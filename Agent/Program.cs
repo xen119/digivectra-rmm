@@ -1,7 +1,9 @@
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Net.WebSockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -23,6 +25,41 @@ internal static class Program
     private static string? screenSessionId;
     private static readonly TimeSpan ScreenOfferTimeout = TimeSpan.FromSeconds(10);
     private static Action? screenDataChannelStateHandler;
+    private static readonly Dictionary<string, ushort> VirtualKeyMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Enter"] = 0x0D,
+        ["Escape"] = 0x1B,
+        ["Backspace"] = 0x08,
+        ["Tab"] = 0x09,
+        ["Delete"] = 0x2E,
+        ["Insert"] = 0x2D,
+        ["Home"] = 0x24,
+        ["End"] = 0x23,
+        ["PageUp"] = 0x21,
+        ["PageDown"] = 0x22,
+        ["ArrowLeft"] = 0x25,
+        ["ArrowUp"] = 0x26,
+        ["ArrowRight"] = 0x27,
+        ["ArrowDown"] = 0x28,
+        ["Space"] = 0x20,
+        ["Shift"] = 0x10,
+        ["Control"] = 0x11,
+        ["Alt"] = 0x12,
+        ["Meta"] = 0x5B
+    };
+    private const uint INPUT_MOUSE = 0;
+    private const uint INPUT_KEYBOARD = 1;
+    private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint KEYEVENTF_UNICODE = 0x0004;
+    private const uint MOUSEEVENTF_MOVE = 0x0001;
+    private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+    private const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+    private const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
+    private const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
+    private const uint MOUSEEVENTF_WHEEL = 0x0800;
 
     private static async Task Main(string[] args)
     {
@@ -433,6 +470,7 @@ internal static class Program
             Console.WriteLine($"Screen data channel state: {screenDataChannel.State}");
         };
         screenDataChannel.StateChanged += screenDataChannelStateHandler;
+        screenDataChannel.MessageReceived += OnScreenDataChannelMessageReceived;
         screenDataChannelStateHandler();
 
         try
@@ -495,6 +533,11 @@ internal static class Program
         {
             screenDataChannel.StateChanged -= screenDataChannelStateHandler;
             screenDataChannelStateHandler = null;
+        }
+
+        if (screenDataChannel is not null)
+        {
+            screenDataChannel.MessageReceived -= OnScreenDataChannelMessageReceived;
         }
 
         screenDataChannel = null;
@@ -608,6 +651,293 @@ internal static class Program
         {
             // Ignore races where the token source was disposed while we were sending.
         }
+    }
+
+    private static void OnScreenDataChannelMessageReceived(byte[] data)
+    {
+        try
+        {
+            var text = Encoding.UTF8.GetString(data);
+            HandleControlMessage(text);
+        }
+        catch (Exception)
+        {
+            // Ignore invalid control payloads.
+        }
+    }
+
+    private static void HandleControlMessage(string payload)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("type", out var typeElement))
+            {
+                return;
+            }
+
+            var type = typeElement.GetString();
+            if (string.Equals(type, "keyboard", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleKeyboardMessage(root);
+            }
+            else if (string.Equals(type, "mouse", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleMouseMessage(root);
+            }
+        }
+        catch (JsonException)
+        {
+            // Ignore malformed control payloads.
+        }
+    }
+
+    private static void HandleKeyboardMessage(JsonElement root)
+    {
+        if (!root.TryGetProperty("action", out var actionElement) ||
+            !root.TryGetProperty("key", out var keyElement))
+        {
+            return;
+        }
+
+        var action = actionElement.GetString();
+        var key = keyElement.GetString();
+        if (string.IsNullOrWhiteSpace(action) || string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        var keyDown = string.Equals(action, "down", StringComparison.OrdinalIgnoreCase);
+        SendKeyboardInput(key, keyDown);
+    }
+
+    private static void HandleMouseMessage(JsonElement root)
+    {
+        if (!root.TryGetProperty("action", out var actionElement))
+        {
+            return;
+        }
+
+        var action = actionElement.GetString();
+        if (action is null)
+        {
+            return;
+        }
+
+        if (string.Equals(action, "move", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryGetNormalizedCoordinates(root, out var x, out var y))
+            {
+                SendMouseMove(x, y);
+            }
+
+            return;
+        }
+
+        if (string.Equals(action, "wheel", StringComparison.OrdinalIgnoreCase))
+        {
+            if (root.TryGetProperty("delta", out var deltaElement))
+            {
+                SendMouseWheel(deltaElement.GetDouble());
+            }
+
+            return;
+        }
+
+        if (!TryGetNormalizedCoordinates(root, out var clickX, out var clickY))
+        {
+            return;
+        }
+
+        if (!root.TryGetProperty("button", out var buttonElement))
+        {
+            return;
+        }
+
+        var button = buttonElement.GetString();
+        if (string.IsNullOrWhiteSpace(button))
+        {
+            return;
+        }
+
+        var isDown = string.Equals(action, "down", StringComparison.OrdinalIgnoreCase);
+        SendMouseButton(button, isDown, clickX, clickY);
+    }
+
+    private static bool TryGetNormalizedCoordinates(JsonElement root, out int normalizedX, out int normalizedY)
+    {
+        normalizedX = normalizedY = 0;
+        if (!root.TryGetProperty("x", out var xElement) || !root.TryGetProperty("y", out var yElement))
+        {
+            return false;
+        }
+
+        var xRatio = xElement.GetDouble();
+        var yRatio = yElement.GetDouble();
+        normalizedX = NormalizeToAbsolute(xRatio);
+        normalizedY = NormalizeToAbsolute(yRatio);
+        return true;
+    }
+
+    private static int NormalizeToAbsolute(double ratio)
+    {
+        var clamped = Math.Clamp(ratio, 0.0, 1.0);
+        return (int)Math.Round(clamped * ushort.MaxValue);
+    }
+
+    private static void SendMouseMove(int normalizedX, int normalizedY)
+    {
+        SendMouseInput(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, normalizedX, normalizedY);
+    }
+
+    private static void SendMouseButton(string button, bool isDown, int normalizedX, int normalizedY)
+    {
+        uint flag = button.ToLowerInvariant() switch
+        {
+            "left" => isDown ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP,
+            "right" => isDown ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP,
+            "middle" => isDown ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP,
+            _ => 0
+        };
+
+        if (flag == 0)
+        {
+            return;
+        }
+
+        SendMouseInput(flag | MOUSEEVENTF_ABSOLUTE, normalizedX, normalizedY);
+    }
+
+    private static void SendMouseWheel(double delta)
+    {
+        var wheelDelta = (int)Math.Round(delta * 120);
+        SendMouseInput(MOUSEEVENTF_WHEEL, 0, 0, (uint)wheelDelta);
+    }
+
+    private static void SendMouseInput(uint flags, int x, int y, uint data = 0)
+    {
+        var input = new INPUT
+        {
+            type = INPUT_MOUSE,
+            U = new InputUnion
+            {
+                mi = new MOUSEINPUT
+                {
+                    dx = x,
+                    dy = y,
+                    mouseData = data,
+                    dwFlags = flags,
+                    time = 0,
+                    dwExtraInfo = IntPtr.Zero
+                }
+            }
+        };
+
+        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+    }
+
+    private static void SendKeyboardInput(string key, bool keyDown)
+    {
+        if (key.Length == 1)
+        {
+            SendUnicodeInput(key[0], keyDown);
+            return;
+        }
+
+        if (VirtualKeyMap.TryGetValue(key, out var vk))
+        {
+            SendVirtualKey(vk, keyDown);
+        }
+    }
+
+    private static void SendUnicodeInput(char character, bool keyDown)
+    {
+        var input = new INPUT
+        {
+            type = INPUT_KEYBOARD,
+            U = new InputUnion
+            {
+                ki = new KEYBDINPUT
+                {
+                    wVk = 0,
+                    wScan = character,
+                    dwFlags = KEYEVENTF_UNICODE | (keyDown ? 0 : KEYEVENTF_KEYUP),
+                    time = 0,
+                    dwExtraInfo = IntPtr.Zero
+                }
+            }
+        };
+
+        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+    }
+
+    private static void SendVirtualKey(ushort vk, bool keyDown)
+    {
+        var input = new INPUT
+        {
+            type = INPUT_KEYBOARD,
+            U = new InputUnion
+            {
+                ki = new KEYBDINPUT
+                {
+                    wVk = vk,
+                    wScan = 0,
+                    dwFlags = keyDown ? 0 : KEYEVENTF_KEYUP,
+                    time = 0,
+                    dwExtraInfo = IntPtr.Zero
+                }
+            }
+        };
+
+        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT
+    {
+        public uint type;
+        public InputUnion U;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct InputUnion
+    {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public HARDWAREINPUT hi;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HARDWAREINPUT
+    {
+        public uint uMsg;
+        public ushort wParamL;
+        public ushort wParamH;
     }
 
     private static void SendInput(string? input)

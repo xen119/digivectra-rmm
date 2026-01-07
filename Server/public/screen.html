@@ -17,7 +17,7 @@
 
       #status {
         color: #8b949e;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
       }
 
       #frame {
@@ -25,12 +25,50 @@
         border: 1px solid #30363d;
         border-radius: 0.5rem;
         background: #161b22;
+        margin-top: 1rem;
+      }
+
+      .status-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      #controlPanel {
+        text-align: right;
+      }
+
+      #controlButton {
+        border: none;
+        border-radius: 0.375rem;
+        padding: 0.35rem 0.9rem;
+        background: #238636;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      #controlButton:disabled {
+        background: #4b5563;
+        cursor: not-allowed;
+      }
+
+      #controlInstructions {
+        color: #8b949e;
+        font-size: 0.85rem;
+        margin: 0.25rem 0 0;
       }
     </style>
   </head>
   <body>
     <h1>Agent Screen</h1>
-    <p id="status">Connecting to agent…</p>
+    <div class="status-row">
+      <p id="status">Connecting to agent.</p>
+      <div id="controlPanel">
+        <button id="controlButton" disabled>Enable control</button>
+        <p id="controlInstructions">Control is disabled until the data channel opens.</p>
+      </div>
+    </div>
     <img id="frame" alt="Live screen" />
     <script src="screen.js"></script>
   </body>

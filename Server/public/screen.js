@@ -1,5 +1,7 @@
 const statusEl = document.getElementById('status');
 const frameEl = document.getElementById('frame');
+const controlButton = document.getElementById('controlButton');
+const controlInstructions = document.getElementById('controlInstructions');
 
 const params = new URLSearchParams(window.location.search);
 const agentId = params.get('agent');
@@ -7,6 +9,38 @@ let agentName = agentId;
 let sessionId;
 let source;
 let pc;
+let controlChannel;
+let controlEnabled = false;
+
+if (controlButton) {
+  controlButton.addEventListener('click', () => {
+    if (!isControlChannelOpen()) {
+      return;
+    }
+
+    setControlEnabled(!controlEnabled);
+  });
+}
+
+if (frameEl) {
+  frameEl.addEventListener('mousemove', handleMouseMove);
+  frameEl.addEventListener('mousedown', (event) => handleMouseButton(event, 'down'));
+  frameEl.addEventListener('mouseup', (event) => handleMouseButton(event, 'up'));
+  frameEl.addEventListener('wheel', handleMouseWheel, { passive: false });
+  frameEl.addEventListener('contextmenu', (event) => {
+    if (controlEnabled) {
+      event.preventDefault();
+    }
+  });
+}
+
+window.addEventListener('keydown', (event) => handleKeyEvent(event, 'down'), true);
+window.addEventListener('keyup', (event) => handleKeyEvent(event, 'up'), true);
+window.addEventListener('blur', () => {
+  if (controlEnabled) {
+    setControlEnabled(false);
+  }
+});
 
 if (!agentId) {
   statusEl.textContent = 'Agent identifier missing.';
@@ -114,6 +148,29 @@ async function handleOffer(payload) {
 
   pc.ondatachannel = (event) => {
     const channel = event.channel;
+    controlChannel = channel;
+    channel.onopen = () => {
+      if (controlButton) {
+        controlButton.disabled = false;
+      }
+
+      if (controlInstructions) {
+        controlInstructions.textContent = 'Click to enable remote control.';
+      }
+    };
+
+    channel.onclose = () => {
+      controlChannel = null;
+      setControlEnabled(false);
+      if (controlButton) {
+        controlButton.disabled = true;
+      }
+
+      if (controlInstructions) {
+        controlInstructions.textContent = 'Control channel closed.';
+      }
+    };
+
     channel.onmessage = async (messageEvent) => {
       try {
         let payloadText;
@@ -166,6 +223,136 @@ window.addEventListener('beforeunload', () => {
     fetch(`/screen/${sessionId}/stop`, { method: 'POST' });
   }
 });
+
+function isControlChannelOpen() {
+  return controlChannel?.readyState === 'open';
+}
+
+function setControlEnabled(enabled) {
+  controlEnabled = enabled;
+  if (controlButton) {
+    controlButton.textContent = enabled ? 'Disable control' : 'Enable control';
+  }
+
+  if (controlInstructions) {
+    controlInstructions.textContent = enabled
+      ? 'Control is active (press Esc to release).'
+      : 'Click to enable remote control.';
+  }
+}
+
+function sendControlMessage(payload) {
+  if (!controlEnabled || !isControlChannelOpen()) {
+    return;
+  }
+
+  try {
+    controlChannel?.send(JSON.stringify(payload));
+  } catch (error) {
+    console.error('Failed to send control message', error);
+  }
+}
+
+function handleKeyEvent(event, action) {
+  if (!controlEnabled || !isControlChannelOpen()) {
+    return;
+  }
+
+  sendControlMessage({
+    type: 'keyboard',
+    action,
+    key: event.key,
+    code: event.code,
+  });
+
+  if (action === 'down') {
+    event.preventDefault();
+    if (event.key === 'Escape') {
+      setControlEnabled(false);
+    }
+  } else {
+    event.preventDefault();
+  }
+}
+
+function handleMouseMove(event) {
+  if (!controlEnabled || !isControlChannelOpen()) {
+    return;
+  }
+
+  const coords = getFrameCoordinates(event);
+  sendControlMessage({
+    type: 'mouse',
+    action: 'move',
+    x: coords.x,
+    y: coords.y,
+  });
+
+  event.preventDefault();
+}
+
+function handleMouseButton(event, action) {
+  if (!controlEnabled || !isControlChannelOpen()) {
+    return;
+  }
+
+  const buttonName = mapMouseButton(event.button);
+  if (!buttonName) {
+    return;
+  }
+
+  const coords = getFrameCoordinates(event);
+  sendControlMessage({
+    type: 'mouse',
+    action,
+    button: buttonName,
+    x: coords.x,
+    y: coords.y,
+  });
+
+  event.preventDefault();
+}
+
+function handleMouseWheel(event) {
+  if (!controlEnabled || !isControlChannelOpen()) {
+    return;
+  }
+
+  sendControlMessage({
+    type: 'mouse',
+    action: 'wheel',
+    delta: event.deltaY,
+  });
+
+  event.preventDefault();
+}
+
+function getFrameCoordinates(event) {
+  const rect = frameEl?.getBoundingClientRect();
+  if (!rect) {
+    return { x: 0, y: 0 };
+  }
+
+  const x = rect.width ? Math.min(Math.max(event.clientX - rect.left, 0), rect.width) : 0;
+  const y = rect.height ? Math.min(Math.max(event.clientY - rect.top, 0), rect.height) : 0;
+  return {
+    x: rect.width ? x / rect.width : 0,
+    y: rect.height ? y / rect.height : 0,
+  };
+}
+
+function mapMouseButton(button) {
+  switch (button) {
+    case 0:
+      return 'left';
+    case 1:
+      return 'middle';
+    case 2:
+      return 'right';
+    default:
+      return null;
+  }
+}
 
 async function pollOffer(id) {
   if (!id) {

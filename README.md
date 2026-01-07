@@ -19,6 +19,8 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - Use **Stream screen** to open `screen.html` and negotiate a WebRTC connection; the agent user must click Yes/No in the popup consent dialog before frames are displayed. The dialog shows a 30 s countdown and automatically denies if no action is taken. Once the page shows the live image, click **Enable control** to forward mouse/keyboard events for remote interaction.  The button disables when the data channel closes.
 - Multi-screen support lets the UI fetch the agent’s monitor list, pick a display from the dropdown, and request that specific output before the stream starts.
 - The dashboard now shows an OS icon for every agent so it is easy to see Windows, Linux, or macOS hosts.
+- The dashboard tracks agent groups and connection status, so you can create named groups, assign agents to them, and see whether each host is online or when it last communicated.
+- The dashboard tracks agent groups (and connection status) so you can create named groups, assign agents, and see if each host is currently online or when it was last seen.
 
 ## Running
 

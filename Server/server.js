@@ -22,10 +22,13 @@ const server = https.createServer({
   key: fs.readFileSync(keyPath),
 });
 
+const DEFAULT_GROUP = 'Ungrouped';
 const clients = new Map(); // socket -> info
+const agents = new Map(); // id -> info (persist offline)
 const clientsById = new Map(); // id -> { socket, info }
 const shellStreams = new Map(); // id -> response
 const screenSessions = new Map(); // sessionId -> session data
+const groups = new Set([DEFAULT_GROUP]);
 const screenLists = new Map(); // agentId -> { screens, updatedAt }
 const screenListRequests = new Map(); // agentId -> { resolvers: [], timer }
 const SCREEN_LIST_TTL_MS = 60_000;
@@ -37,15 +40,69 @@ server.on('request', (req, res) => {
 
   if (pathname === '/clients' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    const payload = Array.from(clients.values()).map((info) => ({
+    const payload = Array.from(agents.values()).map((info) => ({
       id: info.id,
       name: info.name,
       os: info.os,
       platform: info.platform,
       connectedAt: info.connectedAt,
       remoteAddress: info.remoteAddress,
+      group: info.group ?? DEFAULT_GROUP,
+      status: info.status ?? 'offline',
+      lastSeen: info.lastSeen ?? null,
     }));
     return res.end(JSON.stringify(payload));
+  }
+
+  if (pathname === '/groups' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ groups: Array.from(groups).sort() }));
+    return;
+  }
+
+  if (pathname === '/groups' && req.method === 'POST') {
+    collectBody(req, (body) => {
+      try {
+        const { name } = JSON.parse(body);
+        const normalized = normalizeGroupName(name);
+        if (!normalized) {
+          res.writeHead(400);
+          return res.end('Invalid group name');
+        }
+
+        groups.add(normalized);
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ name: normalized }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  if (pathname === '/groups/assign' && req.method === 'POST') {
+    collectBody(req, (body) => {
+      try {
+        const { agentId, group } = JSON.parse(body);
+        const entry = clientsById.get(agentId);
+        if (!entry) {
+          res.writeHead(404);
+          return res.end('Agent not found');
+        }
+
+        const normalized = normalizeGroupName(group);
+        const assignedGroup = assignAgentToGroup(agentId, normalized);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ group: assignedGroup }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
   }
 
   const shellStreamMatch = pathname.match(/^\/shell\/([^/]+)$/);
@@ -330,16 +387,20 @@ const wss = new WebSocket.Server({ server });
 wss.on('connection', (socket, request) => {
   const remote = request.socket.remoteAddress ?? 'unknown';
   const id = randomUUID();
-  const info = {
+  let info = {
     id,
     name: `unnamed (${remote})`,
     remoteAddress: remote,
     connectedAt: new Date().toISOString(),
     os: 'unknown',
     platform: 'unknown',
+    group: DEFAULT_GROUP,
+    status: 'online',
+    lastSeen: null,
   };
 
   clients.set(socket, info);
+  agents.set(id, info);
   clientsById.set(id, { socket, info });
 
   console.log(`Client connected from ${remote}`);
@@ -352,6 +413,21 @@ wss.on('connection', (socket, request) => {
     try {
       const parsed = JSON.parse(payload);
       if (parsed?.type === 'hello' && typeof parsed.name === 'string' && parsed.name.trim()) {
+        const requestedId = typeof parsed.agentId === 'string' && parsed.agentId.trim()
+          ? parsed.agentId.trim()
+          : info.id;
+        if (requestedId !== info.id) {
+          clientsById.delete(info.id);
+          agents.delete(info.id);
+          const existing = agents.get(requestedId);
+          if (existing) {
+            info = existing;
+          } else {
+            info = { ...info, id: requestedId };
+          }
+          agents.set(requestedId, info);
+        }
+
         info.name = parsed.name.trim();
         if (typeof parsed.os === 'string' && parsed.os.trim()) {
           info.os = parsed.os.trim();
@@ -359,7 +435,11 @@ wss.on('connection', (socket, request) => {
         if (typeof parsed.platform === 'string' && parsed.platform.trim()) {
           info.platform = parsed.platform.trim();
         }
+        info.status = 'online';
+        info.lastSeen = null;
         console.log(`Identified client as ${info.name}`);
+        clients.set(socket, info);
+        clientsById.set(info.id, { socket, info });
       } else if (parsed?.type === 'shell-output') {
         emitShellOutput(info.id, parsed);
       } else if (parsed?.type === 'screen-offer') {
@@ -437,6 +517,8 @@ wss.on('connection', (socket, request) => {
   });
 
   socket.on('close', () => {
+    info.status = 'offline';
+    info.lastSeen = new Date().toISOString();
     clients.delete(socket);
     clientsById.delete(id);
     shellStreams.delete(id);
@@ -502,6 +584,27 @@ function sendScreenEvent(session, eventName, data) {
     res.write(`event: ${eventName}\n`);
     res.write(`data: ${payload}\n\n`);
   }
+}
+
+function normalizeGroupName(value) {
+  if (typeof value !== 'string') {
+    return DEFAULT_GROUP;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : DEFAULT_GROUP;
+}
+
+function assignAgentToGroup(agentId, groupName) {
+  const entry = clientsById.get(agentId);
+  if (!entry) {
+    return DEFAULT_GROUP;
+  }
+
+  const normalized = normalizeGroupName(groupName);
+  entry.info.group = normalized;
+  groups.add(normalized);
+  return normalized;
 }
 
 function requestScreenList(agentId, socket) {

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Runtime.InteropServices;
@@ -146,6 +147,9 @@ internal static class Program
         }
     }
 
+    private const string AgentIdFile = "agent.id";
+    private static string? agentId;
+
     private static Task SendAgentIdentityAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
         var identity = JsonSerializer.Serialize(new
@@ -154,9 +158,49 @@ internal static class Program
             name = Environment.MachineName,
             os = RuntimeInformation.OSDescription,
             platform = GetPlatformName()
+            ,
+            agentId = GetAgentId()
         });
 
         return SendTextAsync(socket, identity, cancellationToken);
+    }
+
+    private static string GetAgentId()
+    {
+        if (agentId is not null)
+        {
+            return agentId;
+        }
+
+        var path = Path.Combine(AppContext.BaseDirectory, AgentIdFile);
+        try
+        {
+            if (File.Exists(path))
+            {
+                var existing = File.ReadAllText(path).Trim();
+                if (!string.IsNullOrWhiteSpace(existing))
+                {
+                    agentId = existing;
+                    return agentId;
+                }
+            }
+        }
+        catch
+        {
+            // ignore read failures
+        }
+
+        agentId = Guid.NewGuid().ToString("D");
+        try
+        {
+            File.WriteAllText(path, agentId);
+        }
+        catch
+        {
+            // ignore write failures
+        }
+
+        return agentId;
     }
 
     private static string GetPlatformName()

@@ -1,4 +1,5 @@
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\mrwebrtc.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\assets\rmm-icon.png
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\Agent.exe
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\Agent.deps.json
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\Agent.runtimeconfig.json

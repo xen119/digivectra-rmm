@@ -63,32 +63,41 @@ internal static class Program
 
     private static async Task Main(string[] args)
     {
-        var target = args.Length > 0 ? args[0] : "wss://localhost:8443";
-        using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, eventArgs) =>
+        TrayIconManager.Start();
+
+        try
         {
-            eventArgs.Cancel = true;
+            var target = args.Length > 0 ? args[0] : "wss://localhost:8443";
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, eventArgs) =>
+            {
+                eventArgs.Cancel = true;
+                cts.Cancel();
+            };
+
+            using var socket = new ClientWebSocket();
+
+            // Development convenience: allow self-signed certs. Remove this for production.
+            socket.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+
+            Console.WriteLine($"Connecting to {target} ...");
+            await socket.ConnectAsync(new Uri(target), cts.Token);
+            Console.WriteLine("Connected. Sending identity...");
+
+            await SendAgentIdentityAsync(socket, cts.Token);
+            Console.WriteLine("Type messages and press Enter. Send an empty line to close.");
+
+            var receiveLoop = ReceiveAsync(socket, cts.Token);
+            await SendAsync(socket, cts.Token);
+
             cts.Cancel();
-        };
-
-        using var socket = new ClientWebSocket();
-
-        // Development convenience: allow self-signed certs. Remove this for production.
-        socket.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
-
-        Console.WriteLine($"Connecting to {target} ...");
-        await socket.ConnectAsync(new Uri(target), cts.Token);
-        Console.WriteLine("Connected. Sending identity...");
-
-        await SendAgentIdentityAsync(socket, cts.Token);
-        Console.WriteLine("Type messages and press Enter. Send an empty line to close.");
-
-        var receiveLoop = ReceiveAsync(socket, cts.Token);
-        await SendAsync(socket, cts.Token);
-
-        cts.Cancel();
-        await receiveLoop;
-        Console.WriteLine("Closed.");
+            await receiveLoop;
+            Console.WriteLine("Closed.");
+        }
+        finally
+        {
+            TrayIconManager.Stop();
+        }
     }
 
     private static async Task ReceiveAsync(ClientWebSocket socket, CancellationToken cancellationToken)
@@ -120,18 +129,11 @@ internal static class Program
         }
     }
 
-    private static TaskCompletionSource<string?>? screenConsentTcs;
-
     private static async Task SendAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested && socket.State == WebSocketState.Open)
         {
             var line = Console.ReadLine();
-            if (SubmitScreenConsentResponse(line))
-            {
-                continue;
-            }
-
             if (string.IsNullOrWhiteSpace(line))
             {
                 await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", cancellationToken);
@@ -356,7 +358,7 @@ internal static class Program
     private static async Task StartScreenSessionAsync(ClientWebSocket socket, string sessionId, CancellationToken cancellationToken)
     {
         Console.WriteLine($"Starting screen session {sessionId}");
-        if (!await RequestScreenConsentAsync())
+        if (!await RequestScreenConsentAsync(cancellationToken))
         {
             await SendJsonAsync(socket, new { type = "screen-error", sessionId, message = "User declined screen share." }, cancellationToken);
             return;
@@ -549,38 +551,25 @@ internal static class Program
         return Task.CompletedTask;
     }
 
-    private static async Task<bool> RequestScreenConsentAsync()
+    private static async Task<bool> RequestScreenConsentAsync(CancellationToken cancellationToken)
     {
-        Console.WriteLine("Remote screen share requested. Type 'yes' to approve within 30 seconds.");
-        screenConsentTcs?.TrySetResult(null);
-        screenConsentTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Console.WriteLine("Remote screen share requested. Please respond in the popup within 30 seconds.");
+        var dialogTask = TrayIconManager.ShowConsentDialogAsync(
+            "Remote screen share",
+            "The server wants to view/share your screen. Allow?",
+            cancellationToken);
 
-        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30));
-        var completed = await Task.WhenAny(screenConsentTcs.Task, timeoutTask);
-        var response = completed == screenConsentTcs.Task ? await screenConsentTcs.Task : null;
-
-        if (completed != screenConsentTcs.Task)
+        var timeout = Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+        var completed = await Task.WhenAny(dialogTask, timeout);
+        if (completed != dialogTask)
         {
             Console.WriteLine("Screen share request timed out.");
-            screenConsentTcs = null;
             return false;
         }
 
-        screenConsentTcs = null;
-        var approved = string.Equals(response?.Trim(), "yes", StringComparison.OrdinalIgnoreCase);
+        var approved = await dialogTask == true;
         Console.WriteLine(approved ? "Screen share approved." : "Screen share denied.");
         return approved;
-    }
-
-    private static bool SubmitScreenConsentResponse(string? line)
-    {
-        if (screenConsentTcs is null)
-        {
-            return false;
-        }
-
-        screenConsentTcs.TrySetResult(line);
-        return true;
     }
 
     private static async Task CaptureScreenLoopAsync(CancellationToken cancellationToken)

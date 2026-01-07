@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Agent Task Manager</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        background: #0d1117;
+        color: #cdd9e5;
+        margin: 2rem;
+      }
+
+      h1 {
+        margin-top: 0;
+      }
+
+      #agentHeading {
+        color: #94a3b8;
+        margin: 0 0 1rem 0;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .toolbar button {
+        border: none;
+        border-radius: 0.375rem;
+        background: #2563eb;
+        color: white;
+        padding: 0.45rem 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .table-wrapper {
+        border: 1px solid #30363d;
+        border-radius: 0.75rem;
+        overflow: hidden;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      thead {
+        background: #161b22;
+      }
+
+      th, td {
+        padding: 0.65rem 0.85rem;
+        text-align: left;
+        font-size: 0.9rem;
+        border-bottom: 1px solid #1f2937;
+      }
+
+      th {
+        color: #94a3b8;
+        font-weight: 600;
+      }
+
+      tbody tr:nth-child(even) {
+        background: #0f141a;
+      }
+
+      tbody tr:hover {
+        background: #161b22;
+      }
+
+      .percent {
+        font-weight: 700;
+      }
+
+      .table-button {
+        border: 1px solid #30363d;
+        border-radius: 0.35rem;
+        background: transparent;
+        color: #cdd9e5;
+        padding: 0.25rem 0.6rem;
+        cursor: pointer;
+      }
+
+      .table-button.killing {
+        background: #dc2626;
+        color: #fff;
+        border-color: #dc2626;
+      }
+
+      #status {
+        margin: 0 0 1rem 0;
+        color: #94a3b8;
+      }
+
+      #log {
+        margin-top: 1.5rem;
+        font-size: 0.85rem;
+        color: #cdd9e5;
+      }
+
+      #log div {
+        margin-bottom: 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Agent Task Manager</h1>
+    <p id="agentHeading">Loading agent...</p>
+    <div class="toolbar">
+      <button id="refreshButton" type="button">Refresh list</button>
+      <label>
+        Sort by
+        <select id="sortSelect">
+          <option value="cpu">CPU %</option>
+          <option value="memory">RAM %</option>
+          <option value="disk">Disk %</option>
+          <option value="network">Net %</option>
+        </select>
+      </label>
+      <label>
+        Auto-refresh every
+        <input id="intervalInput" type="number" min="5" value="15" style="width:5ch" />s
+      </label>
+    </div>
+    <p id="status">Awaiting data...</p>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>PID</th>
+            <th>Name</th>
+            <th>CPU %</th>
+            <th>RAM %</th>
+            <th>Disk %</th>
+            <th>Net %</th>
+            <th>Threads</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="processBody"></tbody>
+      </table>
+    </div>
+    <div id="log"></div>
+    <script src="processes.js"></script>
+  </body>
+</html>

@@ -21,6 +21,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - The dashboard now shows an OS icon for every agent so it is easy to see Windows, Linux, or macOS hosts.
 - The dashboard tracks agent groups and connection status, so you can create named groups, assign agents to them, and see whether each host is online or when it last communicated.
 - Each agent card now exposes an updates badge (green if there are no outstanding Windows updates, red otherwise); clicking it opens `updates.html`, where updates are grouped by category/purpose, bulk-selectable, and installable via the agent.
+- A **Manage tasks** button opens `processes.html`, letting you view per-process CPU/RAM/disk/network percentages and send kill requests directly from the browser.
 
 ## Running
 

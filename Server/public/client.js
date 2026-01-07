@@ -212,6 +212,13 @@ function createAgentCard(agent, groups) {
   actions.appendChild(streamButton);
   actions.appendChild(screenButton);
   actions.appendChild(updatesButton);
+  const tasksButton = document.createElement('button');
+  tasksButton.type = 'button';
+  tasksButton.textContent = 'Manage tasks';
+  tasksButton.addEventListener('click', () => {
+    window.open(`processes.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
+  });
+  actions.appendChild(tasksButton);
   card.appendChild(actions);
 
   return card;

@@ -50,6 +50,7 @@ server.on('request', (req, res) => {
       group: info.group ?? DEFAULT_GROUP,
       specs: info.specs ?? null,
       updatesSummary: info.updatesSummary ?? null,
+      processSnapshot: info.processSnapshot ?? null,
       status: info.status ?? 'offline',
       lastSeen: info.lastSeen ?? null,
     }));
@@ -359,6 +360,65 @@ server.on('request', (req, res) => {
     return;
   }
 
+  const processDataMatch = pathname.match(/^\/processes\/([^/]+)\/data$/);
+  if (processDataMatch && req.method === 'GET') {
+    const agentId = processDataMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ snapshot: entry.info.processSnapshot ?? null }));
+    return;
+  }
+
+  const processRefreshMatch = pathname.match(/^\/processes\/([^/]+)\/refresh$/);
+  if (processRefreshMatch && req.method === 'POST') {
+    const agentId = processRefreshMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    sendControl(entry.socket, 'list-processes');
+    res.writeHead(202);
+    res.end();
+    return;
+  }
+
+  const processKillMatch = pathname.match(/^\/processes\/([^/]+)\/kill$/);
+  if (processKillMatch && req.method === 'POST') {
+    const agentId = processKillMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const pid = Number(payload?.processId);
+        if (!Number.isInteger(pid) || pid <= 0) {
+          res.writeHead(400);
+          return res.end('Invalid process id');
+        }
+
+        sendControl(entry.socket, 'kill-process', { processId: pid });
+        res.writeHead(202);
+        res.end();
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid JSON');
+      }
+    });
+
+    return;
+  }
+
   const screenAnswerMatch = pathname.match(/^\/screen\/([^/]+)\/answer$/);
   if (screenAnswerMatch && req.method === 'POST') {
     const sessionId = screenAnswerMatch[1];
@@ -469,6 +529,7 @@ wss.on('connection', (socket, request) => {
     lastSeen: null,
     specs: null,
     updatesSummary: null,
+    processSnapshot: null,
   };
 
   clients.set(socket, info);
@@ -574,6 +635,10 @@ wss.on('connection', (socket, request) => {
         info.updatesSummary = parsed.summary ?? null;
       } else if (parsed?.type === 'update-install-result') {
         console.log(`Update install result from ${info.name}: success=${parsed.success}, message="${parsed.message}", rebootRequired=${parsed.rebootRequired}`);
+      } else if (parsed?.type === 'process-list') {
+        info.processSnapshot = parsed.snapshot ?? null;
+      } else if (parsed?.type === 'process-kill-result') {
+        console.log(`Process kill result from ${info.name}: pid=${parsed.processId}, success=${parsed.success}, message=${parsed.message ?? 'n/a'}`);
       } else if (parsed?.type === 'screen-list' && Array.isArray(parsed.screens)) {
         const normalized = parsed.screens.map((screen, index) => ({
           id: typeof screen.id === 'string' && screen.id.trim() ? screen.id.trim() : `display-${index + 1}`,

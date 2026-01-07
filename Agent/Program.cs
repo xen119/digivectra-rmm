@@ -153,6 +153,7 @@ internal static class Program
     private static string? agentId;
     private static DeviceSpecs? deviceSpecs;
     private static UpdateSummary? lastUpdateSummary;
+    private static readonly Dictionary<int, ProcessSample> processSamples = new();
     private static readonly string[] UpdateCategoryOrder = new[]
     {
         "Security Updates",
@@ -393,6 +394,174 @@ internal static class Program
 
         lastUpdateSummary = summary;
         await SendJsonAsync(socket, new { type = "updates-summary", summary }, cancellationToken);
+    }
+
+    private static async Task SendProcessListAsync(ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        var snapshot = CollectProcessSnapshot();
+        await SendJsonAsync(socket, new { type = "process-list", snapshot }, cancellationToken);
+    }
+
+    private static async Task HandleKillProcessAsync(ClientWebSocket socket, JsonElement root, CancellationToken cancellationToken)
+    {
+        if (!root.TryGetProperty("processId", out var idElement) || !idElement.TryGetInt32(out var processId))
+        {
+            await SendJsonAsync(socket, new { type = "process-kill-result", success = false, message = "Invalid process id." }, cancellationToken);
+            return;
+        }
+
+        try
+        {
+            using var target = Process.GetProcessById(processId);
+            target.Kill(true);
+            await SendJsonAsync(socket, new { type = "process-kill-result", success = true, processId }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await SendJsonAsync(socket, new { type = "process-kill-result", success = false, processId, message = ex.Message }, cancellationToken);
+        }
+    }
+
+    private static ProcessSnapshot CollectProcessSnapshot()
+    {
+        var now = DateTime.UtcNow;
+        var metrics = new List<ProcessSnapshotEntry>();
+        var seen = new HashSet<int>();
+        var totalMemoryBytes = GetDeviceSpecs().TotalMemoryBytes;
+
+        foreach (var process in Process.GetProcesses())
+        {
+            try
+            {
+                using var proc = process;
+                var pid = proc.Id;
+                seen.Add(pid);
+
+                processSamples.TryGetValue(pid, out var previousSample);
+
+                var currentCpuMs = proc.TotalProcessorTime.TotalMilliseconds;
+                var intervalMs = previousSample is not null
+                    ? Math.Max((now - previousSample.Timestamp).TotalMilliseconds, 1)
+                    : 1000;
+                var intervalSeconds = intervalMs / 1000.0;
+                var cpuDeltaMs = previousSample is not null ? currentCpuMs - previousSample.TotalCpuMilliseconds : 0.0;
+                cpuDeltaMs = Math.Max(cpuDeltaMs, 0.0);
+
+                var ioCounters = TryGetIoCounters(proc);
+                var readBytes = ioCounters?.ReadTransferCount ?? 0;
+                var writeBytes = ioCounters?.WriteTransferCount ?? 0;
+                var otherBytes = ioCounters?.OtherTransferCount ?? 0;
+
+                var prevRead = previousSample?.ReadBytes ?? readBytes;
+                var prevWrite = previousSample?.WriteBytes ?? writeBytes;
+                var prevOther = previousSample?.OtherBytes ?? otherBytes;
+
+                var diskDelta = (double)(readBytes + writeBytes - prevRead - prevWrite);
+                var networkDelta = (double)(otherBytes - prevOther);
+                diskDelta = Math.Max(diskDelta, 0.0);
+                networkDelta = Math.Max(networkDelta, 0.0);
+
+                var workingSet = proc.WorkingSet64;
+                var memoryPercent = totalMemoryBytes > 0
+                    ? Math.Round(workingSet / (double)totalMemoryBytes * 100, 2)
+                    : 0.0;
+
+                var snapshotInfo = new ProcessInfo
+                {
+                    ProcessId = pid,
+                    Name = proc.ProcessName,
+                    ThreadCount = proc.Threads.Count,
+                    StartTime = TryGetStartTime(proc),
+                    WorkingSetBytes = workingSet,
+                    PrivateMemoryBytes = proc.PrivateMemorySize64,
+                    CpuPercent = 0.0,
+                    MemoryPercent = Math.Min(memoryPercent, 100.0),
+                    DiskPercent = 0.0,
+                    NetworkPercent = 0.0,
+                    IoBytesPerSecond = intervalSeconds > 0 ? Math.Round(diskDelta / intervalSeconds, 2) : 0.0,
+                    NetworkBytesPerSecond = intervalSeconds > 0 ? Math.Round(networkDelta / intervalSeconds, 2) : 0.0,
+                    IntervalSeconds = intervalSeconds
+                };
+
+                metrics.Add(new ProcessSnapshotEntry
+                {
+                    Info = snapshotInfo,
+                    CpuDeltaMs = cpuDeltaMs,
+                    DiskDeltaBytes = diskDelta,
+                    NetworkDeltaBytes = networkDelta
+                });
+
+                processSamples[pid] = new ProcessSample
+                {
+                    TotalCpuMilliseconds = currentCpuMs,
+                    ReadBytes = readBytes,
+                    WriteBytes = writeBytes,
+                    OtherBytes = otherBytes,
+                    Timestamp = now
+                };
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+        }
+
+        var removed = processSamples.Keys.Except(seen).ToList();
+        foreach (var pid in removed)
+        {
+            processSamples.Remove(pid);
+        }
+
+        var totalCpuDelta = metrics.Sum(entry => entry.CpuDeltaMs);
+        var totalDiskDelta = metrics.Sum(entry => entry.DiskDeltaBytes);
+        var totalNetworkDelta = metrics.Sum(entry => entry.NetworkDeltaBytes);
+
+        foreach (var entry in metrics)
+        {
+            entry.Info.CpuPercent = totalCpuDelta > 0
+                ? Math.Round(Math.Clamp(entry.CpuDeltaMs / totalCpuDelta * 100, 0, 100), 2)
+                : 0.0;
+            entry.Info.DiskPercent = totalDiskDelta > 0
+                ? Math.Round(Math.Clamp(entry.DiskDeltaBytes / totalDiskDelta * 100, 0, 100), 2)
+                : 0.0;
+            entry.Info.NetworkPercent = totalNetworkDelta > 0
+                ? Math.Round(Math.Clamp(entry.NetworkDeltaBytes / totalNetworkDelta * 100, 0, 100), 2)
+                : 0.0;
+        }
+
+        var ordered = metrics
+            .OrderByDescending(entry => entry.Info.CpuPercent)
+            .ThenBy(entry => entry.Info.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(entry => entry.Info)
+            .ToArray();
+
+        return new ProcessSnapshot
+        {
+            RetrievedAt = now,
+            Processes = ordered
+        };
+    }
+
+    private static DateTime? TryGetStartTime(Process process)
+    {
+        try
+        {
+            return process.StartTime;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static IoCounters? TryGetIoCounters(Process process)
+    {
+        if (GetProcessIoCounters(process.Handle, out var counters))
+        {
+            return counters;
+        }
+
+        return null;
     }
 
     private static Task<UpdateSummary> GetUpdateSummaryAsync()
@@ -804,7 +973,7 @@ internal static class Program
                         SdpMlineIndex = index
                     };
                     screenPeerConnection.AddIceCandidate(iceCandidate);
-                }
+                    }
                 }
                 break;
             case "shell-input":
@@ -814,6 +983,12 @@ internal static class Program
                     SendInput(inputElement.GetString());
                 }
 
+                break;
+            case "list-processes":
+                await SendProcessListAsync(socket, cancellationToken);
+                break;
+            case "kill-process":
+                await HandleKillProcessAsync(socket, document.RootElement, cancellationToken);
                 break;
             case "request-updates":
                 await SendAgentUpdateSummaryAsync(socket, cancellationToken, true);
@@ -1623,6 +1798,88 @@ internal static class Program
             }
         }
     }
+
+    private sealed class ProcessSnapshot
+    {
+        [JsonPropertyName("retrievedAt")]
+        public DateTime RetrievedAt { get; set; }
+
+        [JsonPropertyName("processes")]
+        public ProcessInfo[] Processes { get; set; } = Array.Empty<ProcessInfo>();
+    }
+
+    private sealed class ProcessInfo
+    {
+        [JsonPropertyName("processId")]
+        public int ProcessId { get; set; }
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("cpuPercent")]
+        public double CpuPercent { get; set; }
+
+        [JsonPropertyName("memoryPercent")]
+        public double MemoryPercent { get; set; }
+
+        [JsonPropertyName("diskPercent")]
+        public double DiskPercent { get; set; }
+
+        [JsonPropertyName("networkPercent")]
+        public double NetworkPercent { get; set; }
+
+        [JsonPropertyName("workingSetBytes")]
+        public long WorkingSetBytes { get; set; }
+
+        [JsonPropertyName("privateMemoryBytes")]
+        public long PrivateMemoryBytes { get; set; }
+
+        [JsonPropertyName("threads")]
+        public int ThreadCount { get; set; }
+
+        [JsonPropertyName("startTime")]
+        public DateTime? StartTime { get; set; }
+
+        [JsonPropertyName("ioBytesPerSecond")]
+        public double IoBytesPerSecond { get; set; }
+
+        [JsonPropertyName("networkBytesPerSecond")]
+        public double NetworkBytesPerSecond { get; set; }
+
+        [JsonPropertyName("intervalSeconds")]
+        public double IntervalSeconds { get; set; }
+    }
+
+    private sealed class ProcessSnapshotEntry
+    {
+        public ProcessInfo Info { get; set; } = new();
+        public double CpuDeltaMs { get; set; }
+        public double DiskDeltaBytes { get; set; }
+        public double NetworkDeltaBytes { get; set; }
+    }
+
+    private sealed class ProcessSample
+    {
+        public double TotalCpuMilliseconds { get; set; }
+        public ulong ReadBytes { get; set; }
+        public ulong WriteBytes { get; set; }
+        public ulong OtherBytes { get; set; }
+        public DateTime Timestamp { get; set; }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetProcessIoCounters(IntPtr handle, out IoCounters counters);
 
     private sealed class DeviceSpecs
     {

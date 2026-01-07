@@ -49,6 +49,7 @@ server.on('request', (req, res) => {
       remoteAddress: info.remoteAddress,
       group: info.group ?? DEFAULT_GROUP,
       specs: info.specs ?? null,
+      updatesSummary: info.updatesSummary ?? null,
       status: info.status ?? 'offline',
       lastSeen: info.lastSeen ?? null,
     }));
@@ -290,6 +291,74 @@ server.on('request', (req, res) => {
     return;
   }
 
+  const updatesDataMatch = pathname.match(/^\/updates\/([^/]+)\/data$/);
+  if (updatesDataMatch && req.method === 'GET') {
+    const agentId = updatesDataMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ summary: entry.info.updatesSummary ?? null }));
+    return;
+  }
+
+  const updatesRefreshMatch = pathname.match(/^\/updates\/([^/]+)\/refresh$/);
+  if (updatesRefreshMatch && req.method === 'POST') {
+    const agentId = updatesRefreshMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    sendControl(entry.socket, 'request-updates');
+    res.writeHead(202);
+    res.end();
+    return;
+  }
+
+  const updatesInstallMatch = pathname.match(/^\/updates\/([^/]+)\/install$/);
+  if (updatesInstallMatch && req.method === 'POST') {
+    const agentId = updatesInstallMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        if (!Array.isArray(payload?.ids)) {
+          res.writeHead(400);
+          return res.end('Invalid request');
+        }
+
+        const ids = payload.ids
+          .filter((entryId) => typeof entryId === 'string' && entryId.trim())
+          .map((entryId) => entryId.trim());
+
+        if (ids.length === 0) {
+          res.writeHead(400);
+          return res.end('No updates selected');
+        }
+
+        console.log(`Installing ${ids.length} updates on agent ${agentId}`);
+        sendControl(entry.socket, 'install-updates', { ids });
+        res.writeHead(202);
+        res.end();
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid JSON');
+      }
+    });
+
+    return;
+  }
+
   const screenAnswerMatch = pathname.match(/^\/screen\/([^/]+)\/answer$/);
   if (screenAnswerMatch && req.method === 'POST') {
     const sessionId = screenAnswerMatch[1];
@@ -399,6 +468,7 @@ wss.on('connection', (socket, request) => {
     status: 'online',
     lastSeen: null,
     specs: null,
+    updatesSummary: null,
   };
 
   clients.set(socket, info);
@@ -500,6 +570,10 @@ wss.on('connection', (socket, request) => {
             message: parsed.message,
           });
         }
+      } else if (parsed?.type === 'updates-summary') {
+        info.updatesSummary = parsed.summary ?? null;
+      } else if (parsed?.type === 'update-install-result') {
+        console.log(`Update install result from ${info.name}: success=${parsed.success}, message="${parsed.message}", rebootRequired=${parsed.rebootRequired}`);
       } else if (parsed?.type === 'screen-list' && Array.isArray(parsed.screens)) {
         const normalized = parsed.screens.map((screen, index) => ({
           id: typeof screen.id === 'string' && screen.id.trim() ? screen.id.trim() : `display-${index + 1}`,

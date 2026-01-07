@@ -195,9 +195,23 @@ function createAgentCard(agent, groups) {
   screenButton.addEventListener('click', () => {
     window.open(`screen.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
   });
+  const updateCount = typeof agent.updatesSummary?.totalCount === 'number'
+    ? agent.updatesSummary.totalCount
+    : 0;
+  const updatesButton = document.createElement('button');
+  updatesButton.type = 'button';
+  updatesButton.textContent = `Updates: ${updateCount}`;
+  updatesButton.title = agent.updatesSummary?.retrievedAt
+    ? `Last refreshed ${new Date(agent.updatesSummary.retrievedAt).toLocaleString()}`
+    : 'No update info yet';
+  updatesButton.className = `updates-button ${updateCount === 0 ? 'ok' : 'warn'}`;
+  updatesButton.addEventListener('click', () => {
+    window.open(`updates.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
+  });
 
   actions.appendChild(streamButton);
   actions.appendChild(screenButton);
+  actions.appendChild(updatesButton);
   card.appendChild(actions);
 
   return card;

@@ -20,7 +20,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - Multi-screen support lets the UI fetch the agent’s monitor list, pick a display from the dropdown, and request that specific output before the stream starts.
 - The dashboard now shows an OS icon for every agent so it is easy to see Windows, Linux, or macOS hosts.
 - The dashboard tracks agent groups and connection status, so you can create named groups, assign agents to them, and see whether each host is online or when it last communicated.
-- The dashboard tracks agent groups (and connection status) so you can create named groups, assign agents, and see if each host is currently online or when it was last seen.
+- Each agent card now exposes an updates badge (green if there are no outstanding Windows updates, red otherwise); clicking it opens `updates.html`, where updates are grouped by category/purpose, bulk-selectable, and installable via the agent.
 
 ## Running
 

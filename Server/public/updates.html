@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Agent Updates</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        background: #0d1117;
+        color: #cdd9e5;
+        margin: 2rem;
+      }
+
+      h1 {
+        margin-top: 0;
+      }
+
+      #agentHeading {
+        color: #8b949e;
+        margin-top: 0.15rem;
+        margin-bottom: 1rem;
+      }
+
+      .update-summary {
+        display: flex;
+        gap: 0.5rem;
+        align-items: baseline;
+        margin-bottom: 0.5rem;
+      }
+
+      .update-count {
+        font-size: 2.2rem;
+        font-weight: 700;
+      }
+
+      .count-ok {
+        color: #4ade80;
+      }
+
+      .count-alert {
+        color: #f87171;
+      }
+
+      .update-label {
+        font-size: 0.95rem;
+        color: #8b949e;
+      }
+
+      .update-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+      }
+
+      .update-actions button {
+        border: none;
+        border-radius: 0.375rem;
+        padding: 0.45rem 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .update-actions button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .update-actions button:first-child {
+        background: #2563eb;
+        color: white;
+      }
+
+      .update-actions button:last-child {
+        background: #d97706;
+        color: white;
+      }
+
+      #status {
+        margin: 0;
+        margin-bottom: 1rem;
+        color: #8b949e;
+      }
+
+      .category-card {
+        border: 1px solid #30363d;
+        border-radius: 0.75rem;
+        background: #0f141a;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 0 0 1px rgba(132, 199, 255, 0.08);
+      }
+
+      .category-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+
+      .category-header strong {
+        display: block;
+        font-size: 1.1rem;
+      }
+
+      .category-header p {
+        margin: 0.1rem 0 0;
+        color: #94a3b8;
+        font-size: 0.85rem;
+      }
+
+      .select-all {
+        background: transparent;
+        border: 1px solid #30363d;
+        border-radius: 0.5rem;
+        padding: 0.2rem 0.8rem;
+        color: #cdd9e5;
+        cursor: pointer;
+      }
+
+      .category-list {
+        margin-top: 0.75rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      .update-row {
+        display: flex;
+        gap: 0.65rem;
+        align-items: flex-start;
+        cursor: pointer;
+      }
+
+      .update-row input {
+        margin-top: 0.3rem;
+      }
+
+      .update-content strong {
+        display: block;
+      }
+
+      .update-content p {
+        margin: 0.15rem 0;
+        color: #e2e8f0;
+        font-size: 0.9rem;
+      }
+
+      .update-content small {
+        color: #94a3b8;
+      }
+
+      .empty {
+        color: #94a3b8;
+        font-size: 0.85rem;
+        margin: 0;
+      }
+
+      #log {
+        margin-top: 2rem;
+        font-size: 0.85rem;
+        color: #cdd9e5;
+      }
+
+      #log div {
+        margin-bottom: 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Agent Updates</h1>
+    <p id="agentHeading">Loading agent...</p>
+    <div class="update-summary">
+      <span id="updateCount" class="update-count count-ok">0</span>
+      <span id="updateLabel" class="update-label">Pending updates</span>
+    </div>
+    <div class="update-actions">
+      <button id="refreshButton" type="button">Refresh</button>
+      <button id="installButton" type="button" disabled>Install selected updates</button>
+    </div>
+    <p id="status">Fetching update data...</p>
+    <section id="categories"></section>
+    <div id="log"></div>
+    <script src="updates.js"></script>
+  </body>
+</html>

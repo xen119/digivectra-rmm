@@ -9,6 +9,7 @@ using System.Net.WebSockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Windows.Forms;
 using Microsoft.MixedReality.WebRTC;
 
@@ -151,8 +152,33 @@ internal static class Program
     private const string AgentIdFile = "agent.id";
     private static string? agentId;
     private static DeviceSpecs? deviceSpecs;
+    private static UpdateSummary? lastUpdateSummary;
+    private static readonly string[] UpdateCategoryOrder = new[]
+    {
+        "Security Updates",
+        "Feature Updates",
+        "Driver Updates",
+        "Definition Updates",
+        "Optional Updates",
+        "Out-of-Band Updates",
+        "Servicing Stack Updates",
+        "Cumulative Updates",
+        "Other Updates",
+    };
+    private static readonly Dictionary<string, string> UpdateCategoryPurposes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Security Updates"] = "Vulnerability fixes",
+        ["Feature Updates"] = "New Windows versions",
+        ["Driver Updates"] = "Hardware support",
+        ["Definition Updates"] = "Malware protection",
+        ["Optional Updates"] = "Previews & extras",
+        ["Out-of-Band Updates"] = "Emergency fixes",
+        ["Servicing Stack Updates"] = "Update reliability",
+        ["Cumulative Updates"] = "All fixes combined",
+        ["Other Updates"] = "Miscellaneous updates",
+    };
 
-    private static Task SendAgentIdentityAsync(ClientWebSocket socket, CancellationToken cancellationToken)
+    private static async Task SendAgentIdentityAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
         var identity = JsonSerializer.Serialize(new
         {
@@ -163,8 +189,8 @@ internal static class Program
             agentId = GetAgentId(),
             specs = GetDeviceSpecs()
         });
-
-        return SendTextAsync(socket, identity, cancellationToken);
+        await SendTextAsync(socket, identity, cancellationToken);
+        await SendAgentUpdateSummaryAsync(socket, cancellationToken);
     }
 
     private static string GetAgentId()
@@ -342,6 +368,351 @@ internal static class Program
         return specs;
     }
 
+    private static async Task SendAgentUpdateSummaryAsync(ClientWebSocket socket, CancellationToken cancellationToken, bool force = false)
+    {
+        if (!force && lastUpdateSummary is not null)
+        {
+            await SendJsonAsync(socket, new { type = "updates-summary", summary = lastUpdateSummary }, cancellationToken);
+            return;
+        }
+
+        UpdateSummary summary;
+        try
+        {
+            summary = await GetUpdateSummaryAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to collect updates: {ex.Message}");
+            summary = new UpdateSummary();
+        }
+
+        lastUpdateSummary = summary;
+        await SendJsonAsync(socket, new { type = "updates-summary", summary }, cancellationToken);
+    }
+
+    private static Task<UpdateSummary> GetUpdateSummaryAsync()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return Task.FromResult(new UpdateSummary());
+        }
+
+        return Task.Run(() => CollectUpdateSummary());
+    }
+
+    private static UpdateSummary CollectUpdateSummary()
+    {
+        var sessionType = Type.GetTypeFromProgID("Microsoft.Update.Session");
+        if (sessionType is null)
+        {
+            return new UpdateSummary();
+        }
+
+        object? sessionObj = Activator.CreateInstance(sessionType);
+        if (sessionObj is null)
+        {
+            return new UpdateSummary();
+        }
+
+        dynamic session = sessionObj;
+
+        dynamic searcher = session.CreateUpdateSearcher();
+        if (searcher is null)
+        {
+            return new UpdateSummary();
+        }
+        dynamic results = searcher.Search("IsInstalled=0 and IsHidden=0");
+        var entries = new List<UpdateEntry>();
+        var categories = new Dictionary<string, List<UpdateEntry>>(StringComparer.OrdinalIgnoreCase);
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (dynamic update in results.Updates)
+        {
+            string? updateId = (update?.Identity?.UpdateID as string)?.Trim();
+            if (string.IsNullOrWhiteSpace(updateId))
+            {
+                continue;
+            }
+
+            var entry = new UpdateEntry
+            {
+                Id = updateId,
+                Title = ((update?.Title as string)?.Trim()) ?? "Unnamed update",
+                Description = (update?.Description as string)?.Trim(),
+                KBArticleIDs = CollectKbArticles(update),
+                Categories = ExtractCategoryNames(update)
+            };
+
+            if (!seenIds.Add(entry.Id))
+            {
+                continue;
+            }
+
+            entries.Add(entry);
+
+            var targetCategories = entry.Categories.Length > 0 ? entry.Categories : new[] { "Other Updates" };
+            foreach (var rawName in targetCategories)
+            {
+                var normalized = NormalizeCategoryName(rawName);
+                if (!categories.TryGetValue(normalized, out var list))
+                {
+                    list = new List<UpdateEntry>();
+                    categories[normalized] = list;
+                }
+
+                list.Add(entry);
+            }
+        }
+
+        var ordered = new List<UpdateCategoryInfo>();
+        foreach (var categoryName in UpdateCategoryOrder)
+        {
+            if (categories.TryGetValue(categoryName, out var list))
+            {
+                ordered.Add(new UpdateCategoryInfo
+                {
+                    Name = categoryName,
+                    Purpose = GetCategoryPurpose(categoryName),
+                    Updates = list.ToArray()
+                });
+                categories.Remove(categoryName);
+            }
+        }
+
+        foreach (var remaining in categories)
+        {
+            ordered.Add(new UpdateCategoryInfo
+            {
+                Name = remaining.Key,
+                Purpose = GetCategoryPurpose(remaining.Key),
+                Updates = remaining.Value.ToArray()
+            });
+        }
+
+        return new UpdateSummary
+        {
+            RetrievedAt = DateTime.UtcNow,
+            TotalCount = entries.Count,
+            Categories = ordered.ToArray()
+        };
+    }
+
+    private static string[] CollectKbArticles(dynamic update)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (dynamic kb in update.KBArticleIDs)
+            {
+                if (kb is string kbText && !string.IsNullOrWhiteSpace(kbText))
+                {
+                    ids.Add(kbText.Trim());
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return ids.ToArray();
+    }
+
+    private static string[] ExtractCategoryNames(dynamic update)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (dynamic category in update.Categories)
+            {
+                if (category?.Name is string name && !string.IsNullOrWhiteSpace(name))
+                {
+                    names.Add(name.Trim());
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return names.ToArray();
+    }
+
+    private static string NormalizeCategoryName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "Other Updates";
+        }
+
+        foreach (var canonical in UpdateCategoryOrder)
+        {
+            if (name.Equals(canonical, StringComparison.OrdinalIgnoreCase) ||
+                name.IndexOf(canonical, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return canonical;
+            }
+        }
+
+        return name;
+    }
+
+    private static string GetCategoryPurpose(string categoryName)
+    {
+        if (string.IsNullOrWhiteSpace(categoryName))
+        {
+            return UpdateCategoryPurposes["Other Updates"];
+        }
+
+        foreach (var canonical in UpdateCategoryOrder)
+        {
+            if (categoryName.Equals(canonical, StringComparison.OrdinalIgnoreCase) ||
+                categoryName.IndexOf(canonical, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (UpdateCategoryPurposes.TryGetValue(canonical, out var purpose))
+                {
+                    return purpose;
+                }
+            }
+        }
+
+        if (UpdateCategoryPurposes.TryGetValue(categoryName, out var existing))
+        {
+            return existing;
+        }
+
+        return UpdateCategoryPurposes["Other Updates"];
+    }
+
+    private static async Task HandleInstallUpdatesAsync(ClientWebSocket socket, JsonElement element, CancellationToken cancellationToken)
+    {
+        if (!element.TryGetProperty("ids", out var idsElement) || idsElement.ValueKind != JsonValueKind.Array)
+        {
+            await SendUpdateInstallResultAsync(socket, false, "No updates selected.", false, cancellationToken);
+            return;
+        }
+
+        var ids = idsElement.EnumerateArray()
+            .Select(idElement => idElement.GetString())
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (ids.Length == 0)
+        {
+            await SendUpdateInstallResultAsync(socket, false, "No updates selected.", false, cancellationToken);
+            return;
+        }
+
+        UpdateInstallResult result;
+        try
+        {
+            result = await Task.Run(() => InstallSelectedUpdates(ids), cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            await SendUpdateInstallResultAsync(socket, false, $"Install failed: {ex.Message}", false, cancellationToken);
+            return;
+        }
+
+        await SendUpdateInstallResultAsync(socket, result.Success, result.Message, result.RebootRequired, cancellationToken);
+        if (result.Success)
+        {
+            await SendAgentUpdateSummaryAsync(socket, cancellationToken, true);
+        }
+    }
+
+    private static UpdateInstallResult InstallSelectedUpdates(string[] requestedIds)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return new UpdateInstallResult(false, "Update installation is only supported on Windows.");
+        }
+
+        var sessionType = Type.GetTypeFromProgID("Microsoft.Update.Session");
+        if (sessionType is null)
+        {
+            return new UpdateInstallResult(false, "Failed to initialize Windows Update session.");
+        }
+
+        object? sessionObj = Activator.CreateInstance(sessionType);
+        if (sessionObj is null)
+        {
+            return new UpdateInstallResult(false, "Failed to initialize Windows Update session.");
+        }
+
+        dynamic session = sessionObj;
+
+        dynamic searcher = session.CreateUpdateSearcher();
+        if (searcher is null)
+        {
+            return new UpdateInstallResult(false, "Failed to initialize Windows Update session.");
+        }
+        dynamic results = searcher.Search("IsInstalled=0 and IsHidden=0");
+        var requestedSet = new HashSet<string>(requestedIds, StringComparer.OrdinalIgnoreCase);
+        dynamic collection = session.CreateUpdateCollection();
+
+        foreach (dynamic update in results.Updates)
+        {
+            string? updateId = (update?.Identity?.UpdateID as string)?.Trim();
+            if (string.IsNullOrWhiteSpace(updateId))
+            {
+                continue;
+            }
+
+            if (requestedSet.Contains(updateId))
+            {
+                collection.Add(update);
+            }
+        }
+
+        var collectionCount = 0;
+        try
+        {
+            collectionCount = Convert.ToInt32(collection.Count);
+        }
+        catch
+        {
+            collectionCount = 0;
+        }
+
+        if (collectionCount == 0)
+        {
+            return new UpdateInstallResult(false, "Selected updates are no longer available.");
+        }
+
+        dynamic installer = session.CreateUpdateInstaller();
+        installer.Updates = collection;
+        dynamic installResult = installer.Install();
+        var resultCode = Convert.ToInt32(installResult?.ResultCode ?? 0);
+        var reboot = installResult?.RebootRequired is bool rebootRequired && rebootRequired;
+        var success = resultCode == 2;
+        var message = success ? "Updates installed successfully." : $"Update installation completed with code {resultCode}.";
+        return new UpdateInstallResult(success, message, reboot);
+    }
+
+    private static Task SendUpdateInstallResultAsync(ClientWebSocket socket, bool success, string message, bool rebootRequired, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+        {
+            type = "update-install-result",
+            success,
+            message,
+            rebootRequired
+        }, cancellationToken);
+    }
+
     private static async Task HandleServerMessageAsync(string payload, ClientWebSocket socket, CancellationToken cancellationToken)
     {
         JsonDocument? document = null;
@@ -413,9 +784,9 @@ internal static class Program
                 break;
             }
             case "screen-candidate":
-            {
-                if (screenPeerConnection is null)
                 {
+                    if (screenPeerConnection is null)
+                    {
                     break;
                 }
 
@@ -434,8 +805,8 @@ internal static class Program
                     };
                     screenPeerConnection.AddIceCandidate(iceCandidate);
                 }
-            }
-            break;
+                }
+                break;
             case "shell-input":
                 if (document.RootElement.TryGetProperty("input", out var inputElement) &&
                     inputElement.ValueKind == JsonValueKind.String)
@@ -443,6 +814,12 @@ internal static class Program
                     SendInput(inputElement.GetString());
                 }
 
+                break;
+            case "request-updates":
+                await SendAgentUpdateSummaryAsync(socket, cancellationToken, true);
+                break;
+            case "install-updates":
+                await HandleInstallUpdatesAsync(socket, document.RootElement, cancellationToken);
                 break;
             }
         }
@@ -1265,5 +1642,56 @@ internal static class Program
         public string? Name { get; set; }
         public long TotalBytes { get; set; }
         public long FreeBytes { get; set; }
+    }
+
+    private sealed class UpdateSummary
+    {
+        [JsonPropertyName("retrievedAt")]
+        public DateTime RetrievedAt { get; set; }
+        [JsonPropertyName("totalCount")]
+        public int TotalCount { get; set; }
+        [JsonPropertyName("categories")]
+        public UpdateCategoryInfo[] Categories { get; set; } = Array.Empty<UpdateCategoryInfo>();
+    }
+
+    private sealed class UpdateCategoryInfo
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+        [JsonPropertyName("purpose")]
+        public string Purpose { get; set; } = string.Empty;
+        [JsonPropertyName("updates")]
+        public UpdateEntry[] Updates { get; set; } = Array.Empty<UpdateEntry>();
+    }
+
+    private sealed class UpdateEntry
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+        [JsonPropertyName("title")]
+        public string Title { get; set; } = string.Empty;
+        [JsonPropertyName("description")]
+        public string? Description { get; set; }
+        [JsonPropertyName("kbArticleIDs")]
+        public string[] KBArticleIDs { get; set; } = Array.Empty<string>();
+        [JsonPropertyName("categories")]
+        public string[] Categories { get; set; } = Array.Empty<string>();
+    }
+
+    private sealed class UpdateInstallResult
+    {
+        [JsonPropertyName("success")]
+        public bool Success { get; }
+        [JsonPropertyName("message")]
+        public string Message { get; }
+        [JsonPropertyName("rebootRequired")]
+        public bool RebootRequired { get; }
+
+        public UpdateInstallResult(bool success, string message, bool rebootRequired = false)
+        {
+            Success = success;
+            Message = message;
+            RebootRequired = rebootRequired;
+        }
     }
 }

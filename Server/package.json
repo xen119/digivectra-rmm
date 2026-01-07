@@ -1,0 +1,12 @@
+{
+  "name": "rmm-ws-server",
+  "version": "1.0.0",
+  "description": "HTTPS/WebSocket server for the RMM demo",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

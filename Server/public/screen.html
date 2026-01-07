@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Agent Screen Stream</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem;
+        background: #0d1117;
+        color: #cdd9e5;
+      }
+
+      h1 {
+        margin-top: 0;
+      }
+
+      #status {
+        color: #8b949e;
+        margin-bottom: 1rem;
+      }
+
+      #frame {
+        width: 100%;
+        border: 1px solid #30363d;
+        border-radius: 0.5rem;
+        background: #161b22;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Agent Screen</h1>
+    <p id="status">Connecting to agent…</p>
+    <img id="frame" alt="Live screen" />
+    <script src="screen.js"></script>
+  </body>
+</html>

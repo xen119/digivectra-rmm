@@ -31,7 +31,14 @@ async function refreshAgents() {
       streamButton.addEventListener('click', () => {
         window.open(`shell.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
       });
+      const screenButton = document.createElement('button');
+      screenButton.type = 'button';
+      screenButton.textContent = 'Stream screen';
+      screenButton.addEventListener('click', () => {
+        window.open(`screen.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
+      });
       actions.appendChild(streamButton);
+      actions.appendChild(screenButton);
 
       item.appendChild(title);
       item.appendChild(meta);

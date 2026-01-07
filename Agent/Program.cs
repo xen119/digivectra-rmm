@@ -1,7 +1,11 @@
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Windows.Forms;
+using Microsoft.MixedReality.WebRTC;
 
 namespace Agent;
 
@@ -11,6 +15,14 @@ internal static class Program
     private static Process? shellProcess;
     private static CancellationTokenSource? shellCts;
     private static CancellationTokenSource? shellLinkedCts;
+    private const int ScreenCaptureIntervalMs = 400;
+    private static PeerConnection? screenPeerConnection;
+    private static DataChannel? screenDataChannel;
+    private static CancellationTokenSource? screenCaptureCts;
+    private static Task? screenCaptureTask;
+    private static string? screenSessionId;
+    private static readonly TimeSpan ScreenOfferTimeout = TimeSpan.FromSeconds(10);
+    private static Action? screenDataChannelStateHandler;
 
     private static async Task Main(string[] args)
     {
@@ -71,11 +83,18 @@ internal static class Program
         }
     }
 
+    private static TaskCompletionSource<string?>? screenConsentTcs;
+
     private static async Task SendAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested && socket.State == WebSocketState.Open)
         {
             var line = Console.ReadLine();
+            if (SubmitScreenConsentResponse(line))
+            {
+                continue;
+            }
+
             if (string.IsNullOrWhiteSpace(line))
             {
                 await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", cancellationToken);
@@ -102,6 +121,7 @@ internal static class Program
         JsonDocument? document = null;
         try
         {
+            Console.WriteLine($"[server raw] {payload}");
             document = JsonDocument.Parse(payload);
             if (!document.RootElement.TryGetProperty("type", out var typeElement))
             {
@@ -111,20 +131,87 @@ internal static class Program
             var messageType = typeElement.GetString();
             switch (messageType)
             {
-                case "start-shell":
-                    await StartShellSessionAsync(socket, cancellationToken);
-                    break;
-                case "stop-shell":
-                    await StopShellSessionAsync();
-                    break;
-                case "shell-input":
-                    if (document.RootElement.TryGetProperty("input", out var inputElement) &&
-                        inputElement.ValueKind == JsonValueKind.String)
+            case "start-shell":
+                await StartShellSessionAsync(socket, cancellationToken);
+                break;
+            case "stop-shell":
+                await StopShellSessionAsync();
+                break;
+            case "start-screen":
+            {
+                Console.WriteLine("Received start-screen request from server.");
+                if (document.RootElement.TryGetProperty("sessionId", out var sessionIdElement))
+                {
+                    var sessionId = sessionIdElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(sessionId))
                     {
-                        SendInput(inputElement.GetString());
+                        await StartScreenSessionAsync(socket, sessionId, cancellationToken);
                     }
+                }
 
+                break;
+            }
+            case "stop-screen":
+                await StopScreenSessionAsync();
+                break;
+            case "screen-answer":
+            {
+                if (screenPeerConnection is null)
+                {
                     break;
+                }
+
+                if (document.RootElement.TryGetProperty("sdp", out var sdpElement) &&
+                    document.RootElement.TryGetProperty("sdpType", out var sdpTypeElement))
+                {
+                    var sdp = sdpElement.GetString();
+                    var sdpType = sdpTypeElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(sdp) && !string.IsNullOrWhiteSpace(sdpType) &&
+                        Enum.TryParse<SdpMessageType>(sdpType, true, out var parsedType))
+                    {
+                        var message = new SdpMessage
+                        {
+                            Type = parsedType,
+                            Content = sdp
+                        };
+                        await screenPeerConnection.SetRemoteDescriptionAsync(message);
+                    }
+                }
+
+                break;
+            }
+            case "screen-candidate":
+            {
+                if (screenPeerConnection is null)
+                {
+                    break;
+                }
+
+                if (document.RootElement.TryGetProperty("candidate", out var candidateElement) &&
+                    document.RootElement.TryGetProperty("sdpMid", out var midElement) &&
+                    document.RootElement.TryGetProperty("sdpMLineIndex", out var indexElement) &&
+                    candidateElement.ValueKind == JsonValueKind.String &&
+                    midElement.ValueKind == JsonValueKind.String &&
+                    indexElement.TryGetInt32(out var index))
+                {
+                    var iceCandidate = new IceCandidate
+                    {
+                        Content = candidateElement.GetString() ?? string.Empty,
+                        SdpMid = midElement.GetString(),
+                        SdpMlineIndex = index
+                    };
+                    screenPeerConnection.AddIceCandidate(iceCandidate);
+                }
+            }
+            break;
+            case "shell-input":
+                if (document.RootElement.TryGetProperty("input", out var inputElement) &&
+                    inputElement.ValueKind == JsonValueKind.String)
+                {
+                    SendInput(inputElement.GetString());
+                }
+
+                break;
             }
         }
         catch (JsonException)
@@ -151,7 +238,7 @@ internal static class Program
         shellLinkedCts?.Cancel();
         shellLinkedCts?.Dispose();
         shellLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(shellCts.Token, cancellationToken);
-        var readToken = shellLinkedCts.Token;
+        var readToken = GetShellReadToken();
 
         var process = new Process
         {
@@ -173,7 +260,7 @@ internal static class Program
         {
             if (e.Data is not null)
             {
-                await SendShellOutputAsync(socket, e.Data + "\n", "stdout", readToken);
+                await SendShellOutputSafeAsync(socket, e.Data + "\n", "stdout", readToken);
             }
         };
 
@@ -181,13 +268,13 @@ internal static class Program
         {
             if (e.Data is not null)
             {
-                await SendShellOutputAsync(socket, e.Data + "\n", "stderr", readToken);
+                await SendShellOutputSafeAsync(socket, e.Data + "\n", "stderr", readToken);
             }
         };
 
         process.Exited += async (_, _) =>
         {
-            await SendShellOutputAsync(socket, "Shell process exited.\n", "stdout", readToken);
+            await SendShellOutputSafeAsync(socket, "Shell process exited.\n", "stdout", readToken);
             shellProcess = null;
         };
 
@@ -226,6 +313,300 @@ internal static class Program
             }
 
             shellProcess = null;
+        }
+    }
+
+    private static async Task StartScreenSessionAsync(ClientWebSocket socket, string sessionId, CancellationToken cancellationToken)
+    {
+        Console.WriteLine($"Starting screen session {sessionId}");
+        if (!await RequestScreenConsentAsync())
+        {
+            await SendJsonAsync(socket, new { type = "screen-error", sessionId, message = "User declined screen share." }, cancellationToken);
+            return;
+        }
+
+        screenSessionId = sessionId;
+
+        async Task AbortScreenSessionAsync(string message)
+        {
+            Console.WriteLine(message);
+            await SendJsonAsync(socket, new { type = "screen-error", sessionId, message }, cancellationToken);
+            await StopScreenSessionAsync();
+        }
+
+        screenCaptureCts?.Cancel();
+        screenCaptureCts?.Dispose();
+        screenCaptureCts = new CancellationTokenSource();
+
+        screenPeerConnection?.Close();
+        screenPeerConnection?.Dispose();
+        screenPeerConnection = new PeerConnection();
+
+        var offerReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        screenPeerConnection.IceCandidateReadytoSend += async (candidate) =>
+        {
+            var payload = new
+            {
+                type = "screen-candidate",
+                sessionId,
+                candidate = candidate.Content,
+                sdpMid = candidate.SdpMid,
+                sdpMLineIndex = candidate.SdpMlineIndex
+            };
+
+            try
+            {
+                Console.WriteLine($"Sending screen candidate ({payload.candidate?.Length ?? 0} chars) to server.");
+                await SendJsonAsync(socket, payload, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to send screen candidate: {ex.Message}");
+            }
+        };
+
+        screenPeerConnection.LocalSdpReadytoSend += async (message) =>
+        {
+            var payload = new
+            {
+                type = "screen-offer",
+                sessionId,
+                sdpType = message.Type.ToString(),
+                sdp = message.Content
+            };
+
+            try
+            {
+                Console.WriteLine($"Screen offer ready ({payload.sdp?.Length ?? 0} chars).");
+                await SendJsonAsync(socket, payload, cancellationToken);
+                offerReadyTcs.TrySetResult(true);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to send screen offer: {ex.Message}");
+                offerReadyTcs.TrySetException(ex);
+                await AbortScreenSessionAsync($"Failed to send screen offer: {ex.Message}");
+            }
+        };
+
+        try
+        {
+            await screenPeerConnection.InitializeAsync(new PeerConnectionConfiguration
+            {
+                IceServers = { new IceServer { Urls = { "stun:stun.l.google.com:19302" } } }
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await AbortScreenSessionAsync($"Failed to initialize screen peer: {ex.Message}");
+            return;
+        }
+
+        Console.WriteLine("InitializeAsync completed");
+
+        try
+        {
+            screenDataChannel = await screenPeerConnection.AddDataChannelAsync("screen", true, true, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await AbortScreenSessionAsync($"Failed to create screen data channel: {ex.Message}");
+            return;
+        }
+
+        if (screenDataChannel is null)
+        {
+            await AbortScreenSessionAsync("Failed to create screen data channel.");
+            return;
+        }
+
+        Console.WriteLine($"Data channel ready? {screenDataChannel.State}");
+
+        screenDataChannelStateHandler = () =>
+        {
+            if (screenDataChannel is null)
+            {
+                return;
+            }
+
+            Console.WriteLine($"Screen data channel state: {screenDataChannel.State}");
+        };
+        screenDataChannel.StateChanged += screenDataChannelStateHandler;
+        screenDataChannelStateHandler();
+
+        try
+        {
+            Console.WriteLine("Creating screen offer...");
+            var offerCreated = screenPeerConnection.CreateOffer();
+            Console.WriteLine($"CreateOffer returned {offerCreated}");
+            if (!offerCreated)
+            {
+                await AbortScreenSessionAsync("Failed to create offer.");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            await AbortScreenSessionAsync($"CreateOffer threw {ex.Message}");
+            return;
+        }
+
+        try
+        {
+            var offerDelay = Task.Delay(ScreenOfferTimeout, cancellationToken);
+            var offerCompleted = await Task.WhenAny(offerReadyTcs.Task, offerDelay);
+            if (offerCompleted != offerReadyTcs.Task)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                await AbortScreenSessionAsync("Timed out waiting for screen offer.");
+                return;
+            }
+
+            if (offerReadyTcs.Task.IsFaulted)
+            {
+                var error = offerReadyTcs.Task.Exception?.GetBaseException().Message ?? "Unknown error generating the offer.";
+                await AbortScreenSessionAsync($"Screen offer failed: {error}");
+                return;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        screenCaptureTask = Task.Run(() => CaptureScreenLoopAsync(screenCaptureCts.Token), screenCaptureCts.Token);
+
+        await SendShellOutputAsync(socket, "Screen sharing initialized.\n", "stdout", cancellationToken);
+    }
+
+    private static Task StopScreenSessionAsync()
+    {
+        screenCaptureCts?.Cancel();
+        screenCaptureCts?.Dispose();
+        screenCaptureCts = null;
+        screenCaptureTask = null;
+
+        if (screenDataChannel is not null && screenDataChannelStateHandler is not null)
+        {
+            screenDataChannel.StateChanged -= screenDataChannelStateHandler;
+            screenDataChannelStateHandler = null;
+        }
+
+        screenDataChannel = null;
+
+        screenPeerConnection?.Close();
+        screenPeerConnection?.Dispose();
+        screenPeerConnection = null;
+        screenSessionId = null;
+        return Task.CompletedTask;
+    }
+
+    private static async Task<bool> RequestScreenConsentAsync()
+    {
+        Console.WriteLine("Remote screen share requested. Type 'yes' to approve within 30 seconds.");
+        screenConsentTcs?.TrySetResult(null);
+        screenConsentTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30));
+        var completed = await Task.WhenAny(screenConsentTcs.Task, timeoutTask);
+        var response = completed == screenConsentTcs.Task ? await screenConsentTcs.Task : null;
+
+        if (completed != screenConsentTcs.Task)
+        {
+            Console.WriteLine("Screen share request timed out.");
+            screenConsentTcs = null;
+            return false;
+        }
+
+        screenConsentTcs = null;
+        var approved = string.Equals(response?.Trim(), "yes", StringComparison.OrdinalIgnoreCase);
+        Console.WriteLine(approved ? "Screen share approved." : "Screen share denied.");
+        return approved;
+    }
+
+    private static bool SubmitScreenConsentResponse(string? line)
+    {
+        if (screenConsentTcs is null)
+        {
+            return false;
+        }
+
+        screenConsentTcs.TrySetResult(line);
+        return true;
+    }
+
+    private static async Task CaptureScreenLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var frame = CaptureScreenFrame();
+                if (frame.Length > 0 && screenDataChannel is not null)
+                {
+                    var message = JsonSerializer.Serialize(new
+                    {
+                        type = "frame",
+                        image = Convert.ToBase64String(frame)
+                    });
+
+                    try
+                    {
+                        var bytes = Encoding.UTF8.GetBytes(message);
+                        screenDataChannel.SendMessage(bytes);
+                    }
+                    catch
+                    {
+                        // ignore send errors during shutdown
+                    }
+                }
+
+                await Task.Delay(ScreenCaptureIntervalMs, cancellationToken);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private static byte[] CaptureScreenFrame()
+    {
+        var screenBounds = Screen.PrimaryScreen!.Bounds;
+        using var bitmap = new Bitmap(screenBounds.Width, screenBounds.Height);
+        using var g = Graphics.FromImage(bitmap);
+        g.CopyFromScreen(screenBounds.Location, Point.Empty, screenBounds.Size);
+        using var ms = new MemoryStream();
+        bitmap.Save(ms, ImageFormat.Png);
+        return ms.ToArray();
+    }
+
+    private static CancellationToken GetShellReadToken()
+    {
+        try
+        {
+            return shellLinkedCts?.Token ?? CancellationToken.None;
+        }
+        catch (ObjectDisposedException)
+        {
+            return CancellationToken.None;
+        }
+    }
+
+    private static async Task SendShellOutputSafeAsync(ClientWebSocket socket, string output, string stream, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SendShellOutputAsync(socket, output, stream, cancellationToken);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Ignore races where the token source was disposed while we were sending.
         }
     }
 

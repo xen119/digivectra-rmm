@@ -1,8 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <MixedRealityWebRtcVersion>2.0.2</MixedRealityWebRtcVersion>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.MixedReality.WebRTC" Version="2.0.2" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(NuGetPackageRoot)microsoft.mixedreality.webrtc\$(MixedRealityWebRtcVersion)\runtimes\win10-x64\native\mrwebrtc.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>

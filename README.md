@@ -15,6 +15,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - Run `npm install` then `npm start` to launch; defaults to `wss://localhost:8443`.
 - Access `https://localhost:8443` in a browser to see a dashboard of connected agents (the root path serves the GUI).
 - Use the dashboard's **Stream shell** button to open a live PowerShell stream for any agent; the browser opens `shell.html` to display the output and send commands.
+- Use **Stream screen** to open `screen.html` and negotiate a WebRTC connection; the agent user must type `yes` in the console to grant consent before frames are displayed.
 
 ## Running
 
@@ -28,7 +29,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 3. Start the agent:
    ```bash
    cd Agent
-   dotnet run -- wss://localhost:8443
+   dotnet run -r win-x64 -- wss://localhost:8443
    ```
 
 Press Enter on an empty line in the agent to close the connection gracefully.

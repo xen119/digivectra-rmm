@@ -26,6 +26,10 @@ const clients = new Map(); // socket -> info
 const clientsById = new Map(); // id -> { socket, info }
 const shellStreams = new Map(); // id -> response
 const screenSessions = new Map(); // sessionId -> session data
+const screenLists = new Map(); // agentId -> { screens, updatedAt }
+const screenListRequests = new Map(); // agentId -> { resolvers: [], timer }
+const SCREEN_LIST_TTL_MS = 60_000;
+const SCREEN_LIST_TIMEOUT_MS = 5_000;
 
 server.on('request', (req, res) => {
   const requestedUrl = new URL(req.url ?? '/', `https://${req.headers.host ?? 'localhost'}`);
@@ -88,6 +92,35 @@ server.on('request', (req, res) => {
     return;
   }
 
+  const screenListMatch = pathname.match(/^\/screen\/([^/]+)\/screens$/);
+  if (screenListMatch && req.method === 'GET') {
+    const agentId = screenListMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    const cached = screenLists.get(agentId);
+    if (cached && Date.now() - cached.updatedAt < SCREEN_LIST_TTL_MS) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ screens: cached.screens }));
+      return;
+    }
+
+    requestScreenList(agentId, entry.socket)
+      .then((screens) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ screens }));
+      })
+      .catch(() => {
+        res.writeHead(504);
+        res.end('Failed to retrieve screen list');
+      });
+
+    return;
+  }
+
   const screenOfferMatch = pathname.match(/^\/screen\/([^/]+)\/offer$/);
   if (screenOfferMatch && req.method === 'GET') {
     const sessionId = screenOfferMatch[1];
@@ -137,6 +170,8 @@ server.on('request', (req, res) => {
       agentId: session.agentId,
       agentName: session.agentName,
       state: session.offer ? 'offer-ready' : 'waiting-offer',
+      screenId: session.screenId,
+      screenName: getScreenName(session.agentId, session.screenId),
     });
 
     res.on('close', () => {
@@ -161,7 +196,11 @@ server.on('request', (req, res) => {
   if (screenRequestMatch) {
     collectBody(req, (body) => {
       try {
-        const { agentId } = JSON.parse(body);
+        const payload = JSON.parse(body);
+        const agentId = payload.agentId;
+        const requestedScreenId = typeof payload.screenId === 'string' && payload.screenId.trim()
+          ? payload.screenId.trim()
+          : null;
         console.log(`Received screen request for agent ${agentId}`);
         const entry = clientsById.get(agentId);
         if (!entry) {
@@ -177,10 +216,11 @@ server.on('request', (req, res) => {
           sseClients: new Set(),
           offer: null,
           agentCandidates: [],
+          screenId: requestedScreenId,
         });
 
         console.log(`Sending start-screen to agent ${agentId} for session ${sessionId}`);
-        sendControl(entry.socket, 'start-screen', { sessionId });
+        sendControl(entry.socket, 'start-screen', { sessionId, screenId: requestedScreenId });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ sessionId }));
       } catch (error) {
@@ -335,12 +375,16 @@ wss.on('connection', (socket, request) => {
             agentId: session.agentId,
             agentName: session.agentName,
             ...session.offer,
+            screenId: session.screenId,
+            screenName: getScreenName(session.agentId, session.screenId),
           });
           sendScreenEvent(session, 'status', {
             sessionId: parsed.sessionId,
             agentId: session.agentId,
             agentName: session.agentName,
             state: 'offer-ready',
+            screenId: session.screenId,
+            screenName: getScreenName(session.agentId, session.screenId),
           });
         }
       } else if (parsed?.type === 'screen-candidate') {
@@ -371,7 +415,20 @@ wss.on('connection', (socket, request) => {
             message: parsed.message,
           });
         }
-      }
+      } else if (parsed?.type === 'screen-list' && Array.isArray(parsed.screens)) {
+        const normalized = parsed.screens.map((screen, index) => ({
+          id: typeof screen.id === 'string' && screen.id.trim() ? screen.id.trim() : `display-${index + 1}`,
+          name: typeof screen.name === 'string' && screen.name.trim() ? screen.name.trim() : `Display ${index + 1}`,
+          width: typeof screen.width === 'number' ? screen.width : null,
+          height: typeof screen.height === 'number' ? screen.height : null,
+          x: typeof screen.x === 'number' ? screen.x : null,
+          y: typeof screen.y === 'number' ? screen.y : null,
+          primary: Boolean(screen.primary),
+        }));
+
+      screenLists.set(info.id, { screens: normalized, updatedAt: Date.now() });
+      fulfillScreenListRequest(info.id, normalized);
+    }
     } catch (error) {
       // ignore invalid JSON and continue echoing
     }
@@ -383,6 +440,8 @@ wss.on('connection', (socket, request) => {
     clients.delete(socket);
     clientsById.delete(id);
     shellStreams.delete(id);
+    screenLists.delete(id);
+    cancelScreenListRequest(id, new Error('agent disconnected'));
     for (const [sessionId, session] of screenSessions) {
       if (session.agentId === id) {
         sendScreenEvent(session, 'closed', { reason: 'agent disconnected' });
@@ -443,4 +502,65 @@ function sendScreenEvent(session, eventName, data) {
     res.write(`event: ${eventName}\n`);
     res.write(`data: ${payload}\n\n`);
   }
+}
+
+function requestScreenList(agentId, socket) {
+  return new Promise((resolve, reject) => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      reject(new Error('Agent unavailable'));
+      return;
+    }
+
+    const existing = screenListRequests.get(agentId);
+    if (existing) {
+      existing.resolvers.push({ resolve, reject });
+      return;
+    }
+
+    const resolvers = [{ resolve, reject }];
+    const timer = setTimeout(() => {
+      screenListRequests.delete(agentId);
+      for (const entry of resolvers) {
+        entry.reject(new Error('Screen list request timed out'));
+      }
+    }, SCREEN_LIST_TIMEOUT_MS);
+
+    screenListRequests.set(agentId, { resolvers, timer });
+    sendControl(socket, 'get-screen-list');
+  });
+}
+
+function fulfillScreenListRequest(agentId, screens) {
+  const pending = screenListRequests.get(agentId);
+  if (!pending) {
+    return;
+  }
+
+  clearTimeout(pending.timer);
+  screenListRequests.delete(agentId);
+  for (const entry of pending.resolvers) {
+    entry.resolve(screens);
+  }
+}
+
+function cancelScreenListRequest(agentId, reason) {
+  const pending = screenListRequests.get(agentId);
+  if (!pending) {
+    return;
+  }
+
+  clearTimeout(pending.timer);
+  screenListRequests.delete(agentId);
+  for (const entry of pending.resolvers) {
+    entry.reject(reason);
+  }
+}
+
+function getScreenName(agentId, screenId) {
+  if (!screenId) {
+    return null;
+  }
+
+  const stored = screenLists.get(agentId);
+  return stored?.screens.find((screen) => screen.id === screenId)?.name ?? null;
 }

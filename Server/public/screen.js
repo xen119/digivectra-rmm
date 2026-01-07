@@ -2,6 +2,7 @@ const statusEl = document.getElementById('status');
 const frameEl = document.getElementById('frame');
 const controlButton = document.getElementById('controlButton');
 const controlInstructions = document.getElementById('controlInstructions');
+const screenSelect = document.getElementById('screenSelect');
 
 const params = new URLSearchParams(window.location.search);
 const agentId = params.get('agent');
@@ -11,6 +12,7 @@ let source;
 let pc;
 let controlChannel;
 let controlEnabled = false;
+let selectedScreenId = null;
 
 if (controlButton) {
   controlButton.addEventListener('click', () => {
@@ -34,6 +36,17 @@ if (frameEl) {
   });
 }
 
+if (screenSelect) {
+  screenSelect.addEventListener('change', async () => {
+    if (!screenSelect.value || screenSelect.value === selectedScreenId) {
+      return;
+    }
+
+    selectedScreenId = screenSelect.value;
+    await restartScreenSession();
+  });
+}
+
 window.addEventListener('keydown', (event) => handleKeyEvent(event, 'down'), true);
 window.addEventListener('keyup', (event) => handleKeyEvent(event, 'up'), true);
 window.addEventListener('blur', () => {
@@ -50,11 +63,55 @@ if (!agentId) {
 
 async function initialize() {
   await refreshAgentInfo();
+  await loadScreenOptions();
+  await startScreenSession();
+}
+
+async function loadScreenOptions() {
+  if (!screenSelect || !agentId) {
+    return;
+  }
+
+    try {
+      const response = await fetch(`/screen/${agentId}/screens`, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const screens = Array.isArray(payload.screens) ? payload.screens : [];
+    if (screens.length === 0) {
+      screenSelect.disabled = true;
+      return;
+    }
+
+    screenSelect.innerHTML = '';
+    screens.forEach((screen) => {
+      const option = document.createElement('option');
+      option.value = screen.id;
+      option.textContent = `${screen.name ?? screen.id} (${screen.width ?? '?'}x${screen.height ?? '?'})`;
+      screenSelect.appendChild(option);
+    });
+
+    selectedScreenId = screens[0].id;
+    screenSelect.disabled = false;
+    } catch (error) {
+      console.error('Failed to load screen list', error);
+      screenSelect.disabled = true;
+    }
+  }
+
+async function startScreenSession() {
   try {
+    const requestBody = { agentId };
+    if (selectedScreenId) {
+      requestBody.screenId = selectedScreenId;
+    }
+
     const response = await fetch('/screen/request', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agentId }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -108,6 +165,31 @@ async function initialize() {
   } catch (error) {
     console.error(error);
     statusEl.textContent = 'Failed to start screen stream.';
+  }
+}
+
+async function restartScreenSession() {
+  if (sessionId) {
+    await stopExistingSession();
+  }
+
+  await startScreenSession();
+}
+
+async function stopExistingSession() {
+  if (source) {
+    source.close();
+    source = null;
+  }
+
+  if (pc) {
+    pc.close();
+    pc = null;
+  }
+
+  if (sessionId) {
+    await fetch(`/screen/${sessionId}/stop`, { method: 'POST' });
+    sessionId = null;
   }
 }
 

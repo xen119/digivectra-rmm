@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Linq;
 using System.Net.WebSockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -23,6 +24,7 @@ internal static class Program
     private static CancellationTokenSource? screenCaptureCts;
     private static Task? screenCaptureTask;
     private static string? screenSessionId;
+    private static string? selectedScreenId;
     private static readonly TimeSpan ScreenOfferTimeout = TimeSpan.FromSeconds(10);
     private static Action? screenDataChannelStateHandler;
     private static readonly Dictionary<string, ushort> VirtualKeyMap = new(StringComparer.OrdinalIgnoreCase)
@@ -206,12 +208,18 @@ internal static class Program
                     var sessionId = sessionIdElement.GetString();
                     if (!string.IsNullOrWhiteSpace(sessionId))
                     {
-                        await StartScreenSessionAsync(socket, sessionId, cancellationToken);
+                        var screenId = document.RootElement.TryGetProperty("screenId", out var screenIdElement)
+                            ? screenIdElement.GetString()
+                            : null;
+                        await StartScreenSessionAsync(socket, sessionId, screenId, cancellationToken);
                     }
                 }
 
                 break;
             }
+            case "get-screen-list":
+                await SendScreenListAsync(socket, cancellationToken);
+                break;
             case "stop-screen":
                 await StopScreenSessionAsync();
                 break;
@@ -377,9 +385,10 @@ internal static class Program
         }
     }
 
-    private static async Task StartScreenSessionAsync(ClientWebSocket socket, string sessionId, CancellationToken cancellationToken)
+    private static async Task StartScreenSessionAsync(ClientWebSocket socket, string sessionId, string? screenId, CancellationToken cancellationToken)
     {
-        Console.WriteLine($"Starting screen session {sessionId}");
+        selectedScreenId = screenId;
+        Console.WriteLine($"Starting screen session {sessionId} (screen:{selectedScreenId ?? "primary"})");
         if (!await RequestScreenConsentAsync(cancellationToken))
         {
             await SendJsonAsync(socket, new { type = "screen-error", sessionId, message = "User declined screen share." }, cancellationToken);
@@ -552,6 +561,7 @@ internal static class Program
         screenCaptureCts?.Dispose();
         screenCaptureCts = null;
         screenCaptureTask = null;
+        selectedScreenId = null;
 
         if (screenDataChannel is not null && screenDataChannelStateHandler is not null)
         {
@@ -594,6 +604,31 @@ internal static class Program
         return approved;
     }
 
+    private static async Task SendScreenListAsync(ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var descriptors = Screen.AllScreens.Select((screen, index) => new
+            {
+                id = screen.DeviceName,
+                name = screen.DeviceName,
+                width = screen.Bounds.Width,
+                height = screen.Bounds.Height,
+                x = screen.Bounds.X,
+                y = screen.Bounds.Y,
+                primary = screen.Primary,
+                index
+            }).ToArray();
+
+            await SendJsonAsync(socket, new { type = "screen-list", screens = descriptors }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to send screen list: {ex.Message}");
+            await SendJsonAsync(socket, new { type = "screen-error", message = "Failed to enumerate displays." }, cancellationToken);
+        }
+    }
+
     private static async Task CaptureScreenLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -631,13 +666,40 @@ internal static class Program
 
     private static byte[] CaptureScreenFrame()
     {
-        var screenBounds = Screen.PrimaryScreen!.Bounds;
+        var targetScreen = GetCaptureScreen();
+        var screenBounds = targetScreen.Bounds;
         using var bitmap = new Bitmap(screenBounds.Width, screenBounds.Height);
         using var g = Graphics.FromImage(bitmap);
         g.CopyFromScreen(screenBounds.Location, Point.Empty, screenBounds.Size);
         using var ms = new MemoryStream();
         bitmap.Save(ms, ImageFormat.Png);
         return ms.ToArray();
+    }
+
+    private static Screen GetCaptureScreen()
+    {
+        var screens = Screen.AllScreens;
+        if (screens.Length == 0)
+        {
+            throw new InvalidOperationException("No displays detected.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedScreenId))
+        {
+            var match = screens.FirstOrDefault(s => string.Equals(s.DeviceName, selectedScreenId, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        var primary = screens.FirstOrDefault(s => s.Primary);
+        if (primary is not null)
+        {
+            return primary;
+        }
+
+        return screens[0];
     }
 
     private static CancellationToken GetShellReadToken()

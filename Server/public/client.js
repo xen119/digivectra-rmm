@@ -5,7 +5,7 @@ const OS_ICONS = {
   windows: '🪟',
   linux: '🐧',
   macos: '🍎',
-  unknown: '💻'
+  unknown: '💻',
 };
 
 async function refreshAgents() {

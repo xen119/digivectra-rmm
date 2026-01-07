@@ -149,10 +149,32 @@ internal static class Program
         var identity = JsonSerializer.Serialize(new
         {
             type = "hello",
-            name = Environment.MachineName
+            name = Environment.MachineName,
+            os = RuntimeInformation.OSDescription,
+            platform = GetPlatformName()
         });
 
         return SendTextAsync(socket, identity, cancellationToken);
+    }
+
+    private static string GetPlatformName()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return "Windows";
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            return "Linux";
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return "macOS";
+        }
+
+        return "Unknown";
     }
 
     private static async Task HandleServerMessageAsync(string payload, ClientWebSocket socket, CancellationToken cancellationToken)

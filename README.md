@@ -17,6 +17,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - Access `https://localhost:8443` in a browser to see a dashboard of connected agents (the root path serves the GUI).
 - Use the dashboard's **Stream shell** button to open a live PowerShell stream for any agent; the browser opens `shell.html` to display the output and send commands.
 - Use **Stream screen** to open `screen.html` and negotiate a WebRTC connection; the agent user must click Yes/No in the popup consent dialog before frames are displayed. The dialog shows a 30 s countdown and automatically denies if no action is taken. Once the page shows the live image, click **Enable control** to forward mouse/keyboard events for remote interaction.  The button disables when the data channel closes.
+* The dashboard now shows an OS icon for every agent so it is easy to see Windows, Linux, or macOS hosts.
 
 ## Running
 

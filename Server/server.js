@@ -36,6 +36,8 @@ server.on('request', (req, res) => {
     const payload = Array.from(clients.values()).map((info) => ({
       id: info.id,
       name: info.name,
+      os: info.os,
+      platform: info.platform,
       connectedAt: info.connectedAt,
       remoteAddress: info.remoteAddress,
     }));
@@ -293,6 +295,8 @@ wss.on('connection', (socket, request) => {
     name: `unnamed (${remote})`,
     remoteAddress: remote,
     connectedAt: new Date().toISOString(),
+    os: 'unknown',
+    platform: 'unknown',
   };
 
   clients.set(socket, info);
@@ -309,6 +313,12 @@ wss.on('connection', (socket, request) => {
       const parsed = JSON.parse(payload);
       if (parsed?.type === 'hello' && typeof parsed.name === 'string' && parsed.name.trim()) {
         info.name = parsed.name.trim();
+        if (typeof parsed.os === 'string' && parsed.os.trim()) {
+          info.os = parsed.os.trim();
+        }
+        if (typeof parsed.platform === 'string' && parsed.platform.trim()) {
+          info.platform = parsed.platform.trim();
+        }
         console.log(`Identified client as ${info.name}`);
       } else if (parsed?.type === 'shell-output') {
         emitShellOutput(info.id, parsed);

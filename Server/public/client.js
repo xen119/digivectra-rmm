@@ -1,6 +1,13 @@
 const statusEl = document.getElementById('status');
 const listEl = document.getElementById('agents');
 
+const OS_ICONS = {
+  windows: '🪟',
+  linux: '🐧',
+  macos: '🍎',
+  unknown: '💻'
+};
+
 async function refreshAgents() {
   try {
     const response = await fetch('/clients', { cache: 'no-store' });
@@ -18,11 +25,24 @@ async function refreshAgents() {
     listEl.innerHTML = '';
     for (const agent of agents) {
       const item = document.createElement('li');
+
+      const header = document.createElement('div');
+      header.className = 'agent-header';
+
+      const icon = document.createElement('span');
+      icon.className = 'os-icon';
+      icon.textContent = getOsIcon(agent.platform);
+      icon.title = agent.platform ?? 'Unknown';
+      header.appendChild(icon);
+
       const title = document.createElement('strong');
       title.textContent = agent.name;
+      header.appendChild(title);
+
       const meta = document.createElement('span');
+      meta.className = 'agent-meta';
       const connectedAt = new Date(agent.connectedAt).toLocaleTimeString();
-      meta.textContent = `${agent.remoteAddress} · connected at ${connectedAt}`;
+      meta.textContent = `${formatPlatform(agent.platform)} · ${agent.os ?? 'Unknown OS'} · ${agent.remoteAddress} · connected at ${connectedAt}`;
 
       const actions = document.createElement('div');
       const streamButton = document.createElement('button');
@@ -40,7 +60,7 @@ async function refreshAgents() {
       actions.appendChild(streamButton);
       actions.appendChild(screenButton);
 
-      item.appendChild(title);
+      item.appendChild(header);
       item.appendChild(meta);
       item.appendChild(actions);
       listEl.appendChild(item);
@@ -54,3 +74,32 @@ async function refreshAgents() {
 
 refreshAgents();
 setInterval(refreshAgents, 3000);
+
+function getOsIcon(platform) {
+  if (!platform) {
+    return OS_ICONS.unknown;
+  }
+
+  const key = platform.toLowerCase();
+  if (key.includes('windows')) {
+    return OS_ICONS.windows;
+  }
+
+  if (key.includes('linux')) {
+    return OS_ICONS.linux;
+  }
+
+  if (key.includes('mac')) {
+    return OS_ICONS.macos;
+  }
+
+  return OS_ICONS.unknown;
+}
+
+function formatPlatform(platform) {
+  if (!platform) {
+    return 'Unknown';
+  }
+
+  return platform;
+}

@@ -176,6 +176,11 @@ function createAgentCard(agent, groups) {
   meta.textContent = `${formatPlatform(agent.platform)} · ${agent.os ?? 'Unknown OS'} · ${agent.remoteAddress} · connected at ${connectedAt}`;
   card.appendChild(meta);
 
+  const specLine = document.createElement('div');
+  specLine.className = 'agent-spec';
+  specLine.textContent = formatDeviceSpecs(agent.specs);
+  card.appendChild(specLine);
+
   const actions = document.createElement('div');
   actions.className = 'actions';
   const streamButton = document.createElement('button');
@@ -241,4 +246,66 @@ function formatPlatform(platform) {
   }
 
   return platform;
+}
+
+function formatDeviceSpecs(specs) {
+  if (!specs) {
+    return 'Device info unavailable.';
+  }
+
+  const parts = [];
+  const manufacturerParts = [];
+  if (specs.Manufacturer) {
+    manufacturerParts.push(specs.Manufacturer);
+  }
+  if (specs.Model) {
+    manufacturerParts.push(specs.Model);
+  }
+  if (manufacturerParts.length > 0) {
+    parts.push(manufacturerParts.join(' '));
+  }
+
+  if (specs.Edition) {
+    parts.push(`Edition: ${specs.Edition}`);
+  }
+
+  if (specs.SerialNumber) {
+    parts.push(`SN: ${specs.SerialNumber}`);
+  }
+
+  if (specs.CpuName) {
+    const cpu = specs.CpuCores ? `${specs.CpuName} (${specs.CpuCores} cores)` : specs.CpuName;
+    parts.push(`CPU: ${cpu}`);
+  }
+
+  if (specs.TotalMemoryBytes) {
+    parts.push(`RAM: ${formatBytes(specs.TotalMemoryBytes)}`);
+  }
+
+  if (Array.isArray(specs.Storages) && specs.Storages.length > 0) {
+    const storageList = specs.Storages.map((drive) => {
+      const name = drive.Name ? `${drive.Name}` : 'Drive';
+      const total = drive.TotalBytes ? formatBytes(drive.TotalBytes) : '?';
+      const free = drive.FreeBytes ? formatBytes(drive.FreeBytes) : '?';
+      return `${name}: ${total} total, ${free} free`;
+    });
+    parts.push(storageList.join(' | '));
+  }
+
+  return parts.length > 0 ? parts.join(' · ') : 'Device info unavailable.';
+}
+
+function formatBytes(bytes) {
+  if (!bytes || typeof bytes !== 'number') {
+    return '0 B';
+  }
+
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < sizes.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(1)} ${sizes[index]}`;
 }

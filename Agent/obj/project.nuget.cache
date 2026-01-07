@@ -1,12 +1,14 @@
 {
   "version": 2,
-  "dgSpecHash": "qAKwcEE9MeU=",
+  "dgSpecHash": "Aw/vKfq/CmM=",
   "success": true,
   "projectFilePath": "C:\\Users\\DavidNefdt\\Desktop\\Projects\\RMM\\Agent\\Agent.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\DavidNefdt\\.nuget\\packages\\microsoft.mixedreality.webrtc\\2.0.2\\microsoft.mixedreality.webrtc.2.0.2.nupkg.sha512",
     "C:\\Users\\DavidNefdt\\.nuget\\packages\\microsoft.win32.systemevents\\8.0.0\\microsoft.win32.systemevents.8.0.0.nupkg.sha512",
-    "C:\\Users\\DavidNefdt\\.nuget\\packages\\system.drawing.common\\8.0.0\\system.drawing.common.8.0.0.nupkg.sha512"
+    "C:\\Users\\DavidNefdt\\.nuget\\packages\\system.codedom\\8.0.0\\system.codedom.8.0.0.nupkg.sha512",
+    "C:\\Users\\DavidNefdt\\.nuget\\packages\\system.drawing.common\\8.0.0\\system.drawing.common.8.0.0.nupkg.sha512",
+    "C:\\Users\\DavidNefdt\\.nuget\\packages\\system.management\\8.0.0\\system.management.8.0.0.nupkg.sha512"
   ],
   "logs": []
 }

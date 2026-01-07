@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+using System.Management;
 using System.Net.WebSockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -149,6 +150,7 @@ internal static class Program
 
     private const string AgentIdFile = "agent.id";
     private static string? agentId;
+    private static DeviceSpecs? deviceSpecs;
 
     private static Task SendAgentIdentityAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
@@ -157,9 +159,9 @@ internal static class Program
             type = "hello",
             name = Environment.MachineName,
             os = RuntimeInformation.OSDescription,
-            platform = GetPlatformName()
-            ,
-            agentId = GetAgentId()
+            platform = GetPlatformName(),
+            agentId = GetAgentId(),
+            specs = GetDeviceSpecs()
         });
 
         return SendTextAsync(socket, identity, cancellationToken);
@@ -221,6 +223,123 @@ internal static class Program
         }
 
         return "Unknown";
+    }
+
+    private static DeviceSpecs GetDeviceSpecs()
+    {
+        if (deviceSpecs is not null)
+        {
+            return deviceSpecs;
+        }
+
+        var specs = new DeviceSpecs();
+
+        try
+        {
+            using var systemSearcher = new ManagementObjectSearcher("SELECT Manufacturer, Model FROM Win32_ComputerSystem");
+            using var systemResults = systemSearcher.Get();
+            foreach (ManagementBaseObject item in systemResults)
+            {
+                specs.Manufacturer = (item["Manufacturer"] as string)?.Trim();
+                specs.Model = (item["Model"] as string)?.Trim();
+                break;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            using var biosSearcher = new ManagementObjectSearcher("SELECT SerialNumber FROM Win32_BIOS");
+            using var biosResults = biosSearcher.Get();
+            foreach (ManagementBaseObject item in biosResults)
+            {
+                specs.SerialNumber = (item["SerialNumber"] as string)?.Trim();
+                break;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            using var cpuSearcher = new ManagementObjectSearcher("SELECT Name, NumberOfLogicalProcessors FROM Win32_Processor");
+            using var cpuResults = cpuSearcher.Get();
+            foreach (ManagementBaseObject item in cpuResults)
+            {
+                specs.CpuName = (item["Name"] as string)?.Trim();
+                if (item["NumberOfLogicalProcessors"] is uint logical)
+                {
+                    specs.CpuCores = (int)logical;
+                }
+
+                break;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            using var memorySearcher = new ManagementObjectSearcher("SELECT TotalVisibleMemorySize, FreePhysicalMemory, Caption FROM Win32_OperatingSystem");
+            using var memoryResults = memorySearcher.Get();
+            foreach (ManagementBaseObject item in memoryResults)
+            {
+                if (item["TotalVisibleMemorySize"] is ulong totalKb)
+                {
+                    specs.TotalMemoryBytes = (long)totalKb * 1024;
+                }
+
+                if (item["FreePhysicalMemory"] is ulong freeKb)
+                {
+                    specs.AvailableMemoryBytes = (long)freeKb * 1024;
+                }
+
+                if (specs.Edition is null && item["Caption"] is string caption)
+                {
+                    specs.Edition = caption.Trim();
+                }
+
+                break;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        var drives = new List<StorageInfo>();
+        try
+        {
+            foreach (var drive in DriveInfo.GetDrives())
+            {
+                if (!drive.IsReady || drive.DriveType != DriveType.Fixed)
+                {
+                    continue;
+                }
+
+                drives.Add(new StorageInfo
+                {
+                    Name = drive.Name.TrimEnd('\\'),
+                    TotalBytes = drive.TotalSize,
+                    FreeBytes = drive.AvailableFreeSpace
+                });
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        specs.Storages = drives.ToArray();
+        deviceSpecs = specs;
+        return specs;
     }
 
     private static async Task HandleServerMessageAsync(string payload, ClientWebSocket socket, CancellationToken cancellationToken)
@@ -1126,5 +1245,25 @@ internal static class Program
                 SendLock.Release();
             }
         }
+    }
+
+    private sealed class DeviceSpecs
+    {
+        public string? Manufacturer { get; set; }
+        public string? Model { get; set; }
+        public string? Edition { get; set; }
+        public string? SerialNumber { get; set; }
+        public string? CpuName { get; set; }
+        public int? CpuCores { get; set; }
+        public long TotalMemoryBytes { get; set; }
+        public long AvailableMemoryBytes { get; set; }
+        public StorageInfo[] Storages { get; set; } = Array.Empty<StorageInfo>();
+    }
+
+    private sealed class StorageInfo
+    {
+        public string? Name { get; set; }
+        public long TotalBytes { get; set; }
+        public long FreeBytes { get; set; }
     }
 }

@@ -48,6 +48,7 @@ server.on('request', (req, res) => {
       connectedAt: info.connectedAt,
       remoteAddress: info.remoteAddress,
       group: info.group ?? DEFAULT_GROUP,
+      specs: info.specs ?? null,
       status: info.status ?? 'offline',
       lastSeen: info.lastSeen ?? null,
     }));
@@ -397,6 +398,7 @@ wss.on('connection', (socket, request) => {
     group: DEFAULT_GROUP,
     status: 'online',
     lastSeen: null,
+    specs: null,
   };
 
   clients.set(socket, info);
@@ -434,6 +436,9 @@ wss.on('connection', (socket, request) => {
         }
         if (typeof parsed.platform === 'string' && parsed.platform.trim()) {
           info.platform = parsed.platform.trim();
+        }
+        if (parsed.specs != null) {
+          info.specs = parsed.specs;
         }
         info.status = 'online';
         info.lastSeen = null;

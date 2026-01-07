@@ -20,3 +20,5 @@ C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\obj\Debug\net8.0-windows\refint\A
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\obj\Debug\net8.0-windows\Agent.pdb
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\obj\Debug\net8.0-windows\Agent.genruntimeconfig.cache
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\obj\Debug\net8.0-windows\ref\Agent.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\System.Management.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\runtimes\win\lib\net8.0\System.Management.dll

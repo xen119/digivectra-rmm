@@ -38,6 +38,8 @@ internal static class Program
     private static string? currentChatSessionId;
     private static string? selectedScreenId;
     private static readonly TimeSpan ScreenOfferTimeout = TimeSpan.FromSeconds(10);
+    private const int MaxFileEntries = 512;
+    private static readonly Dictionary<string, PendingUpload> uploadSessions = new(StringComparer.OrdinalIgnoreCase);
     private static Action? screenDataChannelStateHandler;
     private static readonly ImageCodecInfo? JpegEncoder = ImageCodecInfo.GetImageEncoders()
         .FirstOrDefault(codec => codec.FormatID == ImageFormat.Jpeg.Guid);
@@ -1102,6 +1104,18 @@ internal static class Program
             case "request-updates":
                 await SendAgentUpdateSummaryAsync(socket, cancellationToken, true);
                 break;
+            case "list-files":
+                await HandleFileListRequestAsync(socket, document.RootElement, cancellationToken);
+                break;
+            case "download-file":
+                await HandleFileDownloadRequestAsync(socket, document.RootElement, cancellationToken);
+                break;
+            case "upload-file-chunk":
+                await HandleFileUploadChunkAsync(socket, document.RootElement, cancellationToken);
+                break;
+            case "upload-file-complete":
+                await HandleFileUploadCompleteAsync(socket, document.RootElement, cancellationToken);
+                break;
             case "install-updates":
                 await HandleInstallUpdatesAsync(socket, document.RootElement, cancellationToken);
                 break;
@@ -2009,6 +2023,283 @@ internal static class Program
         await SendTextAsync(socket, text, cancellationToken);
     }
 
+    private static string? ExtractRequestId(JsonElement root)
+    {
+        if (!root.TryGetProperty("requestId", out var requestIdElement) || requestIdElement.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        string? value = requestIdElement.GetString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static string ResolveBrowsePath(string? requestedPath)
+    {
+        var candidate = string.IsNullOrWhiteSpace(requestedPath)
+            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : requestedPath!;
+
+        try
+        {
+            candidate = Path.GetFullPath(candidate);
+        }
+        catch
+        {
+            candidate = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+
+        if (!Directory.Exists(candidate))
+        {
+            var parent = Path.GetDirectoryName(candidate);
+            if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
+            {
+                candidate = parent;
+            }
+            else
+            {
+                candidate = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            }
+        }
+
+        return candidate;
+    }
+
+    private static async Task HandleFileListRequestAsync(ClientWebSocket socket, JsonElement root, CancellationToken cancellationToken)
+    {
+        var requestId = ExtractRequestId(root);
+        var requestedPath = root.TryGetProperty("path", out var pathElement) && pathElement.ValueKind == JsonValueKind.String
+            ? pathElement.GetString()
+            : null;
+        var resolvedPath = ResolveBrowsePath(requestedPath);
+        var entries = new List<FileEntry>();
+        var parentPath = Directory.GetParent(resolvedPath)?.FullName ?? resolvedPath;
+
+        try
+        {
+            var directoryInfo = new DirectoryInfo(resolvedPath);
+            foreach (var dir in directoryInfo.EnumerateDirectories())
+            {
+                if (entries.Count >= MaxFileEntries)
+                {
+                    break;
+                }
+
+                entries.Add(new FileEntry
+                {
+                    Name = dir.Name,
+                    Path = dir.FullName,
+                    IsDirectory = true,
+                    LastModifiedUtc = dir.LastWriteTimeUtc,
+                });
+            }
+
+            if (entries.Count < MaxFileEntries)
+            {
+                foreach (var file in directoryInfo.EnumerateFiles())
+                {
+                    if (entries.Count >= MaxFileEntries)
+                    {
+                        break;
+                    }
+
+                    entries.Add(new FileEntry
+                    {
+                        Name = file.Name,
+                        Path = file.FullName,
+                        IsDirectory = false,
+                        Size = file.Length,
+                        LastModifiedUtc = file.LastWriteTimeUtc,
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            await SendJsonAsync(socket, new
+            {
+                type = "file-list",
+                requestId,
+                path = resolvedPath,
+                parentPath,
+                entries,
+                error = ex.Message,
+            }, cancellationToken);
+            return;
+        }
+
+            await SendJsonAsync(socket, new
+            {
+                type = "file-list",
+                requestId,
+                path = resolvedPath,
+                parentPath,
+                entries,
+            }, cancellationToken);
+    }
+
+    private static async Task HandleFileDownloadRequestAsync(ClientWebSocket socket, JsonElement root, CancellationToken cancellationToken)
+    {
+        var requestId = ExtractRequestId(root);
+        var requestedPath = root.TryGetProperty("path", out var pathElement) && pathElement.ValueKind == JsonValueKind.String
+            ? pathElement.GetString()
+            : null;
+
+        if (string.IsNullOrWhiteSpace(requestedPath))
+        {
+            await SendFileDownloadErrorAsync(socket, requestId, "Path is required", cancellationToken);
+            return;
+        }
+
+        try
+        {
+            var normalized = Path.GetFullPath(requestedPath);
+            var fileInfo = new FileInfo(normalized);
+            if (!fileInfo.Exists)
+            {
+                await SendFileDownloadErrorAsync(socket, requestId, "File not found", cancellationToken);
+                return;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(normalized, cancellationToken);
+            var encoded = Convert.ToBase64String(bytes);
+            await SendJsonAsync(socket, new
+            {
+                type = "file-download-result",
+                requestId,
+                path = normalized,
+                name = fileInfo.Name,
+                size = fileInfo.Length,
+                data = encoded,
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await SendFileDownloadErrorAsync(socket, requestId, ex.Message, cancellationToken);
+        }
+    }
+
+    private static async Task HandleFileUploadChunkAsync(ClientWebSocket socket, JsonElement root, CancellationToken cancellationToken)
+    {
+        var requestId = ExtractRequestId(root);
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            return;
+        }
+
+        var destinationPath = root.TryGetProperty("path", out var pathElement) && pathElement.ValueKind == JsonValueKind.String
+            ? pathElement.GetString()
+            : null;
+        var data = root.TryGetProperty("data", out var dataElement) && dataElement.ValueKind == JsonValueKind.String
+            ? dataElement.GetString()
+            : null;
+
+        if (string.IsNullOrWhiteSpace(destinationPath) || data is null)
+        {
+            await SendFileUploadResultAsync(socket, requestId, false, "Invalid upload chunk", cancellationToken);
+            return;
+        }
+
+        try
+        {
+            var normalized = Path.GetFullPath(destinationPath);
+            if (!uploadSessions.TryGetValue(requestId, out var session))
+            {
+                var directory = Path.GetDirectoryName(normalized);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                var stream = new FileStream(normalized, FileMode.Create, FileAccess.Write, FileShare.None);
+                session = new PendingUpload
+                {
+                    FilePath = normalized,
+                    Stream = stream,
+                };
+                uploadSessions[requestId] = session;
+            }
+
+            var bytes = Convert.FromBase64String(data);
+            await session.Stream.WriteAsync(bytes, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await SendFileUploadResultAsync(socket, requestId, false, ex.Message, cancellationToken);
+            await CleanupUploadSessionAsync(requestId);
+        }
+    }
+
+    private static async Task HandleFileUploadCompleteAsync(ClientWebSocket socket, JsonElement root, CancellationToken cancellationToken)
+    {
+        var requestId = ExtractRequestId(root);
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            return;
+        }
+
+        if (!uploadSessions.TryGetValue(requestId, out var session))
+        {
+            await SendFileUploadResultAsync(socket, requestId, false, "Upload session not found", cancellationToken);
+            return;
+        }
+
+        try
+        {
+            await session.Stream.FlushAsync(cancellationToken);
+            session.Stream.Dispose();
+            uploadSessions.Remove(requestId);
+            await SendFileUploadResultAsync(socket, requestId, true, "File uploaded", cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await SendFileUploadResultAsync(socket, requestId, false, ex.Message, cancellationToken);
+            await CleanupUploadSessionAsync(requestId);
+        }
+    }
+
+    private static Task CleanupUploadSessionAsync(string requestId)
+    {
+        if (!uploadSessions.TryGetValue(requestId, out var session))
+        {
+            return Task.CompletedTask;
+        }
+
+        uploadSessions.Remove(requestId);
+        try
+        {
+            session.Stream.Dispose();
+        }
+        catch
+        {
+            // ignore disposal failures
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static Task SendFileDownloadErrorAsync(ClientWebSocket socket, string? requestId, string message, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+        {
+            type = "file-download-result",
+            requestId,
+            success = false,
+            message,
+        }, cancellationToken);
+    }
+
+    private static Task SendFileUploadResultAsync(ClientWebSocket socket, string? requestId, bool success, string message, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+        {
+            type = "file-upload-result",
+            requestId,
+            success,
+            message,
+        }, cancellationToken);
+    }
+
     private static async Task SendTextAsync(ClientWebSocket socket, string text, CancellationToken cancellationToken)
     {
         var data = Encoding.UTF8.GetBytes(text);
@@ -2213,5 +2504,25 @@ internal static class Program
             Message = message;
             RebootRequired = rebootRequired;
         }
+    }
+
+    private sealed class FileEntry
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+        [JsonPropertyName("path")]
+        public string Path { get; set; } = string.Empty;
+        [JsonPropertyName("isDirectory")]
+        public bool IsDirectory { get; set; }
+        [JsonPropertyName("size")]
+        public long? Size { get; set; }
+        [JsonPropertyName("lastModifiedUtc")]
+        public DateTime? LastModifiedUtc { get; set; }
+    }
+
+    private sealed class PendingUpload
+    {
+        public string FilePath { get; set; } = string.Empty;
+        public FileStream Stream { get; set; } = null!;
     }
 }

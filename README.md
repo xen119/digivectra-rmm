@@ -28,6 +28,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - Each card also shows the agent’s logged-in user so you can tell whom you are talking to, and the chat window payload includes the dashboard user that initiated the request.
 - Each agent card now exposes an updates badge (green if there are no outstanding Windows updates, red otherwise); clicking it opens `updates.html`, where updates are grouped by category/purpose, bulk-selectable, and installable via the agent.
 - A **Manage tasks** button opens `processes.html`, letting you view per-process CPU/RAM/disk/network percentages and send kill requests.
+- A **Files** button opens `files.html`, giving you a quick explorer for the selected agent so you can browse directories, download files, or upload content directly to a target path.
 - A **BSODs** badge tracks Windows bug check counts; click it to open `bsod.html`, which lists timestamped events.
 
 ## Authentication
@@ -43,6 +44,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - SSO is supported through a signed token handshake (`/auth/sso`). Use `Server/scripts/gen_sso_url.md` (and the `SSO_SECRET` environment variable your deployment uses) to craft a URL; the link stays valid for five minutes and automatically redirects back to `/` when the signature matches.
 - BSOD totals appear on every card; clicking the new badge opens `bsod.html` to show each recorded blue screen with its timestamp.
 - A **Manage tasks** button opens `processes.html`, letting you view per-process CPU/RAM/disk/network percentages and send kill requests directly from the browser.
+- A **Files** button launches `files.html` for the selected agent so you can explore folders, download binaries, or push new files to a specific destination.
 
 ## Running
 

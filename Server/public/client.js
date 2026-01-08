@@ -227,6 +227,13 @@ function createAgentCard(agent, groups) {
     window.open(`processes.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
   });
   actions.appendChild(tasksButton);
+  const filesButton = document.createElement('button');
+  filesButton.type = 'button';
+  filesButton.textContent = 'Files';
+  filesButton.addEventListener('click', () => {
+    window.open(`files.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
+  });
+  actions.appendChild(filesButton);
   const chatButton = document.createElement('button');
   chatButton.type = 'button';
   chatButton.textContent = 'Chat';

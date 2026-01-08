@@ -34,6 +34,9 @@ const screenSessions = new Map(); // sessionId -> session data
 const groups = new Set([DEFAULT_GROUP]);
 const screenLists = new Map(); // agentId -> { screens, updatedAt }
 const screenListRequests = new Map(); // agentId -> { resolvers: [], timer }
+const FILE_REQUEST_TIMEOUT_MS = 120_000;
+const FILE_UPLOAD_CHUNK_BYTES = 256 * 1024;
+const fileRequests = new Map(); // requestId -> { kind, agentId, resolve, reject, timer }
 const MIN_SCREEN_SCALE = 0.35;
 const MAX_SCREEN_SCALE = 1.0;
 const DEFAULT_SCREEN_SCALE = 0.75;
@@ -570,6 +573,110 @@ server.on('request', (req, res) => {
     return;
   }
 
+  const fileListMatch = pathname.match(/^\/files\/([^/]+)\/list$/);
+  if (fileListMatch && req.method === 'GET') {
+    const agentId = fileListMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    const requestedPath = requestedUrl.searchParams.get('path') ?? '';
+    requestAgentFileList(entry, requestedPath)
+      .then((result) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      })
+      .catch((error) => {
+        console.error('File list request failed', error);
+        res.writeHead(504);
+        res.end('File list request timed out');
+      });
+
+    return;
+  }
+
+  const fileDownloadMatch = pathname.match(/^\/files\/([^/]+)\/download$/);
+  if (fileDownloadMatch && req.method === 'GET') {
+    const agentId = fileDownloadMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    const requestedPath = requestedUrl.searchParams.get('path');
+    if (!requestedPath) {
+      res.writeHead(400);
+      return res.end('Path is required');
+    }
+
+    requestAgentFileDownload(entry, requestedPath)
+      .then((result) => {
+        if (!result || typeof result.data !== 'string' || !result.name) {
+          res.writeHead(502);
+          return res.end('Invalid download response');
+        }
+
+        const buffer = Buffer.from(result.data, 'base64');
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Disposition': `attachment; filename="${encodeURIComponent(result.name)}"`,
+        });
+        res.end(buffer);
+      })
+      .catch((error) => {
+        console.error('File download failed', error);
+        res.writeHead(504);
+        res.end('File download timed out');
+      });
+
+    return;
+  }
+
+  const fileUploadMatch = pathname.match(/^\/files\/([^/]+)\/upload$/);
+  if (fileUploadMatch && req.method === 'POST') {
+    const agentId = fileUploadMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const destinationPath = typeof payload?.path === 'string' ? payload.path.trim() : '';
+        const data = typeof payload?.data === 'string' ? payload.data.trim() : '';
+        if (!destinationPath || !data) {
+          res.writeHead(400);
+          return res.end('Path and data are required');
+        }
+
+        requestAgentFileUpload(entry, destinationPath, data)
+          .then((response) => {
+            res.writeHead(response.success ? 202 : 400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: response.success,
+              message: response.message ?? '',
+            }));
+          })
+          .catch((error) => {
+            console.error('File upload failed', error);
+            res.writeHead(400);
+            res.end('Upload request timed out');
+          });
+      } catch (error) {
+        console.error('File upload failed', error);
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
   const screenAnswerMatch = pathname.match(/^\/screen\/([^/]+)\/answer$/);
   if (screenAnswerMatch && req.method === 'POST') {
     const sessionId = screenAnswerMatch[1];
@@ -797,6 +904,21 @@ wss.on('connection', (socket, request) => {
         info.processSnapshot = parsed.snapshot ?? null;
       } else if (parsed?.type === 'process-kill-result') {
         console.log(`Process kill result from ${info.name}: pid=${parsed.processId}, success=${parsed.success}, message=${parsed.message ?? 'n/a'}`);
+      } else if (parsed?.type === 'file-list' && typeof parsed.requestId === 'string') {
+        const pending = completeFileRequest(parsed.requestId);
+        if (pending) {
+          pending.resolve(parsed);
+        }
+      } else if (parsed?.type === 'file-download-result' && typeof parsed.requestId === 'string') {
+        const pending = completeFileRequest(parsed.requestId);
+        if (pending) {
+          pending.resolve(parsed);
+        }
+      } else if (parsed?.type === 'file-upload-result' && typeof parsed.requestId === 'string') {
+        const pending = completeFileRequest(parsed.requestId);
+        if (pending) {
+          pending.resolve(parsed);
+        }
       } else if (parsed?.type === 'chat-response') {
         const text = typeof parsed.text === 'string' ? parsed.text.trim() : '';
         if (text.length > 0) {
@@ -1054,6 +1176,71 @@ function cancelScreenListRequest(agentId, reason) {
   for (const entry of pending.resolvers) {
     entry.reject(reason);
   }
+}
+
+function requestAgentFileList(entry, requestedPath) {
+  return new Promise((resolve, reject) => {
+    const requestId = enqueueFileRequest('list', entry.info.id, resolve, reject);
+    sendControl(entry.socket, 'list-files', { requestId, path: requestedPath ?? '' });
+  });
+}
+
+function requestAgentFileDownload(entry, requestedPath) {
+  return new Promise((resolve, reject) => {
+    const requestId = enqueueFileRequest('download', entry.info.id, resolve, reject);
+    sendControl(entry.socket, 'download-file', { requestId, path: requestedPath });
+  });
+}
+
+function requestAgentFileUpload(entry, destinationPath, base64Data) {
+  return new Promise((resolve, reject) => {
+    const requestId = enqueueFileRequest('upload', entry.info.id, resolve, reject);
+    const buffer = Buffer.from(base64Data, 'base64');
+    const chunkCount = buffer.length === 0
+      ? 1
+      : Math.ceil(buffer.length / FILE_UPLOAD_CHUNK_BYTES);
+
+    for (let index = 0; index < chunkCount; index += 1) {
+      const start = index * FILE_UPLOAD_CHUNK_BYTES;
+      const end = Math.min(buffer.length, start + FILE_UPLOAD_CHUNK_BYTES);
+      const chunk = buffer.slice(start, end);
+
+      sendControl(entry.socket, 'upload-file-chunk', {
+        requestId,
+        path: destinationPath,
+        chunkIndex: index,
+        totalChunks: chunkCount,
+        data: chunk.toString('base64'),
+      });
+    }
+
+    sendControl(entry.socket, 'upload-file-complete', {
+      requestId,
+      path: destinationPath,
+    });
+  });
+}
+
+function enqueueFileRequest(kind, agentId, resolve, reject) {
+  const requestId = uuidv4();
+  const timer = setTimeout(() => {
+    fileRequests.delete(requestId);
+    reject(new Error('File request timed out'));
+  }, FILE_REQUEST_TIMEOUT_MS);
+
+  fileRequests.set(requestId, { kind, agentId, resolve, reject, timer });
+  return requestId;
+}
+
+function completeFileRequest(requestId) {
+  const entry = fileRequests.get(requestId);
+  if (!entry) {
+    return null;
+  }
+
+  clearTimeout(entry.timer);
+  fileRequests.delete(requestId);
+  return entry;
 }
 
 function handleAuthRoute(req, res, pathname, requestedUrl) {

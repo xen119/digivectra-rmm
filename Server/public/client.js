@@ -182,6 +182,12 @@ function createAgentCard(agent, groups) {
   specLine.className = 'agent-spec';
   specLine.textContent = formatDeviceSpecs(agent.specs);
   card.appendChild(specLine);
+  const loginLine = document.createElement('div');
+  loginLine.className = 'agent-login';
+  loginLine.textContent = agent.loggedInUser
+    ? `Logged in user: ${agent.loggedInUser}`
+    : 'Logged in user: unknown';
+  card.appendChild(loginLine);
 
   const actions = document.createElement('div');
   actions.className = 'actions';

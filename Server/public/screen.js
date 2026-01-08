@@ -3,6 +3,7 @@ const frameEl = document.getElementById('frame');
 const controlButton = document.getElementById('controlButton');
 const controlInstructions = document.getElementById('controlInstructions');
 const screenSelect = document.getElementById('screenSelect');
+const resolutionSelect = document.getElementById('resolutionSelect');
 
 const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
 
@@ -15,6 +16,7 @@ let pc;
 let controlChannel;
 let controlEnabled = false;
 let selectedScreenId = null;
+let captureScale = 0.75;
 
 if (controlButton) {
   controlButton.addEventListener('click', () => {
@@ -45,6 +47,25 @@ if (screenSelect) {
     }
 
     selectedScreenId = screenSelect.value;
+    await restartScreenSession();
+  });
+}
+
+if (resolutionSelect) {
+  const initial = parseFloat(resolutionSelect.value);
+  captureScale = clampScale(!Number.isNaN(initial) ? initial : captureScale);
+  resolutionSelect.addEventListener('change', async () => {
+    const requested = parseFloat(resolutionSelect.value);
+    if (Number.isNaN(requested)) {
+      return;
+    }
+
+    const clamped = clampScale(requested);
+    if (Math.abs(clamped - captureScale) < 0.01) {
+      return;
+    }
+
+    captureScale = clamped;
     await restartScreenSession();
   });
 }
@@ -109,6 +130,7 @@ async function startScreenSession() {
     if (selectedScreenId) {
       requestBody.screenId = selectedScreenId;
     }
+    requestBody.scale = captureScale;
 
     const response = await authFetch('/screen/request', {
       method: 'POST',
@@ -469,4 +491,14 @@ async function pollOffer(id) {
 
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
+}
+
+function clampScale(value) {
+  const min = 0.35;
+  const max = 1.0;
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return 0.75;
+  }
+
+  return Math.min(Math.max(value, min), max);
 }

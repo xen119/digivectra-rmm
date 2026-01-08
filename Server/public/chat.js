@@ -81,9 +81,12 @@ function renderMessage(entry) {
 
   const meta = document.createElement('div');
   meta.className = 'meta';
-  const who = entry.direction === 'agent' ? `Agent ${entry.agentName ?? ''}`.trim() : 'You';
+  const who = entry.direction === 'agent'
+    ? `${entry.user ?? `Agent ${entry.agentName ?? 'Unknown'}`}`.trim()
+    : 'You';
+  const roleSuffix = entry.role ? ` (${entry.role})` : '';
   const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : '';
-  meta.textContent = timestamp ? `${who} • ${timestamp}` : who;
+  meta.textContent = timestamp ? `${who}${roleSuffix} • ${timestamp}` : `${who}${roleSuffix}`;
 
   const text = document.createElement('div');
   text.textContent = entry.text;

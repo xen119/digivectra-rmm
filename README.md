@@ -7,7 +7,9 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - Located in `Agent/`.
 - A .NET 8 console app that connects to a `wss://` endpoint, echoes server messages, and lets you type outgoing payloads.
 - Displays an RMM-branded tray icon so the console stays accessible while running in the background.
-- Supports secure chat requests from the dashboard; chat messages show in the console and you reply by typing `/chat <your response>`.
+- Supports secure chat requests from the dashboard; a tray chat popup appears in the lower-right, showing the server user/role, timestamps and no redundant header, and you reply by typing `/chat <your response>` or using the popup.
+- Incoming chat requests now pop up as a small window near the agent’s system tray so you always see the server user, and replies are sent with the local logged-in username.
+- Screen sharing now captures at ~5 FPS with JPEG compression plus automatic resizing to keep bandwidth low, making the stream noticeably smoother.
 
 ## Server
 
@@ -18,10 +20,12 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - Access `https://localhost:8443` in a browser to see a dashboard of connected agents (the root path serves the GUI).
 - Use the dashboard's **Stream shell** button to open a live PowerShell stream for any agent; the browser opens `shell.html` to display the output and send commands.
 - Use **Stream screen** to open `screen.html` and negotiate a WebRTC connection; the agent user must click Yes/No in the popup consent dialog before frames are displayed. The dialog shows a 30 s countdown and automatically denies if no action is taken. Once the page shows the live image, click **Enable control** to forward mouse/keyboard events for remote interaction.  The button disables when the data channel closes.
+- Inside the screen stream window there is now a resolution selector (High/Balanced/Low/Very Low) that requests a scaled feed from the agent before the session starts so you can choose the best trade-off between clarity and speed.
 - Multi-screen support lets the UI fetch the agent’s monitor list, pick a display from the dropdown, and request that specific output before the stream starts.
 - The dashboard now shows an OS icon for every agent so it is easy to see Windows, Linux, or macOS hosts.
 - The dashboard tracks agent groups and connection status, so you can create named groups, assign agents to them, and see whether each host is online or when it last communicated.
-- Each agent card now exposes a **Chat** button that opens `chat.html`; messages stream over SSE, you can send secure requests, and the agent replies by typing `/chat <response>` in the console.
+- Each agent card now exposes a **Chat** button that opens `chat.html`; messages stream over SSE, you can send secure requests, and the agent replies by typing `/chat <response>` in the console (the page now shows timestamps and the user name of the sender).
+- Each card also shows the agent’s logged-in user so you can tell whom you are talking to, and the chat window payload includes the dashboard user that initiated the request.
 - Each agent card now exposes an updates badge (green if there are no outstanding Windows updates, red otherwise); clicking it opens `updates.html`, where updates are grouped by category/purpose, bulk-selectable, and installable via the agent.
 - A **Manage tasks** button opens `processes.html`, letting you view per-process CPU/RAM/disk/network percentages and send kill requests.
 - A **BSODs** badge tracks Windows bug check counts; click it to open `bsod.html`, which lists timestamped events.

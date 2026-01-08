@@ -25,7 +25,7 @@ const server = https.createServer({
   key: fs.readFileSync(keyPath),
 });
 
-const DEFAULT_GROUP = 'Ungrouped';
+  const DEFAULT_GROUP = 'Ungrouped';
 const clients = new Map(); // socket -> info
 const agents = new Map(); // id -> info (persist offline)
 const clientsById = new Map(); // id -> { socket, info }
@@ -34,6 +34,9 @@ const screenSessions = new Map(); // sessionId -> session data
 const groups = new Set([DEFAULT_GROUP]);
 const screenLists = new Map(); // agentId -> { screens, updatedAt }
 const screenListRequests = new Map(); // agentId -> { resolvers: [], timer }
+const MIN_SCREEN_SCALE = 0.35;
+const MAX_SCREEN_SCALE = 1.0;
+const DEFAULT_SCREEN_SCALE = 0.75;
 const chatListeners = new Map(); // agentId -> Set<ServerResponse>
 const chatHistories = new Map(); // agentId -> [{ sessionId, text, direction, agentName, timestamp }]
 const CHAT_HISTORY_LIMIT = 200;
@@ -85,6 +88,7 @@ server.on('request', (req, res) => {
       processSnapshot: info.processSnapshot ?? null,
       status: info.status ?? 'offline',
       lastSeen: info.lastSeen ?? null,
+      loggedInUser: info.loggedInUser ?? null,
     }));
     return res.end(JSON.stringify(payload));
   }
@@ -303,6 +307,7 @@ server.on('request', (req, res) => {
           return res.end('Agent not found');
         }
 
+        const requestedScale = extractScale(payload?.scale);
         const sessionId = uuidv4();
         screenSessions.set(sessionId, {
           agentId,
@@ -312,10 +317,11 @@ server.on('request', (req, res) => {
           offer: null,
           agentCandidates: [],
           screenId: requestedScreenId,
+          scale: requestedScale,
         });
 
         console.log(`Sending start-screen to agent ${agentId} for session ${sessionId}`);
-        sendControl(entry.socket, 'start-screen', { sessionId, screenId: requestedScreenId });
+        sendControl(entry.socket, 'start-screen', { sessionId, screenId: requestedScreenId, scale: requestedScale });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ sessionId }));
       } catch (error) {
@@ -374,6 +380,8 @@ server.on('request', (req, res) => {
         }
 
         const sessionId = uuidv4();
+        const sessionUser = req.userSession?.user?.username ?? 'server';
+        const sessionRole = req.userSession?.user?.role ?? 'user';
         const chatEvent = {
           sessionId,
           agentId,
@@ -381,11 +389,13 @@ server.on('request', (req, res) => {
           direction: 'server',
           text,
           timestamp: new Date().toISOString(),
+          user: sessionUser,
+          role: sessionRole,
         };
 
         recordChatHistory(agentId, chatEvent);
         dispatchChatEvent(agentId, chatEvent);
-        sendControl(entry.socket, 'chat-request', { sessionId, text });
+        sendControl(entry.socket, 'chat-request', { sessionId, text, user: sessionUser, role: sessionRole });
 
         res.writeHead(202, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ sessionId }));
@@ -672,6 +682,7 @@ wss.on('connection', (socket, request) => {
     updatesSummary: null,
     bsodSummary: null,
     processSnapshot: null,
+    loggedInUser: 'Unknown',
   };
 
   clients.set(socket, info);
@@ -709,6 +720,9 @@ wss.on('connection', (socket, request) => {
         }
         if (typeof parsed.platform === 'string' && parsed.platform.trim()) {
           info.platform = parsed.platform.trim();
+        }
+        if (typeof parsed.loggedInUser === 'string' && parsed.loggedInUser.trim()) {
+          info.loggedInUser = parsed.loggedInUser.trim();
         }
         if (parsed.specs != null) {
           info.specs = parsed.specs;
@@ -795,6 +809,8 @@ wss.on('connection', (socket, request) => {
             direction: 'agent',
             text,
             timestamp: new Date().toISOString(),
+            user: info.loggedInUser ?? info.name,
+            role: 'agent',
           };
 
           recordChatHistory(info.id, chatEvent);
@@ -964,6 +980,28 @@ function assignAgentToGroup(agentId, groupName) {
   entry.info.group = normalized;
   groups.add(normalized);
   return normalized;
+}
+
+function extractScale(raw) {
+  let scale = DEFAULT_SCREEN_SCALE;
+  if (typeof raw === 'number') {
+    scale = raw;
+  } else if (typeof raw === 'string') {
+    const parsed = parseFloat(raw);
+    if (!Number.isNaN(parsed)) {
+      scale = parsed;
+    }
+  }
+
+  return clampScreenScale(scale);
+}
+
+function clampScreenScale(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return DEFAULT_SCREEN_SCALE;
+  }
+
+  return Math.min(Math.max(value, MIN_SCREEN_SCALE), MAX_SCREEN_SCALE);
 }
 
 function requestScreenList(agentId, socket) {

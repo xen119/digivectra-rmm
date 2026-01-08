@@ -25,6 +25,14 @@
         flex-direction: column;
         gap: 0.25rem;
       }
+      .status-group select {
+        max-width: 100%;
+      }
+      .status-subgroup {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
 
       #screenSelect {
         background: #0d1117;
@@ -83,6 +91,13 @@
         <p id="status">Connecting to agent.</p>
         <label for="screenSelect">Display</label>
         <select id="screenSelect" disabled></select>
+        <label for="resolutionSelect">Resolution</label>
+        <select id="resolutionSelect">
+          <option value="1.0">High (100%)</option>
+          <option value="0.75" selected>Balanced (75%)</option>
+          <option value="0.5">Low (50%)</option>
+          <option value="0.35">Very low (35%)</option>
+        </select>
       </div>
       <div id="controlPanel">
         <button id="controlButton" disabled>Enable control</button>

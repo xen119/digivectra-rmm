@@ -1,10 +1,12 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Security.Principal;
 using System.Diagnostics.Eventing.Reader;
 using System.Net.WebSockets;
 using System.Runtime.InteropServices;
@@ -22,7 +24,12 @@ internal static class Program
     private static Process? shellProcess;
     private static CancellationTokenSource? shellCts;
     private static CancellationTokenSource? shellLinkedCts;
-    private const int ScreenCaptureIntervalMs = 400;
+    private const int ScreenCaptureIntervalMs = 200;
+    private const double DefaultCaptureScale = 0.75;
+    private const double MinCaptureScale = 0.35;
+    private const double MaxCaptureScale = 1.0;
+    private static double captureScale = DefaultCaptureScale;
+    private const long ScreenJpegQuality = 65L;
     private static PeerConnection? screenPeerConnection;
     private static DataChannel? screenDataChannel;
     private static CancellationTokenSource? screenCaptureCts;
@@ -32,6 +39,8 @@ internal static class Program
     private static string? selectedScreenId;
     private static readonly TimeSpan ScreenOfferTimeout = TimeSpan.FromSeconds(10);
     private static Action? screenDataChannelStateHandler;
+    private static readonly ImageCodecInfo? JpegEncoder = ImageCodecInfo.GetImageEncoders()
+        .FirstOrDefault(codec => codec.FormatID == ImageFormat.Jpeg.Guid);
     private static readonly Dictionary<string, ushort> VirtualKeyMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["Enter"] = 0x0D,
@@ -92,6 +101,10 @@ internal static class Program
             Console.WriteLine("Connected. Sending identity...");
 
             await SendAgentIdentityAsync(socket, cts.Token);
+            var agentUser = GetAgentLocalUser();
+            TrayIconManager.RegisterChatHandler(
+                async (text) => await SendChatResponseAsync(socket, text, CancellationToken.None),
+                agentUser);
             Console.WriteLine("Type messages and press Enter. Send an empty line to close.");
 
             var receiveLoop = ReceiveAsync(socket, cts.Token);
@@ -205,7 +218,8 @@ internal static class Program
             os = RuntimeInformation.OSDescription,
             platform = GetPlatformName(),
             agentId = GetAgentId(),
-            specs = GetDeviceSpecs()
+            specs = GetDeviceSpecs(),
+            loggedInUser = GetAgentLocalUser()
         });
         await SendTextAsync(socket, identity, cancellationToken);
         await SendAgentUpdateSummaryAsync(socket, cancellationToken);
@@ -248,6 +262,18 @@ internal static class Program
         }
 
         return agentId;
+    }
+
+    private static string GetAgentLocalUser()
+    {
+        try
+        {
+            return WindowsIdentity.GetCurrent()?.Name?.Trim() ?? Environment.UserName;
+        }
+        catch
+        {
+            return Environment.UserName;
+        }
     }
 
     private static string GetPlatformName()
@@ -988,7 +1014,8 @@ internal static class Program
                         var screenId = document.RootElement.TryGetProperty("screenId", out var screenIdElement)
                             ? screenIdElement.GetString()
                             : null;
-                        await StartScreenSessionAsync(socket, sessionId, screenId, cancellationToken);
+                        var scale = GetRequestedCaptureScale(document.RootElement);
+                        await StartScreenSessionAsync(socket, sessionId, screenId, scale, cancellationToken);
                     }
                 }
 
@@ -1117,6 +1144,51 @@ internal static class Program
         Console.WriteLine(text);
         Console.WriteLine("Reply by typing \"/chat <your message>\".");
         Console.WriteLine();
+
+        var serverUser = "Server";
+        var serverRole = (string?)null;
+        if (root.TryGetProperty("user", out var userElement) && userElement.ValueKind == JsonValueKind.String)
+        {
+            var value = userElement.GetString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                serverUser = value;
+            }
+        }
+
+        if (root.TryGetProperty("role", out var roleElement) && roleElement.ValueKind == JsonValueKind.String)
+        {
+            var value = roleElement.GetString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                serverRole = value;
+            }
+        }
+
+        var timestamp = GetChatTimestamp(root);
+        TrayIconManager.PostChatMessage(serverUser, serverRole, text, true, timestamp);
+    }
+
+    private static string GetChatTimestamp(JsonElement root)
+    {
+        if (root.TryGetProperty("timestamp", out var timestampElement) &&
+            timestampElement.ValueKind == JsonValueKind.String &&
+            DateTime.TryParse(timestampElement.GetString(), out var parsed))
+        {
+            return parsed.ToLocalTime().ToShortTimeString();
+        }
+
+        return DateTime.Now.ToShortTimeString();
+    }
+
+    private static double GetRequestedCaptureScale(JsonElement root)
+    {
+        if (root.TryGetProperty("scale", out var element) && element.TryGetDouble(out var value))
+        {
+            return ClampCaptureScale(value);
+        }
+
+        return DefaultCaptureScale;
     }
 
     private static async Task StartShellSessionAsync(ClientWebSocket socket, CancellationToken cancellationToken)
@@ -1211,9 +1283,10 @@ internal static class Program
         }
     }
 
-    private static async Task StartScreenSessionAsync(ClientWebSocket socket, string sessionId, string? screenId, CancellationToken cancellationToken)
+    private static async Task StartScreenSessionAsync(ClientWebSocket socket, string sessionId, string? screenId, double requestedScale, CancellationToken cancellationToken)
     {
         selectedScreenId = screenId;
+        captureScale = ClampCaptureScale(requestedScale);
         Console.WriteLine($"Starting screen session {sessionId} (screen:{selectedScreenId ?? "primary"})");
         if (!await RequestScreenConsentAsync(cancellationToken))
         {
@@ -1493,12 +1566,57 @@ internal static class Program
     private static byte[] CaptureScreenFrame()
     {
         var targetScreen = GetCaptureScreen();
-        var screenBounds = targetScreen.Bounds;
-        using var bitmap = new Bitmap(screenBounds.Width, screenBounds.Height);
-        using var g = Graphics.FromImage(bitmap);
-        g.CopyFromScreen(screenBounds.Location, Point.Empty, screenBounds.Size);
+        var bounds = targetScreen.Bounds;
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return Array.Empty<byte>();
+        }
+
+        var captureWidth = Math.Max(1, bounds.Width);
+        var captureHeight = Math.Max(1, bounds.Height);
+
+        using var capture = new Bitmap(captureWidth, captureHeight);
+        using (var g = Graphics.FromImage(capture))
+        {
+            g.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
+        }
+
+        var scaledWidth = Math.Max(1, (int)Math.Round(bounds.Width * captureScale));
+        var scaledHeight = Math.Max(1, (int)Math.Round(bounds.Height * captureScale));
+
+        if (scaledWidth == captureWidth && scaledHeight == captureHeight)
+        {
+            return EncodeBitmapToJpeg(capture);
+        }
+
+        using var scaled = new Bitmap(scaledWidth, scaledHeight);
+        using (var g = Graphics.FromImage(scaled))
+        {
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.DrawImage(capture, 0, 0, scaledWidth, scaledHeight);
+        }
+
+        return EncodeBitmapToJpeg(scaled);
+    }
+
+    private static double ClampCaptureScale(double value)
+    {
+        if (double.IsNaN(value))
+        {
+            return DefaultCaptureScale;
+        }
+
+        return Math.Min(Math.Max(value, MinCaptureScale), MaxCaptureScale);
+    }
+
+    private static byte[] EncodeBitmapToJpeg(Bitmap bitmap)
+    {
         using var ms = new MemoryStream();
-        bitmap.Save(ms, ImageFormat.Png);
+        var encoder = JpegEncoder ?? ImageCodecInfo.GetImageEncoders()
+            .FirstOrDefault(codec => codec.FormatID == ImageFormat.Jpeg.Guid);
+        var encoderParams = new EncoderParameters(1);
+        encoderParams.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, ScreenJpegQuality);
+        bitmap.Save(ms, encoder ?? ImageCodecInfo.GetImageEncoders()[0], encoderParams);
         return ms.ToArray();
     }
 

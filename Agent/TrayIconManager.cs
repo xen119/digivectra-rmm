@@ -14,6 +14,9 @@ internal static class TrayIconManager
     private static TrayApplicationContext? context;
     private static SynchronizationContext? uiContext;
     private static readonly ManualResetEventSlim Started = new();
+    private static ChatWindow? chatWindow;
+    private static Func<string, Task>? chatSendHandler;
+    private static string? chatAgentUser;
 
     public static void Start()
     {
@@ -53,6 +56,75 @@ internal static class TrayIconManager
         uiThread = null;
         uiContext = null;
         Started.Reset();
+    }
+
+        public static void RegisterChatHandler(Func<string, Task> sendHandler, string agentUser)
+        {
+            if (uiContext is null)
+            {
+                chatSendHandler = sendHandler;
+                chatAgentUser = agentUser;
+                return;
+            }
+
+            uiContext.Post(_ =>
+            {
+                chatSendHandler = sendHandler;
+                chatAgentUser = agentUser;
+                EnsureChatWindow();
+                chatWindow?.SetAgentUserName(agentUser);
+            }, null);
+        }
+
+    public static void PostChatMessage(string fromUser, string? role, string text, bool isServerMessage, string? timestamp = null)
+    {
+        if (uiContext is null)
+        {
+            return;
+        }
+
+        uiContext.Post(_ =>
+        {
+            EnsureChatWindow();
+            chatWindow?.AddMessage(fromUser, role, text, isServerMessage, timestamp);
+            chatWindow?.EnsureVisible();
+        }, null);
+    }
+
+    private static void EnsureChatWindow()
+    {
+        if (chatWindow is not null)
+        {
+            return;
+        }
+
+        chatWindow = new ChatWindow();
+        if (!string.IsNullOrWhiteSpace(chatAgentUser))
+        {
+            chatWindow.SetAgentUserName(chatAgentUser);
+        }
+        chatWindow.MessageSent += async (message) =>
+        {
+            if (chatSendHandler is null)
+            {
+                return;
+            }
+
+            try
+            {
+                await chatSendHandler(message);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Chat send failed: {ex.Message}");
+            }
+        };
+
+        chatWindow.FormClosing += (sender, args) =>
+        {
+            args.Cancel = true;
+            chatWindow?.Hide();
+        };
     }
 
     public static Task<bool?> ShowConsentDialogAsync(string title, string message, CancellationToken cancellationToken)
@@ -198,7 +270,6 @@ internal static class TrayIconManager
             ShowWindow(handle, SW_RESTORE);
             SetForegroundWindow(handle);
         }
-
     }
 
     private sealed class ConsentDialog : Form
@@ -287,6 +358,156 @@ internal static class TrayIconManager
             }
 
             countdownLabel.Text = $"{remainingSeconds}s remaining";
+        }
+    }
+
+    private sealed class ChatWindow : Form
+    {
+        private readonly FlowLayoutPanel messagePanel;
+        private readonly TextBox inputBox;
+        private readonly Button sendButton;
+        private readonly Panel inputPanel;
+        private string agentUserName = "Agent";
+        public event Func<string, Task>? MessageSent;
+
+        public ChatWindow()
+        {
+            Text = "Agent Chat";
+            FormBorderStyle = FormBorderStyle.SizableToolWindow;
+            StartPosition = FormStartPosition.Manual;
+            TopMost = true;
+            ShowInTaskbar = false;
+            Size = new Size(360, 260);
+
+            var workingArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1024, 768);
+            Location = new Point(Math.Max(workingArea.Left, workingArea.Right - Width - 10), workingArea.Bottom - Height - 10);
+
+            messagePanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Dock = DockStyle.Fill,
+                    AutoSize = false,
+                    Margin = new Padding(8, 32, 8, 48),
+                    Padding = new Padding(2),
+                    AutoScroll = true
+                };
+
+            inputPanel = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 40,
+                Padding = new Padding(4)
+            };
+
+            inputBox = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = false
+            };
+
+            sendButton = new Button
+            {
+                Text = "Send",
+                Dock = DockStyle.Right,
+                Width = 80
+            };
+            sendButton.Click += OnSendClicked;
+
+            inputPanel.Controls.Add(inputBox);
+            inputPanel.Controls.Add(sendButton);
+
+            Controls.Add(messagePanel);
+            Controls.Add(inputPanel);
+        }
+
+        public void SetAgentUserName(string userName)
+        {
+            agentUserName = string.IsNullOrWhiteSpace(userName) ? "Agent" : userName;
+        }
+
+        public void AddMessage(string fromUser, string? role, string text, bool isServerMessage, string? timestamp = null)
+        {
+            var containerWidth = Math.Max(200, messagePanel.ClientSize.Width - 32);
+            var messagePanelContainer = new FlowLayoutPanel
+            {
+                    FlowDirection = FlowDirection.TopDown,
+                    WrapContents = false,
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    Margin = new Padding(0, 4, 0, 4),
+                    BackColor = isServerMessage ? Color.FromArgb(20, 51, 102) : Color.FromArgb(30, 30, 30),
+                    Padding = new Padding(8),
+                    MaximumSize = new Size(containerWidth, 0),
+                    Width = containerWidth
+                };
+
+            var metaLabel = new Label
+            {
+                Text = string.IsNullOrWhiteSpace(role) ? fromUser : $"{fromUser} ({role})",
+                ForeColor = Color.LightGray,
+                AutoSize = true
+            };
+
+                var textLabel = new Label
+                {
+                    Text = text,
+                    AutoSize = true,
+                    MaximumSize = new Size(messagePanelContainer.MaximumSize.Width - 12, 0),
+                    ForeColor = Color.White,
+                    Margin = new Padding(0, 4, 0, 0)
+                };
+
+            var metaText = timestamp is not null ? $"{metaLabel.Text} • {timestamp}" : metaLabel.Text;
+            metaLabel.Text = metaText;
+            messagePanelContainer.Controls.Add(metaLabel);
+            messagePanelContainer.Controls.Add(textLabel);
+            messagePanel.Controls.Add(messagePanelContainer);
+            messagePanel.ScrollControlIntoView(messagePanelContainer);
+            messagePanel.Invalidate();
+        }
+
+        public void EnsureVisible()
+        {
+            if (!Visible)
+            {
+                Show();
+            }
+
+            if (WindowState == FormWindowState.Minimized)
+            {
+                WindowState = FormWindowState.Normal;
+            }
+
+            BringToFront();
+        }
+
+        private async void OnSendClicked(object? sender, EventArgs e)
+        {
+            var text = inputBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            inputBox.Clear();
+                AddMessage(agentUserName, null, text, false, DateTime.Now.ToShortTimeString());
+            sendButton.Enabled = false;
+            try
+            {
+                if (MessageSent is not null)
+                {
+                    await MessageSent.Invoke(text);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to send chat message: {ex.Message}");
+            }
+            finally
+            {
+                sendButton.Enabled = true;
+            }
         }
     }
 }

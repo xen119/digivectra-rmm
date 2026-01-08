@@ -50,6 +50,7 @@ server.on('request', (req, res) => {
       group: info.group ?? DEFAULT_GROUP,
       specs: info.specs ?? null,
       updatesSummary: info.updatesSummary ?? null,
+      bsodSummary: info.bsodSummary ?? null,
       processSnapshot: info.processSnapshot ?? null,
       status: info.status ?? 'offline',
       lastSeen: info.lastSeen ?? null,
@@ -360,6 +361,35 @@ server.on('request', (req, res) => {
     return;
   }
 
+  const bsodDataMatch = pathname.match(/^\/bsod\/([^/]+)\/data$/);
+  if (bsodDataMatch && req.method === 'GET') {
+    const agentId = bsodDataMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ summary: entry.info.bsodSummary ?? null }));
+    return;
+  }
+
+  const bsodRefreshMatch = pathname.match(/^\/bsod\/([^/]+)\/refresh$/);
+  if (bsodRefreshMatch && req.method === 'POST') {
+    const agentId = bsodRefreshMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    sendControl(entry.socket, 'request-bsod');
+    res.writeHead(202);
+    res.end();
+    return;
+  }
+
   const processDataMatch = pathname.match(/^\/processes\/([^/]+)\/data$/);
   if (processDataMatch && req.method === 'GET') {
     const agentId = processDataMatch[1];
@@ -529,6 +559,7 @@ wss.on('connection', (socket, request) => {
     lastSeen: null,
     specs: null,
     updatesSummary: null,
+    bsodSummary: null,
     processSnapshot: null,
   };
 
@@ -633,6 +664,8 @@ wss.on('connection', (socket, request) => {
         }
       } else if (parsed?.type === 'updates-summary') {
         info.updatesSummary = parsed.summary ?? null;
+      } else if (parsed?.type === 'bsod-summary') {
+        info.bsodSummary = parsed.summary ?? null;
       } else if (parsed?.type === 'update-install-result') {
         console.log(`Update install result from ${info.name}: success=${parsed.success}, message="${parsed.message}", rebootRequired=${parsed.rebootRequired}`);
       } else if (parsed?.type === 'process-list') {

@@ -219,6 +219,18 @@ function createAgentCard(agent, groups) {
     window.open(`processes.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
   });
   actions.appendChild(tasksButton);
+  const bsodCount = typeof agent.bsodSummary?.totalCount === 'number'
+    ? agent.bsodSummary.totalCount
+    : 0;
+  const bsodButton = document.createElement('button');
+  bsodButton.type = 'button';
+  bsodButton.textContent = `BSODs: ${bsodCount}`;
+  bsodButton.title = bsodCount === 0 ? 'No blue screens detected' : 'View BSOD history';
+  bsodButton.className = `bsod-button ${bsodCount === 0 ? 'ok' : 'warn'}`;
+  bsodButton.addEventListener('click', () => {
+    window.open(`bsod.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
+  });
+  actions.appendChild(bsodButton);
   card.appendChild(actions);
 
   return card;

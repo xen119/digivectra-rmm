@@ -5,6 +5,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Diagnostics.Eventing.Reader;
 using System.Net.WebSockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -153,6 +154,7 @@ internal static class Program
     private static string? agentId;
     private static DeviceSpecs? deviceSpecs;
     private static UpdateSummary? lastUpdateSummary;
+    private static BsodSummary? lastBsodSummary;
     private static readonly Dictionary<int, ProcessSample> processSamples = new();
     private static readonly string[] UpdateCategoryOrder = new[]
     {
@@ -192,6 +194,7 @@ internal static class Program
         });
         await SendTextAsync(socket, identity, cancellationToken);
         await SendAgentUpdateSummaryAsync(socket, cancellationToken);
+        await SendBsodSummaryAsync(socket, cancellationToken);
     }
 
     private static string GetAgentId()
@@ -396,6 +399,19 @@ internal static class Program
         await SendJsonAsync(socket, new { type = "updates-summary", summary }, cancellationToken);
     }
 
+    private static async Task SendBsodSummaryAsync(ClientWebSocket socket, CancellationToken cancellationToken, bool force = false)
+    {
+        if (!force && lastBsodSummary is not null)
+        {
+            await SendJsonAsync(socket, new { type = "bsod-summary", summary = lastBsodSummary }, cancellationToken);
+            return;
+        }
+
+        var summary = CollectBsodSummary();
+        lastBsodSummary = summary;
+        await SendJsonAsync(socket, new { type = "bsod-summary", summary }, cancellationToken);
+    }
+
     private static async Task SendProcessListAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
         var snapshot = CollectProcessSnapshot();
@@ -572,6 +588,49 @@ internal static class Program
         }
 
         return Task.Run(() => CollectUpdateSummary());
+    }
+
+    private static BsodSummary CollectBsodSummary()
+    {
+        var summary = new BsodSummary();
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return summary;
+        }
+
+        try
+        {
+            var queryText = "*[System/EventID=1001]";
+            var query = new EventLogQuery("System", PathType.LogName, queryText);
+            using var reader = new EventLogReader(query);
+            var events = new List<BsodEvent>();
+            EventRecord? record;
+            while (events.Count < 50 && (record = reader.ReadEvent()) is not null)
+            {
+                using (record)
+                {
+                    var description = record.FormatDescription() ?? record.ProviderName ?? string.Empty;
+                    events.Add(new BsodEvent
+                    {
+                        TimestampUtc = record.TimeCreated?.ToUniversalTime() ?? DateTime.MinValue,
+                        Description = description
+                    });
+                }
+            }
+
+            summary.TotalCount = events.Count;
+            summary.Events = events.ToArray();
+        }
+        catch (EventLogNotFoundException)
+        {
+            // ignore missing log
+        }
+        catch (Exception)
+        {
+            // ignore other failures
+        }
+
+        return summary;
     }
 
     private static UpdateSummary CollectUpdateSummary()
@@ -989,6 +1048,9 @@ internal static class Program
                 break;
             case "kill-process":
                 await HandleKillProcessAsync(socket, document.RootElement, cancellationToken);
+                break;
+            case "request-bsod":
+                await SendBsodSummaryAsync(socket, cancellationToken, true);
                 break;
             case "request-updates":
                 await SendAgentUpdateSummaryAsync(socket, cancellationToken, true);
@@ -1899,6 +1961,24 @@ internal static class Program
         public string? Name { get; set; }
         public long TotalBytes { get; set; }
         public long FreeBytes { get; set; }
+    }
+
+    private sealed class BsodSummary
+    {
+        [JsonPropertyName("totalCount")]
+        public int TotalCount { get; set; }
+
+        [JsonPropertyName("events")]
+        public BsodEvent[] Events { get; set; } = Array.Empty<BsodEvent>();
+    }
+
+    private sealed class BsodEvent
+    {
+        [JsonPropertyName("timestampUtc")]
+        public DateTime TimestampUtc { get; set; }
+
+        [JsonPropertyName("description")]
+        public string Description { get; set; } = string.Empty;
     }
 
     private sealed class UpdateSummary

@@ -6,8 +6,10 @@ C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\Agent.ru
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\Agent.dll
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\Agent.pdb
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\Microsoft.MixedReality.WebRTC.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\System.Management.dll
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\runtimes\win10-x64\native\mrwebrtc.dll
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\runtimes\win10-x86\native\mrwebrtc.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\runtimes\win\lib\net8.0\System.Management.dll
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\obj\Debug\net8.0-windows\Agent.csproj.AssemblyReference.cache
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\obj\Debug\net8.0-windows\Agent.GeneratedMSBuildEditorConfig.editorconfig
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\obj\Debug\net8.0-windows\Agent.AssemblyInfoInputs.cache
@@ -20,5 +22,3 @@ C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\obj\Debug\net8.0-windows\refint\A
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\obj\Debug\net8.0-windows\Agent.pdb
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\obj\Debug\net8.0-windows\Agent.genruntimeconfig.cache
 C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\obj\Debug\net8.0-windows\ref\Agent.dll
-C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\System.Management.dll
-C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Debug\net8.0-windows\runtimes\win\lib\net8.0\System.Management.dll

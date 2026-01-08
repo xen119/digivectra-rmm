@@ -2,6 +2,7 @@ const summaryEl = document.getElementById('summary');
 const logEl = document.getElementById('log');
 const formEl = document.getElementById('command-form');
 const inputEl = document.getElementById('command-input');
+const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
 
 const params = new URLSearchParams(window.location.search);
 const agentId = params.get('agent');
@@ -41,7 +42,7 @@ async function refreshAgentInfo() {
   }
 
   try {
-    const response = await fetch('/clients', { cache: 'no-store' });
+    const response = await authFetch('/clients', { cache: 'no-store' });
     if (!response.ok) {
       throw new Error('agent lookup failed');
     }
@@ -70,7 +71,7 @@ formEl.addEventListener('submit', async (event) => {
   }
 
   try {
-    await fetch(`/shell/${agentId}/input`, {
+    await authFetch(`/shell/${agentId}/input`, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',

@@ -1,7 +1,10 @@
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
-const { randomUUID } = require('crypto');
+const crypto = require('crypto');
+const { v4: uuidv4 } = require('uuid');
+const bcrypt = require('bcrypt');
+const { authenticator } = require('otplib');
 const WebSocket = require('ws');
 
 const CERT_DIR = path.join(__dirname, 'certs');
@@ -33,10 +36,35 @@ const screenLists = new Map(); // agentId -> { screens, updatedAt }
 const screenListRequests = new Map(); // agentId -> { resolvers: [], timer }
 const SCREEN_LIST_TTL_MS = 60_000;
 const SCREEN_LIST_TIMEOUT_MS = 5_000;
+const SESSION_TTL_MS = 30 * 60_1000;
+const SSO_SECRET = process.env.SSO_SECRET ?? 'CHANGE_ME-SSO-KEY';
+const SSO_WINDOW_MS = 5 * 60_1000;
+
+const USERS_CONFIG = loadUsersConfig();
+const sessions = new Map();
+const roleWeight = { viewer: 0, operator: 1, admin: 2 };
 
 server.on('request', (req, res) => {
   const requestedUrl = new URL(req.url ?? '/', `https://${req.headers.host ?? 'localhost'}`);
   const pathname = requestedUrl.pathname;
+
+  if (pathname.startsWith('/auth/')) {
+    handleAuthRoute(req, res, pathname, requestedUrl);
+    return;
+  }
+
+  if (pathname === '/login.html' || pathname === '/login.js') {
+    serveStaticAsset(req, res, pathname);
+    return;
+  }
+
+  const session = getSessionFromRequest(req);
+  if (!session) {
+    respondUnauthorized(req, res);
+    return;
+  }
+
+  req.userSession = session;
 
   if (pathname === '/clients' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -87,6 +115,9 @@ server.on('request', (req, res) => {
   }
 
   if (pathname === '/groups/assign' && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
     collectBody(req, (body) => {
       try {
         const { agentId, group } = JSON.parse(body);
@@ -269,7 +300,7 @@ server.on('request', (req, res) => {
           return res.end('Agent not found');
         }
 
-        const sessionId = randomUUID();
+        const sessionId = uuidv4();
         screenSessions.set(sessionId, {
           agentId,
           socket: entry.socket,
@@ -324,6 +355,9 @@ server.on('request', (req, res) => {
 
   const updatesInstallMatch = pathname.match(/^\/updates\/([^/]+)\/install$/);
   if (updatesInstallMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
     const agentId = updatesInstallMatch[1];
     const entry = clientsById.get(agentId);
     if (!entry) {
@@ -421,6 +455,9 @@ server.on('request', (req, res) => {
 
   const processKillMatch = pathname.match(/^\/processes\/([^/]+)\/kill$/);
   if (processKillMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
     const agentId = processKillMatch[1];
     const entry = clientsById.get(agentId);
     if (!entry) {
@@ -546,7 +583,7 @@ const wss = new WebSocket.Server({ server });
 
 wss.on('connection', (socket, request) => {
   const remote = request.socket.remoteAddress ?? 'unknown';
-  const id = randomUUID();
+  const id = uuidv4();
   let info = {
     id,
     name: `unnamed (${remote})`,
@@ -833,6 +870,220 @@ function cancelScreenListRequest(agentId, reason) {
   screenListRequests.delete(agentId);
   for (const entry of pending.resolvers) {
     entry.reject(reason);
+  }
+}
+
+function handleAuthRoute(req, res, pathname, requestedUrl) {
+  if (req.method === 'POST' && pathname === '/auth/login') {
+    return handleLogin(req, res);
+  }
+
+  if (pathname === '/auth/logout') {
+    const session = getSessionFromRequest(req);
+    if (session) {
+      sessions.delete(session.id);
+    }
+
+    clearSessionCookie(res);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ success: true }));
+  }
+
+  if (pathname === '/auth/me' && req.method === 'GET') {
+    const session = getSessionFromRequest(req);
+    if (!session) {
+      res.writeHead(401);
+      return res.end('Unauthorized');
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ username: session.user.username, role: session.user.role }));
+  }
+
+  if (pathname === '/auth/sso') {
+    return handleSso(req, res, requestedUrl);
+  }
+
+  res.writeHead(404);
+  res.end('Not found');
+}
+
+function handleLogin(req, res) {
+  collectBody(req, async (body) => {
+    try {
+      const data = JSON.parse(body.toString());
+      const username = data.username?.toString().trim();
+      const password = data.password?.toString();
+      const totp = data.totp?.toString();
+      if (!username || !password || !totp) {
+        throw new Error('Missing credentials.');
+      }
+
+      const user = USERS_CONFIG.find((entry) => entry.username === username);
+      if (!user) {
+        throw new Error('Invalid credentials.');
+      }
+
+      const match = await bcrypt.compare(password, user.passwordHash);
+      if (!match || !authenticator.check(totp, user.totpSecret)) {
+        throw new Error('Invalid credentials.');
+      }
+
+      const session = createSession(user);
+      setSessionCookie(res, session.id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ username: user.username, role: user.role }));
+    } catch (error) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: error.message }));
+    }
+  });
+}
+
+function handleSso(req, res, requestedUrl) {
+  const username = requestedUrl.searchParams.get('username') ?? '';
+  const timestamp = Number(requestedUrl.searchParams.get('ts'));
+  const signature = requestedUrl.searchParams.get('sig');
+
+  if (!username || !signature || Number.isNaN(timestamp)) {
+    res.writeHead(400);
+    return res.end('Invalid SSO request.');
+  }
+
+  if (Math.abs(Date.now() - timestamp) > SSO_WINDOW_MS) {
+    res.writeHead(400);
+    return res.end('SSO request expired.');
+  }
+
+  const expected = crypto.createHmac('sha256', SSO_SECRET).update(`${username}:${timestamp}`).digest('hex');
+  if (expected !== signature) {
+    res.writeHead(401);
+    return res.end('Invalid SSO signature.');
+  }
+
+  const user = USERS_CONFIG.find((entry) => entry.username === username);
+  if (!user) {
+    res.writeHead(401);
+    return res.end('Unknown user.');
+  }
+
+  const session = createSession(user);
+  setSessionCookie(res, session.id);
+  res.writeHead(302, { Location: '/' });
+  res.end();
+}
+
+function serveStaticAsset(req, res, pathname) {
+  const filePath = pathname === '/login.html' ? '/login.html' : '/login.js';
+  const resolved = path.join(PUBLIC_DIR, filePath);
+  if (!resolved.startsWith(PUBLIC_DIR)) {
+    res.writeHead(403);
+    return res.end('Forbidden');
+  }
+
+  fs.readFile(resolved, (error, data) => {
+    if (error) {
+      res.writeHead(404);
+      return res.end('Not found');
+    }
+
+    const ext = path.extname(resolved);
+    const mime = ext === '.js' ? 'application/javascript' : 'text/html';
+    res.writeHead(200, { 'Content-Type': mime });
+    res.end(data);
+  });
+}
+
+function setSessionCookie(res, sessionId) {
+  const maxAge = Math.floor(SESSION_TTL_MS / 1000);
+  res.setHeader('Set-Cookie', `rmm-session=${sessionId}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`);
+}
+
+function clearSessionCookie(res) {
+  res.setHeader('Set-Cookie', 'rmm-session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');
+}
+
+function parseCookies(header) {
+  if (!header) {
+    return {};
+  }
+
+  return header.split(';').reduce((acc, cookie) => {
+    const [key, ...valueParts] = cookie.split('=');
+    if (!key) {
+      return acc;
+    }
+
+    acc[key.trim()] = decodeURIComponent(valueParts.join('=').trim());
+    return acc;
+  }, {});
+}
+
+function getSessionFromRequest(req) {
+  const cookies = parseCookies(req.headers.cookie);
+  const sessionId = cookies['rmm-session'];
+  if (!sessionId) {
+    return null;
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session) {
+    return null;
+  }
+
+  if (session.expires < Date.now()) {
+    sessions.delete(sessionId);
+    return null;
+  }
+
+  session.expires = Date.now() + SESSION_TTL_MS;
+  return session;
+}
+
+function createSession(user) {
+  const id = uuidv4();
+  const session = { id, user, expires: Date.now() + SESSION_TTL_MS };
+  sessions.set(id, session);
+  return session;
+}
+
+function respondUnauthorized(req, res) {
+  const acceptHeader = req.headers.accept ?? '';
+  if (acceptHeader.includes('text/html')) {
+    res.writeHead(302, { Location: '/login.html' });
+    res.end();
+    return;
+  }
+
+  res.writeHead(401);
+  res.end('Unauthorized');
+}
+
+function ensureRole(req, res, minRole) {
+  const session = req.userSession;
+  if (!session) {
+    respondUnauthorized(req, res);
+    return false;
+  }
+
+  const weight = roleWeight[session.user.role] ?? 0;
+  if (weight < roleWeight[minRole]) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return false;
+  }
+
+  return true;
+}
+
+function loadUsersConfig() {
+  try {
+    const configPath = path.join(__dirname, 'config', 'users.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    return JSON.parse(raw);
+  } catch (error) {
+    console.error('Failed to load users config', error);
+    return [];
   }
 }
 

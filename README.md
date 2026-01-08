@@ -21,6 +21,20 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - The dashboard now shows an OS icon for every agent so it is easy to see Windows, Linux, or macOS hosts.
 - The dashboard tracks agent groups and connection status, so you can create named groups, assign agents to them, and see whether each host is online or when it last communicated.
 - Each agent card now exposes an updates badge (green if there are no outstanding Windows updates, red otherwise); clicking it opens `updates.html`, where updates are grouped by category/purpose, bulk-selectable, and installable via the agent.
+- A **Manage tasks** button opens `processes.html`, letting you view per-process CPU/RAM/disk/network percentages and send kill requests.
+- A **BSODs** badge tracks Windows bug check counts; click it to open `bsod.html`, which lists timestamped events.
+
+## Authentication
+
+- Open `https://localhost:8443` in your browser. You will be redirected to the new login page (username/password + TOTP). The built-in users live at `Server/config/users.json`, e.g.:
+  - `admin` (role `admin`, password `P@ssw0rd!`, TOTP secret `FF6TA63XLBDFQE2C`)
+  - `operator` (role `operator`, password `Operate123`, TOTP secret `OFWF6AA5EYSU65Q4`)
+  - `viewer` (role `viewer`, password `ViewOnly1`, TOTP secret `CRUVMZJLNBCE6YCX`)
+
+- After successful login the server issues an HttpOnly session cookie. API and static assets load with `fetch(..., { credentials: 'same-origin' })` so embedded clients respect the same session.
+- RBAC is enforced: viewers can browse the dashboard, operators may run remote installs and terminate processes, and admins have full control.
+- MFA is implemented via TOTP (use any authenticator app with the secret above when logging in).
+- SSO is supported through a signed token handshake (`/auth/sso`). Use `Server/scripts/gen_sso_url.md` (and the `SSO_SECRET` environment variable your deployment uses) to craft a URL; the link stays valid for five minutes and automatically redirects back to `/` when the signature matches.
 - BSOD totals appear on every card; clicking the new badge opens `bsod.html` to show each recorded blue screen with its timestamp.
 - A **Manage tasks** button opens `processes.html`, letting you view per-process CPU/RAM/disk/network percentages and send kill requests directly from the browser.
 

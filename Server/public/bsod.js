@@ -5,6 +5,7 @@ const statusEl = document.getElementById('status');
 const bsodList = document.getElementById('bsodList');
 const refreshButton = document.getElementById('refreshButton');
 let summaryCache = null;
+const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
 
 refreshButton?.addEventListener('click', () => loadBsod(true));
 
@@ -22,7 +23,7 @@ async function initialize() {
 
 async function fetchAgentName() {
   try {
-    const response = await fetch('/clients', { cache: 'no-store' });
+    const response = await authFetch('/clients', { cache: 'no-store' });
     if (!response.ok) {
       throw new Error('Failed to fetch agent');
     }
@@ -46,14 +47,14 @@ async function loadBsod(force = false) {
 
   try {
     if (force) {
-      const refreshResponse = await fetch(`/bsod/${agentId}/refresh`, { method: 'POST' });
+      const refreshResponse = await authFetch(`/bsod/${agentId}/refresh`, { method: 'POST' });
       if (!refreshResponse.ok) {
         throw new Error('Failed to refresh BSOD data');
       }
       await delay(500);
     }
 
-    const response = await fetch(`/bsod/${agentId}/data`, { cache: 'no-store' });
+    const response = await authFetch(`/bsod/${agentId}/data`, { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }

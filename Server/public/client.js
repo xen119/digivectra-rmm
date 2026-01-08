@@ -3,6 +3,7 @@ const listEl = document.getElementById('agents');
 const groupPanel = document.getElementById('groupPanel');
 const newGroupForm = document.getElementById('newGroupForm');
 const newGroupInput = document.getElementById('newGroupName');
+const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
 
 const OS_ICONS = {
   windows: '🪟',
@@ -21,7 +22,7 @@ newGroupForm?.addEventListener('submit', async (event) => {
   }
 
   try {
-    const response = await fetch('/groups', {
+    const response = await authFetch('/groups', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
@@ -43,7 +44,7 @@ async function refreshAgents() {
     const groups = await fetchGroups();
     cachedGroups = groups;
 
-    const response = await fetch('/clients', { cache: 'no-store' });
+    const response = await authFetch('/clients', { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -63,7 +64,7 @@ async function refreshAgents() {
 
 async function fetchGroups() {
   try {
-    const response = await fetch('/groups', { cache: 'no-store' });
+    const response = await authFetch('/groups', { cache: 'no-store' });
     if (!response.ok) {
       throw new Error('Could not fetch groups');
     }
@@ -238,7 +239,7 @@ function createAgentCard(agent, groups) {
 
 async function assignAgentGroup(agentId, groupName) {
   try {
-    await fetch('/groups/assign', {
+    await authFetch('/groups/assign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agentId, group: groupName }),

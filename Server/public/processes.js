@@ -5,6 +5,7 @@ const statusEl = document.getElementById('status');
 const processBody = document.getElementById('processBody');
 const refreshButton = document.getElementById('refreshButton');
 const logEl = document.getElementById('log');
+const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
 const sortSelect = document.getElementById('sortSelect');
 const intervalInput = document.getElementById('intervalInput');
 let retryTimer;
@@ -47,7 +48,7 @@ async function initialize() {
 
 async function fetchAgentName() {
   try {
-    const response = await fetch('/clients', { cache: 'no-store' });
+    const response = await authFetch('/clients', { cache: 'no-store' });
     if (!response.ok) {
       throw new Error('Failed to fetch agent list');
     }
@@ -72,14 +73,14 @@ async function loadProcesses(force = false) {
 
   try {
     if (force) {
-      const refreshResponse = await fetch(`/processes/${agentId}/refresh`, { method: 'POST' });
+      const refreshResponse = await authFetch(`/processes/${agentId}/refresh`, { method: 'POST' });
       if (!refreshResponse.ok) {
         throw new Error('Failed to refresh process list');
       }
       await delay(500);
     }
 
-    const response = await fetch(`/processes/${agentId}/data`, { cache: 'no-store' });
+    const response = await authFetch(`/processes/${agentId}/data`, { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -190,7 +191,7 @@ async function killProcess(pid, button) {
   setStatus(`Sending kill request for PID ${pid}...`);
 
   try {
-    const response = await fetch(`/processes/${agentId}/kill`, {
+    const response = await authFetch(`/processes/${agentId}/kill`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ processId: pid }),

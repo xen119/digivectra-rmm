@@ -4,6 +4,8 @@ const controlButton = document.getElementById('controlButton');
 const controlInstructions = document.getElementById('controlInstructions');
 const screenSelect = document.getElementById('screenSelect');
 
+const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
+
 const params = new URLSearchParams(window.location.search);
 const agentId = params.get('agent');
 let agentName = agentId;
@@ -73,7 +75,7 @@ async function loadScreenOptions() {
   }
 
     try {
-      const response = await fetch(`/screen/${agentId}/screens`, { cache: 'no-store' });
+      const response = await authFetch(`/screen/${agentId}/screens`, { cache: 'no-store' });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
     }
@@ -108,7 +110,7 @@ async function startScreenSession() {
       requestBody.screenId = selectedScreenId;
     }
 
-    const response = await fetch('/screen/request', {
+    const response = await authFetch('/screen/request', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
@@ -188,7 +190,7 @@ async function stopExistingSession() {
   }
 
   if (sessionId) {
-    await fetch(`/screen/${sessionId}/stop`, { method: 'POST' });
+    await authFetch(`/screen/${sessionId}/stop`, { method: 'POST' });
     sessionId = null;
   }
 }
@@ -199,7 +201,7 @@ async function refreshAgentInfo() {
   }
 
   try {
-    const response = await fetch('/clients', { cache: 'no-store' });
+    const response = await authFetch('/clients', { cache: 'no-store' });
     if (!response.ok) {
       throw new Error('agent lookup failed');
     }
@@ -284,7 +286,7 @@ async function handleOffer(payload) {
 }
 
 async function postAnswer(answer) {
-  await fetch(`/screen/${sessionId}/answer`, {
+  await authFetch(`/screen/${sessionId}/answer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(answer),
@@ -292,7 +294,7 @@ async function postAnswer(answer) {
 }
 
 async function postCandidate(candidate) {
-  await fetch(`/screen/${sessionId}/candidate`, {
+  await authFetch(`/screen/${sessionId}/candidate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(candidate),
@@ -302,7 +304,7 @@ async function postCandidate(candidate) {
 window.addEventListener('beforeunload', () => {
   source?.close();
   if (sessionId) {
-    fetch(`/screen/${sessionId}/stop`, { method: 'POST' });
+    authFetch(`/screen/${sessionId}/stop`, { method: 'POST' });
   }
 });
 
@@ -443,7 +445,7 @@ async function pollOffer(id) {
 
   while (!pc) {
     try {
-      const response = await fetch(`/screen/${id}/offer`, { cache: 'no-store' });
+      const response = await authFetch(`/screen/${id}/offer`, { cache: 'no-store' });
       if (!response.ok) {
         throw new Error(`serve ${response.status}`);
       }

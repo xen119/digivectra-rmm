@@ -1,0 +1,20 @@
+[
+  {
+    "username": "admin",
+    "passwordHash": "$2b$10$DRCRY43tZ91K3AI4rWs1su2cpWkgvNpcfcvjirjAfOW7O3RY6fUae",
+    "role": "admin",
+    "totpSecret": "FF6TA63XLBDFQE2C"
+  },
+  {
+    "username": "operator",
+    "passwordHash": "$2b$10$TcVTPNDN5a8U/fhwO8r4JOicf/SeShFJ7L1KP.IXVSXTIXkqgYhC.",
+    "role": "operator",
+    "totpSecret": "OFWF6AA5EYSU65Q4"
+  },
+  {
+    "username": "viewer",
+    "passwordHash": "$2b$10$59D3SkL3GII24ztHK.iNHuEITzV9.WHzgGCPQMyzAXGXb1BrjAoLy",
+    "role": "viewer",
+    "totpSecret": "CRUVMZJLNBCE6YCX"
+  }
+]

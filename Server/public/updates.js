@@ -8,6 +8,7 @@ const labelEl = document.getElementById('updateLabel');
 const refreshButton = document.getElementById('refreshButton');
 const installButton = document.getElementById('installButton');
 const logEl = document.getElementById('log');
+const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
 
 let summaryData = null;
 
@@ -29,7 +30,7 @@ async function initialize() {
 
 async function fetchAgentName() {
   try {
-    const response = await fetch('/clients', { cache: 'no-store' });
+    const response = await authFetch('/clients', { cache: 'no-store' });
     if (!response.ok) {
       throw new Error('Failed to fetch agent list');
     }
@@ -53,13 +54,13 @@ async function loadSummary(force = false) {
 
   try {
     if (force) {
-      const refreshResponse = await fetch(`/updates/${agentId}/refresh`, { method: 'POST' });
+      const refreshResponse = await authFetch(`/updates/${agentId}/refresh`, { method: 'POST' });
       if (!refreshResponse.ok) {
         throw new Error('Failed to refresh updates');
       }
     }
 
-    const response = await fetch(`/updates/${agentId}/data`, { cache: 'no-store' });
+    const response = await authFetch(`/updates/${agentId}/data`, { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -185,7 +186,7 @@ async function installSelectedUpdates() {
   setStatus('Sending install request...');
 
   try {
-    const response = await fetch(`/updates/${agentId}/install`, {
+    const response = await authFetch(`/updates/${agentId}/install`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: selectedIds }),

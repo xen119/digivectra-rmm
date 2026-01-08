@@ -28,6 +28,7 @@ internal static class Program
     private static CancellationTokenSource? screenCaptureCts;
     private static Task? screenCaptureTask;
     private static string? screenSessionId;
+    private static string? currentChatSessionId;
     private static string? selectedScreenId;
     private static readonly TimeSpan ScreenOfferTimeout = TimeSpan.FromSeconds(10);
     private static Action? screenDataChannelStateHandler;
@@ -146,7 +147,21 @@ internal static class Program
                 return;
             }
 
-            await SendTextAsync(socket, line, cancellationToken);
+            if (line.StartsWith("/chat ", StringComparison.OrdinalIgnoreCase))
+            {
+                var text = line["/chat ".Length..].Trim();
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    Console.WriteLine("Enter a message after /chat.");
+                    continue;
+                }
+
+                await SendChatResponseAsync(socket, text, cancellationToken);
+            }
+            else
+            {
+                await SendTextAsync(socket, line, cancellationToken);
+            }
         }
     }
 
@@ -985,6 +1000,11 @@ internal static class Program
             case "stop-screen":
                 await StopScreenSessionAsync();
                 break;
+            case "chat-request":
+            {
+                HandleChatRequest(document.RootElement);
+                break;
+            }
             case "screen-answer":
             {
                 if (screenPeerConnection is null)
@@ -1068,6 +1088,35 @@ internal static class Program
         {
             document?.Dispose();
         }
+    }
+
+    private static void HandleChatRequest(JsonElement root)
+    {
+        if (!root.TryGetProperty("text", out var textElement) || textElement.ValueKind != JsonValueKind.String)
+        {
+            return;
+        }
+
+        var text = textElement.GetString()?.Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        if (root.TryGetProperty("sessionId", out var sessionIdElement) && sessionIdElement.ValueKind == JsonValueKind.String)
+        {
+            var sessionId = sessionIdElement.GetString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(sessionId))
+            {
+                currentChatSessionId = sessionId;
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("🔔 Chat request from the server:");
+        Console.WriteLine(text);
+        Console.WriteLine("Reply by typing \"/chat <your message>\".");
+        Console.WriteLine();
     }
 
     private static async Task StartShellSessionAsync(ClientWebSocket socket, CancellationToken cancellationToken)
@@ -1818,6 +1867,22 @@ internal static class Program
         };
 
         await SendJsonAsync(socket, payload, cancellationToken);
+    }
+
+    private static async Task SendChatResponseAsync(ClientWebSocket socket, string text, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(currentChatSessionId))
+        {
+            Console.WriteLine("No active chat session available.");
+            return;
+        }
+
+        await SendJsonAsync(socket, new
+        {
+            type = "chat-response",
+            sessionId = currentChatSessionId,
+            text
+        }, cancellationToken);
     }
 
     private static async Task SendJsonAsync(ClientWebSocket socket, object payload, CancellationToken cancellationToken)

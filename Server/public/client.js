@@ -3,6 +3,7 @@ const listEl = document.getElementById('agents');
 const groupPanel = document.getElementById('groupPanel');
 const newGroupForm = document.getElementById('newGroupForm');
 const newGroupInput = document.getElementById('newGroupName');
+const logoutButton = document.getElementById('logoutButton');
 const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
 
 const OS_ICONS = {
@@ -220,6 +221,13 @@ function createAgentCard(agent, groups) {
     window.open(`processes.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
   });
   actions.appendChild(tasksButton);
+  const chatButton = document.createElement('button');
+  chatButton.type = 'button';
+  chatButton.textContent = 'Chat';
+  chatButton.addEventListener('click', () => {
+    window.open(`chat.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
+  });
+  actions.appendChild(chatButton);
   const bsodCount = typeof agent.bsodSummary?.totalCount === 'number'
     ? agent.bsodSummary.totalCount
     : 0;
@@ -252,6 +260,14 @@ async function assignAgentGroup(agentId, groupName) {
 
 refreshAgents();
 setInterval(refreshAgents, 5000);
+
+logoutButton?.addEventListener('click', async () => {
+  try {
+    await authFetch('/auth/logout', { method: 'POST' });
+  } finally {
+    window.location.href = '/login.html';
+  }
+});
 
 function getOsIcon(platform) {
   if (!platform) {

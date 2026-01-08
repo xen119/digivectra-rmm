@@ -34,6 +34,9 @@ const screenSessions = new Map(); // sessionId -> session data
 const groups = new Set([DEFAULT_GROUP]);
 const screenLists = new Map(); // agentId -> { screens, updatedAt }
 const screenListRequests = new Map(); // agentId -> { resolvers: [], timer }
+const chatListeners = new Map(); // agentId -> Set<ServerResponse>
+const chatHistories = new Map(); // agentId -> [{ sessionId, text, direction, agentName, timestamp }]
+const CHAT_HISTORY_LIMIT = 200;
 const SCREEN_LIST_TTL_MS = 60_000;
 const SCREEN_LIST_TIMEOUT_MS = 5_000;
 const SESSION_TTL_MS = 30 * 60_1000;
@@ -314,6 +317,77 @@ server.on('request', (req, res) => {
         console.log(`Sending start-screen to agent ${agentId} for session ${sessionId}`);
         sendControl(entry.socket, 'start-screen', { sessionId, screenId: requestedScreenId });
         res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ sessionId }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const chatEventsMatch = pathname.match(/^\/chat\/([^/]+)\/events$/);
+  if (chatEventsMatch && req.method === 'GET') {
+    const agentId = chatEventsMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      res.end('Agent not found');
+      return;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write(': connected\n\n');
+
+    addChatListener(agentId, res);
+    flushChatHistory(agentId, res);
+    res.on('close', () => {
+      removeChatListener(agentId, res);
+    });
+
+    return;
+  }
+
+  const chatMessageMatch = pathname.match(/^\/chat\/([^/]+)\/message$/);
+  if (chatMessageMatch && req.method === 'POST') {
+    const agentId = chatMessageMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      res.end('Agent not found');
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const text = typeof payload?.text === 'string' ? payload.text.trim() : '';
+        if (!text) {
+          res.writeHead(400);
+          res.end('Message text is required');
+          return;
+        }
+
+        const sessionId = uuidv4();
+        const chatEvent = {
+          sessionId,
+          agentId,
+          agentName: entry.info.name,
+          direction: 'server',
+          text,
+          timestamp: new Date().toISOString(),
+        };
+
+        recordChatHistory(agentId, chatEvent);
+        dispatchChatEvent(agentId, chatEvent);
+        sendControl(entry.socket, 'chat-request', { sessionId, text });
+
+        res.writeHead(202, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ sessionId }));
       } catch (error) {
         res.writeHead(400);
@@ -709,6 +783,23 @@ wss.on('connection', (socket, request) => {
         info.processSnapshot = parsed.snapshot ?? null;
       } else if (parsed?.type === 'process-kill-result') {
         console.log(`Process kill result from ${info.name}: pid=${parsed.processId}, success=${parsed.success}, message=${parsed.message ?? 'n/a'}`);
+      } else if (parsed?.type === 'chat-response') {
+        const text = typeof parsed.text === 'string' ? parsed.text.trim() : '';
+        if (text.length > 0) {
+          const chatEvent = {
+            sessionId: typeof parsed.sessionId === 'string' && parsed.sessionId.trim()
+              ? parsed.sessionId.trim()
+              : uuidv4(),
+            agentId: info.id,
+            agentName: info.name,
+            direction: 'agent',
+            text,
+            timestamp: new Date().toISOString(),
+          };
+
+          recordChatHistory(info.id, chatEvent);
+          dispatchChatEvent(info.id, chatEvent);
+        }
       } else if (parsed?.type === 'screen-list' && Array.isArray(parsed.screens)) {
         const normalized = parsed.screens.map((screen, index) => ({
           id: typeof screen.id === 'string' && screen.id.trim() ? screen.id.trim() : `display-${index + 1}`,
@@ -798,6 +889,60 @@ function sendScreenEvent(session, eventName, data) {
     res.write(`event: ${eventName}\n`);
     res.write(`data: ${payload}\n\n`);
   }
+}
+
+function addChatListener(agentId, res) {
+  const listeners = chatListeners.get(agentId) ?? new Set();
+  listeners.add(res);
+  chatListeners.set(agentId, listeners);
+}
+
+function removeChatListener(agentId, res) {
+  const listeners = chatListeners.get(agentId);
+  if (!listeners) {
+    return;
+  }
+
+  listeners.delete(res);
+  if (listeners.size === 0) {
+    chatListeners.delete(agentId);
+  } else {
+    chatListeners.set(agentId, listeners);
+  }
+}
+
+function flushChatHistory(agentId, res) {
+  const history = chatHistories.get(agentId) ?? [];
+  for (const entry of history) {
+    writeChatEvent(res, entry);
+  }
+}
+
+function dispatchChatEvent(agentId, payload) {
+  const listeners = chatListeners.get(agentId);
+  if (!listeners || listeners.size === 0) {
+    return;
+  }
+
+  const data = JSON.stringify(payload);
+  for (const res of listeners) {
+    res.write('event: chat\n');
+    res.write(`data: ${data}\n\n`);
+  }
+}
+
+function recordChatHistory(agentId, payload) {
+  const history = chatHistories.get(agentId) ?? [];
+  history.push({ ...payload });
+  if (history.length > CHAT_HISTORY_LIMIT) {
+    history.shift();
+  }
+  chatHistories.set(agentId, history);
+}
+
+function writeChatEvent(res, payload) {
+  res.write('event: chat\n');
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function normalizeGroupName(value) {

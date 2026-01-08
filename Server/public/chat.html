@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Agent Chat</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        background: #0d1117;
+        color: #cdd9e5;
+        height: 100vh;
+      }
+
+      .chat-shell {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        padding: 1rem;
+        box-sizing: border-box;
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 0.75rem;
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 1.5rem;
+      }
+
+      header .subtitle {
+        font-size: 0.95rem;
+        color: #8b949e;
+      }
+
+      .chat-history {
+        background: #0f141a;
+        border: 1px solid #22272d;
+        border-radius: 0.75rem;
+        padding: 0.75rem;
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .chat-message {
+        padding: 0.65rem 0.75rem;
+        border-radius: 0.5rem;
+        font-size: 0.95rem;
+        line-height: 1.4;
+      }
+
+      .chat-message.server {
+        background: #0a2b45;
+        align-self: flex-end;
+        color: #c7f5ff;
+      }
+
+      .chat-message.agent {
+        background: #1f2933;
+        align-self: flex-start;
+      }
+
+      .chat-message .meta {
+        font-size: 0.75rem;
+        color: #94a3b8;
+        margin-bottom: 0.25rem;
+      }
+
+      form {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+
+      input[type='text'] {
+        flex: 1;
+        border-radius: 0.5rem;
+        border: 1px solid #30363d;
+        background: #010409;
+        color: #cdd9e5;
+        padding: 0.65rem 0.8rem;
+        font-size: 1rem;
+      }
+
+      button {
+        border: none;
+        border-radius: 0.5rem;
+        padding: 0.65rem 1.25rem;
+        background: #238636;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .status-text {
+        margin: 0.65rem 0 0;
+        color: #8b949e;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="chat-shell">
+      <header>
+        <div>
+          <h1>Agent Chat</h1>
+          <p class="subtitle">Talking to <span id="agentName">...</span></p>
+        </div>
+        <span id="statusLabel" class="subtitle">Connecting...</span>
+      </header>
+      <div id="chatHistory" class="chat-history">
+        <div id="emptyHistory">Awaiting chat events...</div>
+      </div>
+      <form id="chatForm">
+        <input id="chatInput" type="text" autocomplete="off" placeholder="Type a message and press Enter" />
+        <button type="submit">Send</button>
+      </form>
+      <p id="statusText" class="status-text">Messages flow over a secure channel.</p>
+    </div>
+    <script src="chat.js"></script>
+  </body>
+</html>

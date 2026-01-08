@@ -7,6 +7,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - Located in `Agent/`.
 - A .NET 8 console app that connects to a `wss://` endpoint, echoes server messages, and lets you type outgoing payloads.
 - Displays an RMM-branded tray icon so the console stays accessible while running in the background.
+- Supports secure chat requests from the dashboard; chat messages show in the console and you reply by typing `/chat <your response>`.
 
 ## Server
 
@@ -20,6 +21,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - Multi-screen support lets the UI fetch the agent’s monitor list, pick a display from the dropdown, and request that specific output before the stream starts.
 - The dashboard now shows an OS icon for every agent so it is easy to see Windows, Linux, or macOS hosts.
 - The dashboard tracks agent groups and connection status, so you can create named groups, assign agents to them, and see whether each host is online or when it last communicated.
+- Each agent card now exposes a **Chat** button that opens `chat.html`; messages stream over SSE, you can send secure requests, and the agent replies by typing `/chat <response>` in the console.
 - Each agent card now exposes an updates badge (green if there are no outstanding Windows updates, red otherwise); clicking it opens `updates.html`, where updates are grouped by category/purpose, bulk-selectable, and installable via the agent.
 - A **Manage tasks** button opens `processes.html`, letting you view per-process CPU/RAM/disk/network percentages and send kill requests.
 - A **BSODs** badge tracks Windows bug check counts; click it to open `bsod.html`, which lists timestamped events.
@@ -31,7 +33,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
   - `operator` (role `operator`, password `Operate123`, TOTP secret `OFWF6AA5EYSU65Q4`)
   - `viewer` (role `viewer`, password `ViewOnly1`, TOTP secret `CRUVMZJLNBCE6YCX`)
 
-- After successful login the server issues an HttpOnly session cookie. API and static assets load with `fetch(..., { credentials: 'same-origin' })` so embedded clients respect the same session.
+- After successful login the server issues an HttpOnly session cookie. API and static assets load with `fetch(..., { credentials: 'same-origin' })` so embedded clients respect the same session. Click **Logout** in the dashboard header to clear the cookie and return to the login screen.
 - RBAC is enforced: viewers can browse the dashboard, operators may run remote installs and terminate processes, and admins have full control.
 - MFA is implemented via TOTP (use any authenticator app with the secret above when logging in).
 - SSO is supported through a signed token handshake (`/auth/sso`). Use `Server/scripts/gen_sso_url.md` (and the `SSO_SECRET` environment variable your deployment uses) to craft a URL; the link stays valid for five minutes and automatically redirects back to `/` when the signature matches.

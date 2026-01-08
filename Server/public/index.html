@@ -11,6 +11,21 @@
         color: #cdd9e5;
       }
 
+      .hero {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+
+      #logoutButton {
+        background: transparent;
+        border: 1px solid #30363d;
+        border-radius: 0.375rem;
+        padding: 0.35rem 0.9rem;
+        color: #cdd9e5;
+      }
+
       h1 {
         margin-bottom: 0.5rem;
       }
@@ -191,7 +206,10 @@
     </style>
   </head>
   <body>
-    <h1>Connected Agents</h1>
+    <div class="hero">
+      <h1>Connected Agents</h1>
+      <button id="logoutButton" type="button">Logout</button>
+    </div>
     <p id="status">Loading agent list.</p>
     <div id="groupPanel">
       <form id="newGroupForm">

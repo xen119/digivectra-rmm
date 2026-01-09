@@ -1548,19 +1548,41 @@ internal static class Program
         {
             try
             {
-                var frame = CaptureScreenFrame();
-                if (frame.Length > 0 && screenDataChannel is not null)
+                var targetScreen = GetCaptureScreen();
+                var frame = CaptureScreenFrame(targetScreen);
+                if (screenDataChannel is not null)
                 {
-                    var message = JsonSerializer.Serialize(new
+                    if (frame.Length > 0)
                     {
-                        type = "frame",
-                        image = Convert.ToBase64String(frame)
+                        var message = JsonSerializer.Serialize(new
+                        {
+                            type = "frame",
+                            image = Convert.ToBase64String(frame)
+                        });
+
+                        try
+                        {
+                            var bytes = Encoding.UTF8.GetBytes(message);
+                            screenDataChannel.SendMessage(bytes);
+                        }
+                        catch
+                        {
+                            // ignore send errors during shutdown
+                        }
+                    }
+
+                    var cursorState = GetCursorState(targetScreen.Bounds);
+                    var cursorMessage = JsonSerializer.Serialize(new
+                    {
+                        type = "cursor",
+                        x = cursorState.x,
+                        y = cursorState.y,
+                        visible = cursorState.visible
                     });
 
                     try
                     {
-                        var bytes = Encoding.UTF8.GetBytes(message);
-                        screenDataChannel.SendMessage(bytes);
+                        screenDataChannel.SendMessage(Encoding.UTF8.GetBytes(cursorMessage));
                     }
                     catch
                     {
@@ -1577,9 +1599,8 @@ internal static class Program
         }
     }
 
-    private static byte[] CaptureScreenFrame()
+    private static byte[] CaptureScreenFrame(Screen targetScreen)
     {
-        var targetScreen = GetCaptureScreen();
         var bounds = targetScreen.Bounds;
         if (bounds.Width <= 0 || bounds.Height <= 0)
         {
@@ -1611,6 +1632,15 @@ internal static class Program
         }
 
         return EncodeBitmapToJpeg(scaled);
+    }
+
+    private static (double x, double y, bool visible) GetCursorState(Rectangle bounds)
+    {
+        var cursor = Cursor.Position;
+        var visible = bounds.Contains(cursor) && bounds.Width > 0 && bounds.Height > 0;
+        var normalizedX = visible ? (cursor.X - bounds.X) / (double)bounds.Width : 0.0;
+        var normalizedY = visible ? (cursor.Y - bounds.Y) / (double)bounds.Height : 0.0;
+        return (Math.Clamp(normalizedX, 0.0, 1.0), Math.Clamp(normalizedY, 0.0, 1.0), visible);
     }
 
     private static double ClampCaptureScale(double value)

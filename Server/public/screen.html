@@ -44,12 +44,32 @@
         max-width: 18rem;
       }
 
+      .frame-wrapper {
+        position: relative;
+        margin-top: 1rem;
+      }
+
       #frame {
         width: 100%;
         border: 1px solid #30363d;
         border-radius: 0.5rem;
         background: #161b22;
-        margin-top: 1rem;
+        display: block;
+      }
+
+      #remoteCursor {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: rgba(14, 165, 233, 0.85);
+        box-shadow: 0 0 4px rgba(14, 165, 233, 0.9);
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s ease;
       }
 
       .status-row {
@@ -104,7 +124,10 @@
         <p id="controlInstructions">Control is disabled until the data channel opens.</p>
       </div>
     </div>
-    <img id="frame" alt="Live screen" />
+    <div class="frame-wrapper">
+      <img id="frame" alt="Live screen" />
+      <div id="remoteCursor" aria-hidden="true"></div>
+    </div>
     <script src="screen.js"></script>
   </body>
 </html>

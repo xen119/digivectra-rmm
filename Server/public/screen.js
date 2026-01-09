@@ -1,5 +1,6 @@
 const statusEl = document.getElementById('status');
 const frameEl = document.getElementById('frame');
+const cursorEl = document.getElementById('remoteCursor');
 const controlButton = document.getElementById('controlButton');
 const controlInstructions = document.getElementById('controlInstructions');
 const screenSelect = document.getElementById('screenSelect');
@@ -17,6 +18,7 @@ let controlChannel;
 let controlEnabled = false;
 let selectedScreenId = null;
 let captureScale = 0.75;
+let lastCursorPayload = null;
 
 if (controlButton) {
   controlButton.addEventListener('click', () => {
@@ -36,6 +38,11 @@ if (frameEl) {
   frameEl.addEventListener('contextmenu', (event) => {
     if (controlEnabled) {
       event.preventDefault();
+    }
+  });
+  frameEl.addEventListener('load', () => {
+    if (lastCursorPayload) {
+      updateRemoteCursor(lastCursorPayload);
     }
   });
 }
@@ -75,6 +82,11 @@ window.addEventListener('keyup', (event) => handleKeyEvent(event, 'up'), true);
 window.addEventListener('blur', () => {
   if (controlEnabled) {
     setControlEnabled(false);
+  }
+});
+window.addEventListener('resize', () => {
+  if (lastCursorPayload) {
+    updateRemoteCursor(lastCursorPayload);
   }
 });
 
@@ -293,6 +305,8 @@ async function handleOffer(payload) {
         const frame = JSON.parse(payloadText);
         if (frame.type === 'frame' && frame.image) {
           frameEl.src = `data:image/png;base64,${frame.image}`;
+        } else if (frame.type === 'cursor') {
+          updateRemoteCursor(frame);
         }
       } catch (error) {
         console.error('Failed to decode frame', error);
@@ -458,6 +472,33 @@ function mapMouseButton(button) {
     default:
       return null;
   }
+}
+
+function updateRemoteCursor(payload) {
+  lastCursorPayload = payload;
+  if (!cursorEl || !frameEl) {
+    return;
+  }
+
+  const rect = frameEl.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    cursorEl.style.opacity = '0';
+    return;
+  }
+
+  const x = clampNormalized(payload.x);
+  const y = clampNormalized(payload.y);
+  cursorEl.style.left = `${x * rect.width}px`;
+  cursorEl.style.top = `${y * rect.height}px`;
+  cursorEl.style.opacity = payload.visible ? '1' : '0';
+}
+
+function clampNormalized(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return 0;
+  }
+
+  return Math.min(Math.max(value, 0), 1);
 }
 
 async function pollOffer(id) {

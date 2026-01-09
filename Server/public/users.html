@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>User Management</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      body {
+        margin: 0;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        background: #0b0f1a;
+        color: #cdd9e5;
+      }
+
+      .page {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+
+      h1 {
+        margin-bottom: 0.25rem;
+      }
+
+      p {
+        color: #8b949e;
+        margin-top: 0;
+      }
+
+      .panel {
+        background: #0f141a;
+        border: 1px solid #1c2735;
+        border-radius: 0.75rem;
+        padding: 1.25rem 1.5rem;
+        margin-bottom: 1.25rem;
+        box-shadow: 0 20px 35px rgba(2, 6, 23, 0.35);
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+        padding: 0.5rem;
+        background: #05080f;
+        border-radius: 0.65rem;
+      }
+
+      label {
+        font-size: 0.85rem;
+        color: #94a3b8;
+      }
+
+      input,
+      select {
+        width: 100%;
+        border-radius: 0.45rem;
+        border: 1px solid #30363d;
+        background: #05080f;
+        color: #cdd9e5;
+        padding: 0.5rem 0.65rem;
+        font-size: 0.95rem;
+      }
+
+      button {
+        margin-top: 1rem;
+        border: none;
+        border-radius: 0.45rem;
+        padding: 0.45rem 1rem;
+        background: #2563eb;
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      #userList {
+        margin-top: 1rem;
+      }
+
+      .message {
+        min-height: 1.2rem;
+        margin-top: 0.5rem;
+        font-size: 0.9rem;
+      }
+
+      .message.success {
+        color: #34d399;
+      }
+
+      .message.error {
+        color: #f87171;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1rem;
+        font-size: 0.9rem;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 0.65rem 0.5rem;
+      }
+
+      thead {
+        color: #94a3b8;
+      }
+
+      tbody tr {
+        border-bottom: 1px solid #1b2433;
+      }
+
+      td span {
+        display: inline-flex;
+        gap: 0.6rem;
+        align-items: center;
+      }
+
+      .pill {
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        background: #161b22;
+        font-size: 0.75rem;
+        color: #cdd9e5;
+        border: 1px solid #30363d;
+      }
+
+      .subtitle {
+        margin: 0.25rem 0 0;
+        color: #94a3b8;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="panel">
+        <h1>User management</h1>
+        <p>Review who can access the dashboard and create new users with their MFA secret.</p>
+      </div>
+
+      <section class="panel">
+        <h2>Create user</h2>
+        <p class="subtitle">New users need a password, role, and TOTP secret.</p>
+        <form id="userForm" class="form-grid">
+          <label>
+            Username
+            <input id="userUsername" name="username" type="text" required />
+          </label>
+          <label>
+            Password
+            <input id="userPassword" name="password" type="password" required />
+          </label>
+          <label>
+            Role
+            <select id="userRole" name="role">
+              <option value="viewer">Viewer</option>
+              <option value="operator">Operator</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <label>
+            TOTP secret
+            <input id="userTotp" name="totp" type="text" placeholder="Leave empty to auto-generate" />
+          </label>
+          <div style="grid-column: 1 / -1;">
+            <button type="submit">Create user</button>
+            <span id="userMessage" class="message"></span>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Existing users</h2>
+        <div id="userList">
+          <p class="subtitle">Loading user list…</p>
+        </div>
+      </section>
+    </div>
+    <script src="users.js"></script>
+  </body>
+</html>

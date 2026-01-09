@@ -10,6 +10,7 @@ const archiver = require('archiver');
 
 const CERT_DIR = path.join(__dirname, 'certs');
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8443;
+const USERS_CONFIG_PATH = path.join(__dirname, 'config', 'users.json');
 const AGENT_DOWNLOAD_DIR = process.env.AGENT_DOWNLOAD_DIR
   ? path.resolve(process.env.AGENT_DOWNLOAD_DIR)
   : path.join(__dirname, '..', 'AgentPublished');
@@ -76,7 +77,7 @@ const SSO_SECRET = process.env.SSO_SECRET ?? 'CHANGE_ME-SSO-KEY';
 const SSO_WINDOW_MS = 5 * 60_1000;
 const REMEDIATION_DIR = path.join(__dirname, 'scripts', 'remediation');
 
-const USERS_CONFIG = loadUsersConfig();
+let USERS_CONFIG = loadUsersConfig();
 const monitoringEvents = new Set();
 const monitoringConfig = loadMonitoringConfig();
 const monitoringHistory = [];
@@ -182,6 +183,74 @@ server.on('request', (req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ group: assignedGroup }));
       } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const usersGetMatch = pathname === '/users' && req.method === 'GET';
+  if (usersGetMatch) {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    const payload = USERS_CONFIG.map((entry) => ({
+      username: entry.username,
+      role: entry.role,
+      totpSecret: entry.totpSecret,
+      createdAt: entry.createdAt ?? null,
+    }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ users: payload }));
+    return;
+  }
+
+  const usersCreateMatch = pathname === '/users' && req.method === 'POST';
+  if (usersCreateMatch) {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    collectBody(req, async (body) => {
+      try {
+        const data = JSON.parse(body);
+        const username = (data.username ?? '').toString().trim();
+        const password = (data.password ?? '').toString();
+        const role = (data.role ?? 'viewer').toString().trim();
+        const totpSecret = (data.totp ?? authenticator.generateSecret()).toString().trim();
+        if (!username || !password || !role) {
+          res.writeHead(400);
+          return res.end('Username, password and role are required');
+        }
+
+        if (USERS_CONFIG.some((entry) => entry.username === username)) {
+          res.writeHead(409);
+          return res.end('Username already exists');
+        }
+
+        const passwordHash = await bcrypt.hash(password, 10);
+        const newUser = {
+          username,
+          role,
+          passwordHash,
+          totpSecret,
+          createdAt: Date.now(),
+        };
+        USERS_CONFIG.push(newUser);
+        persistUsersConfig();
+
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          username: newUser.username,
+          role: newUser.role,
+          totpSecret: newUser.totpSecret,
+          createdAt: newUser.createdAt,
+        }));
+      } catch (error) {
+        console.error('Unable to create user', error);
         res.writeHead(400);
         res.end('Invalid request');
       }
@@ -2603,12 +2672,21 @@ function ensureRole(req, res, minRole) {
 
 function loadUsersConfig() {
   try {
-    const configPath = path.join(__dirname, 'config', 'users.json');
-    const raw = fs.readFileSync(configPath, 'utf-8');
+    const raw = fs.readFileSync(USERS_CONFIG_PATH, 'utf-8');
     return JSON.parse(raw);
   } catch (error) {
     console.error('Failed to load users config', error);
     return [];
+  }
+}
+
+function persistUsersConfig() {
+  try {
+    fs.writeFileSync(USERS_CONFIG_PATH, JSON.stringify(USERS_CONFIG, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to save users config', error);
+    return false;
   }
 }
 

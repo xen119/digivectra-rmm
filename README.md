@@ -54,6 +54,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - A **Files** button launches `files.html` for the selected agent so you can explore folders, download binaries, or push new files to a specific destination.
 - A **Monitoring** button opens `monitoring.html`, where you can define monitoring and alert profiles, assign them to agents/groups, watch real-time alert streams, and optionally trigger remediation scripts that execute on the agent.
 - A **Scripts** entry in the sidebar launches `scripts.html`, a central repository for uploading, viewing, and executing PowerShell or Python automation across multiple agents at once (with sample scripts stored under `Server/scripts/remediation/`).
+- A **Users** entry in the sidebar opens `users.html`, where admins can list the configured dashboard users and quickly create new accounts (the zip download area already embeds the current `wss://` endpoint, so downloaded agents automatically point back to whichever domain you are hosting on).
 
 ## Running
 

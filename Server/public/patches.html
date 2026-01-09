@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Patch Management</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      body {
+        margin: 0;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        background: #0d1117;
+        color: #cdd9e5;
+      }
+
+      .page {
+        min-height: 100vh;
+        padding: 2rem;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 2rem;
+      }
+
+      #patchStatus {
+        margin-top: 0.25rem;
+        color: #8b949e;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1rem;
+        margin-top: 1.5rem;
+      }
+
+      .summary-card {
+        border-radius: 0.7rem;
+        border: 1px solid #1e293b;
+        padding: 1rem;
+        background: #0f141a;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+
+      .summary-card span {
+        font-size: 0.85rem;
+        color: #94a3b8;
+      }
+
+      .summary-card strong {
+        font-size: 1.7rem;
+      }
+
+      .summary-card .secondary {
+        font-size: 0.9rem;
+        color: #cdd9e5;
+      }
+
+      .tab-nav {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1.5rem;
+      }
+
+      .tab-button {
+        border: 1px solid #30363d;
+        border-radius: 0.45rem;
+        padding: 0.45rem 1rem;
+        background: #05080f;
+        color: #cdd9e5;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .tab-button.active {
+        background: #1f2937;
+        border-color: #1d4ed8;
+        color: #fff;
+      }
+
+      .tab-panel {
+        display: none;
+      }
+
+      .tab-panel.active {
+        display: block;
+      }
+
+      .patch-actions {
+        margin-top: 1rem;
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: none;
+        border-radius: 0.45rem;
+        padding: 0.45rem 1rem;
+        background: #2d6df0;
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #161b22;
+        border: 1px solid #30363d;
+      }
+
+      .patch-panel {
+        margin-top: 2rem;
+        border: 1px solid #1e293b;
+        border-radius: 0.75rem;
+        background: #0f141a;
+        padding: 1.5rem;
+        box-shadow: 0 10px 35px rgba(0, 0, 0, 0.35);
+      }
+
+      .patch-panel h2 {
+        margin-top: 0;
+        margin-bottom: 0.5rem;
+      }
+
+      .patch-list {
+        margin-top: 1.5rem;
+        display: grid;
+        gap: 1rem;
+      }
+
+      .patch-card {
+        border: 1px solid #1e293b;
+        border-radius: 0.75rem;
+        padding: 1rem;
+        background: #0d1117;
+      }
+
+      .patch-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+      }
+
+      .patch-header h3 {
+        margin: 0;
+      }
+
+      .patch-id {
+        font-size: 0.75rem;
+        color: #94a3b8;
+        word-break: break-all;
+      }
+
+      .patch-meta {
+        color: #94a3b8;
+        font-size: 0.85rem;
+        margin-top: 0.35rem;
+      }
+
+      .patch-description {
+        margin: 0.75rem 0;
+        color: #cdd9e5;
+      }
+
+      .kb-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+      }
+
+      .kb-pill {
+        padding: 0.2rem 0.55rem;
+        border-radius: 999px;
+        background: #1f2937;
+        font-size: 0.75rem;
+        border: 1px solid transparent;
+      }
+
+      .agent-grid {
+        margin-top: 1rem;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.35rem;
+      }
+
+      .agent-entry {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.35rem 0.5rem;
+        border-radius: 0.45rem;
+        border: 1px solid #1e293b;
+      }
+
+      .agent-entry input {
+        width: 1rem;
+        height: 1rem;
+      }
+
+      .agent-details {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+      }
+
+      .agent-details span:first-child {
+        font-weight: 600;
+      }
+
+      .agent-action-row {
+        margin-top: 0.35rem;
+        display: flex;
+        gap: 0.35rem;
+        flex-wrap: wrap;
+      }
+
+      .agent-action-row button {
+        padding: 0.2rem 0.7rem;
+        font-size: 0.75rem;
+      }
+
+      .pill {
+        border-radius: 999px;
+        padding: 0.1rem 0.6rem;
+        font-size: 0.7rem;
+        align-self: flex-start;
+      }
+
+      .pill.online {
+        background: #047857;
+        color: #dcfce7;
+      }
+
+      .pill.offline {
+        background: #dc2626;
+        color: #fee2e2;
+      }
+
+      .pill.reboot {
+        background: #f97316;
+        color: #1f2937;
+      }
+
+      .schedule-form {
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      .form-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      .form-row.inline {
+        flex-direction: row;
+        align-items: flex-end;
+        gap: 0.5rem;
+      }
+
+      .form-row label {
+        font-size: 0.85rem;
+        color: #94a3b8;
+      }
+
+      .form-row input,
+      .form-row select {
+        border-radius: 0.45rem;
+        border: 1px solid #30363d;
+        background: #0d1117;
+        color: #cdd9e5;
+        padding: 0.4rem 0.65rem;
+      }
+
+      #scheduleAgents {
+        max-height: 160px;
+        overflow: auto;
+        border: 1px solid #1e293b;
+        border-radius: 0.55rem;
+        padding: 0.5rem;
+        background: #05080f;
+      }
+
+      #scheduleAgents label {
+        justify-content: space-between;
+      }
+
+      .approval-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      .approval-list li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .schedule-message {
+        font-size: 0.9rem;
+        min-height: 1.2rem;
+      }
+
+      .schedule-message.success {
+        color: #34d399;
+      }
+
+      .schedule-message.error {
+        color: #f87171;
+      }
+
+      .schedule-table-wrapper {
+        margin-top: 1.5rem;
+        overflow-x: auto;
+      }
+
+      .history-log {
+        margin-top: 1.75rem;
+        border-top: 1px solid #1e293b;
+        padding-top: 1rem;
+      }
+
+      .history-list {
+        margin-top: 0.75rem;
+        display: grid;
+        gap: 0.65rem;
+      }
+
+      .history-entry {
+        border: 1px solid #1e293b;
+        border-radius: 0.5rem;
+        padding: 0.65rem 0.85rem;
+        background: #05080f;
+        font-size: 0.85rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+
+      .history-entry strong {
+        font-size: 0.9rem;
+      }
+
+      .history-meta {
+        color: #94a3b8;
+        font-size: 0.75rem;
+      }
+
+      .step-header {
+        padding-bottom: 0.8rem;
+        border-bottom: 1px dashed #1e293b;
+        margin-bottom: 1rem;
+        color: #94a3b8;
+      }
+
+      .step-label {
+        font-weight: 600;
+        display: inline-block;
+        background: #161b22;
+        padding: 0.2rem 0.6rem;
+        border-radius: 0.4rem;
+        margin-bottom: 0.35rem;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid #1e293b;
+        padding: 0.6rem 0.5rem;
+        text-align: left;
+      }
+
+      thead {
+        color: #94a3b8;
+      }
+
+      .empty {
+        color: #8b949e;
+        text-align: center;
+        padding: 1.5rem;
+      }
+
+      @media (max-width: 600px) {
+        .form-row.inline {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .agent-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Patch management</h1>
+      <p id="patchStatus">Loading patch data.</p>
+
+      <div class="summary-grid">
+        <article class="summary-card">
+          <span>Pending patches</span>
+          <strong id="patchCount">0</strong>
+          <span class="secondary">Distinct update titles awaiting attention</span>
+        </article>
+        <article class="summary-card">
+          <span>Pending approvals</span>
+          <strong id="pendingCount">0</strong>
+          <span class="secondary">Agent/update pairs waiting for consent</span>
+        </article>
+        <article class="summary-card">
+          <span>Approved pairs</span>
+          <strong id="approvedCount">0</strong>
+          <span class="secondary">Agent/update pairs ready for scheduling</span>
+        </article>
+        <article class="summary-card">
+          <span>Pending reboots</span>
+          <strong id="rebootCount">0</strong>
+          <span class="secondary">Agents awaiting restart</span>
+        </article>
+      </div>
+
+      <div class="tab-nav">
+        <button type="button" class="tab-button active" data-tab-button="approval">Step 1 · Approve</button>
+        <button type="button" class="tab-button" data-tab-button="scheduler">Step 2 · Scheduler</button>
+        <button type="button" class="tab-button" data-tab-button="scheduled">Step 3 · Manage</button>
+      </div>
+
+      <div class="tab-panel active" data-tab-panel="approval">
+        <section id="patchList" class="patch-list">
+          <div class="step-header">
+            <span class="step-label">Approve patches</span>
+            <p>Mark each agent/update pair before scheduling. Refresh to pull the latest availability.</p>
+          </div>
+          <div class="empty">Loading patches...</div>
+        </section>
+      </div>
+
+      <div class="tab-panel" data-tab-panel="scheduler">
+        <div class="patch-panel">
+          <h2>Schedule approved patches</h2>
+          <p class="patch-meta">
+            Pick an approved patch, choose the agents, set the window, and save the job to run later.
+          </p>
+          <form id="scheduleForm" class="schedule-form">
+          <div class="form-row">
+            <label for="schedulePatch">Patch (optional)</label>
+            <select id="schedulePatch">
+              <option value="">Select a patch</option>
+            </select>
+            <small class="secondary">Overrides category when selected.</small>
+          </div>
+          <div class="form-row">
+            <label for="scheduleCategory">Category</label>
+            <select id="scheduleCategory">
+              <option value="">Select a category</option>
+            </select>
+            <small class="secondary">Scheduling all approved patches within the chosen category.</small>
+          </div>
+          <div class="form-row">
+            <label>Approved agents (informational)</label>
+            <div id="scheduleAgents">
+              <p class="empty">Choose a patch or category to see its approved agents.</p>
+            </div>
+            <small class="secondary">The schedule will automatically target every approved agent for the chosen patches.</small>
+          </div>
+            <div class="form-row">
+              <label for="scheduleRunAt">Run at</label>
+              <input id="scheduleRunAt" type="datetime-local" required />
+            </div>
+            <div class="form-row inline">
+              <label for="scheduleRepeatValue">Repeat every</label>
+              <input id="scheduleRepeatValue" type="number" min="0" value="0" />
+              <select id="scheduleRepeatUnit">
+                <option value="seconds">Seconds</option>
+                <option value="minutes" selected>Minutes</option>
+                <option value="hours">Hours</option>
+                <option value="days">Days</option>
+              </select>
+              <span class="secondary">Set to 0 for a single run.</span>
+            </div>
+            <div class="form-row">
+              <button type="submit">Save schedule</button>
+              <span id="scheduleMessage" class="schedule-message"></span>
+            </div>
+          </form>
+          <div class="patch-actions">
+            <button id="refreshPatches" type="button" class="secondary">Refresh patch list</button>
+            <button id="refreshSchedules" type="button" class="secondary">Refresh schedules</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" data-tab-panel="scheduled">
+        <section class="schedule-table-wrapper">
+          <h2>Scheduled jobs</h2>
+          <div id="scheduleEmpty" class="empty">No schedules defined yet.</div>
+          <table id="scheduleTable">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Patches</th>
+                <th>Targets</th>
+                <th>Next run</th>
+                <th>Repeat</th>
+                <th>Pending agents</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </section>
+        <section class="history-log">
+          <h3>Execution log</h3>
+          <div id="historyList" class="history-list">
+            <div class="empty">Nothing logged yet.</div>
+          </div>
+        </section>
+      </div>
+    </div>
+    <script src="patches.js"></script>
+  </body>
+</html>

@@ -6,9 +6,14 @@ const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
 const { authenticator } = require('otplib');
 const WebSocket = require('ws');
+const archiver = require('archiver');
 
 const CERT_DIR = path.join(__dirname, 'certs');
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8443;
+const AGENT_DOWNLOAD_DIR = process.env.AGENT_DOWNLOAD_DIR
+  ? path.resolve(process.env.AGENT_DOWNLOAD_DIR)
+  : path.join(__dirname, '..', 'AgentPublished');
+const AGENT_BUILD_FALLBACK_DIR = path.join(__dirname, '..', 'Agent', 'bin', 'Debug', 'net8.0-windows');
 
 const certPath = path.join(CERT_DIR, 'server.crt');
 const keyPath = path.join(CERT_DIR, 'server.key');
@@ -39,6 +44,23 @@ const FILE_UPLOAD_CHUNK_BYTES = 256 * 1024;
 const fileRequests = new Map(); // requestId -> { kind, agentId, resolve, reject, timer }
 const SOFTWARE_REQUEST_TIMEOUT_MS = 60_000;
 const softwareRequests = new Map(); // requestId -> { agentId, resolve, reject, timer }
+const patchApprovals = new Map(); // `${agentId}:${updateId}` -> { approvedAt }
+const patchSchedules = new Map(); // scheduleId -> schedule data
+const PATCH_SCHEDULE_TICK_MS = 5_000;
+const PATCH_SCHEDULE_RETRY_MS = 15_000;
+const patchHistory = [];
+const PATCH_HISTORY_LIMIT = 200;
+const PATCH_CATEGORY_ORDER = [
+  'Security Updates',
+  'Feature Updates',
+  'Driver Updates',
+  'Definition Updates',
+  'Optional Updates',
+  'Out-of-Band Updates',
+  'Servicing Stack Updates',
+  'Cumulative Updates',
+  'Other Updates',
+];
 const MIN_SCREEN_SCALE = 0.35;
 const MAX_SCREEN_SCALE = 1.0;
 const DEFAULT_SCREEN_SCALE = 0.75;
@@ -105,6 +127,7 @@ server.on('request', (req, res) => {
       status: info.status ?? 'offline',
       lastSeen: info.lastSeen ?? null,
       loggedInUser: info.loggedInUser ?? null,
+      pendingReboot: info.pendingReboot ?? false,
       monitoringEnabled: shouldMonitorAgent(info),
       monitoringAlert: agentAlertStatus.get(info.id) ?? false,
       monitoringProfiles: getAgentMonitoringProfiles(info),
@@ -164,6 +187,58 @@ server.on('request', (req, res) => {
       }
     });
 
+    return;
+  }
+
+  const agentDownloadMatch = pathname === '/agent/download' && req.method === 'GET';
+  if (agentDownloadMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const agentDir = resolveAgentPackageDir();
+    if (!agentDir) {
+      res.writeHead(500);
+      res.end('Agent package directory not found. Publish the agent first.');
+      return;
+    }
+
+    const forwardedProto = req.headers['x-forwarded-proto'];
+    const protocol = forwardedProto
+      ? String(forwardedProto).split(',')[0].trim()
+      : (req.socket.encrypted || req.connection?.encrypted ? 'https' : 'http');
+    const wssScheme = protocol === 'https' ? 'wss' : 'ws';
+    const hostHeader = req.headers.host ?? `localhost:${PORT}`;
+    const endpoint = `${wssScheme}://${hostHeader}`;
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    const fileName = `rmm-agent-${Date.now()}.zip`;
+    res.writeHead(200, {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+    });
+
+    archive.on('error', (error) => {
+      console.error('Agent download creation failed', error);
+      if (!res.headersSent) {
+        res.writeHead(500);
+        res.end('Unable to create agent package.');
+      } else {
+        res.destroy(error);
+      }
+    });
+
+    archive.pipe(res);
+    archive.directory(agentDir, false);
+    const launcherLines = [
+      '@echo off',
+      'setlocal',
+      'cd /d "%~dp0"',
+      `dotnet Agent.dll ${endpoint}`,
+      'endlocal',
+    ];
+    archive.append(launcherLines.join('\r\n'), { name: 'run-agent.bat' });
+    archive.append(JSON.stringify({ endpoint, dashboard: `${protocol}://${hostHeader}` }, null, 2), { name: 'server.json' });
+    archive.finalize();
     return;
   }
 
@@ -496,6 +571,231 @@ server.on('request', (req, res) => {
       }
     });
 
+    return;
+  }
+
+  const patchesMatch = pathname === '/patches' && req.method === 'GET';
+  if (patchesMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const patches = buildPatchCatalog();
+    res.end(JSON.stringify({
+      patches,
+      summary: buildPatchSummary(patches),
+    }));
+    return;
+  }
+
+  const patchSchedulesMatch = pathname === '/patches/schedules' && req.method === 'GET';
+  if (patchSchedulesMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ schedules: serializeSchedules(Array.from(patchSchedules.values())) }));
+    return;
+  }
+
+  const patchApproveMatch = pathname === '/patches/approve' && req.method === 'POST';
+  if (patchApproveMatch) {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const agentId = typeof payload?.agentId === 'string' ? payload.agentId.trim() : '';
+        const updateId = typeof payload?.updateId === 'string' ? payload.updateId.trim() : '';
+        if (!agentId || !updateId) {
+          res.writeHead(400);
+          return res.end('Agent and update ID required');
+        }
+
+        const entry = agents.get(agentId);
+        if (!entry) {
+          res.writeHead(404);
+          return res.end('Agent not found');
+        }
+
+        const approved = payload?.approved !== false;
+        const key = `${agentId}:${updateId}`;
+        if (approved) {
+          patchApprovals.set(key, { approvedAt: Date.now() });
+        } else {
+          patchApprovals.delete(key);
+        }
+
+        res.writeHead(204);
+        res.end();
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const patchScheduleMatch = pathname === '/patches/schedule' && req.method === 'POST';
+  if (patchScheduleMatch) {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const patchIds = Array.isArray(payload?.patchIds)
+          ? payload.patchIds.filter((entry) => typeof entry === 'string' && entry.trim()).map((entry) => entry.trim())
+          : [];
+        const agentIds = Array.isArray(payload?.agentIds)
+          ? payload.agentIds.filter((entry) => typeof entry === 'string' && entry.trim()).map((entry) => entry.trim())
+          : [];
+
+        if (patchIds.length === 0) {
+          res.writeHead(400);
+          return res.end('At least one patch must be selected');
+        }
+
+        const runAtValue = payload?.runAt;
+        let runAt = typeof runAtValue === 'number' ? runAtValue : Date.parse(runAtValue ?? '');
+        if (Number.isNaN(runAt)) {
+          runAt = Date.now();
+        }
+        if (runAt < Date.now()) {
+          runAt = Date.now();
+        }
+
+        const repeatMsValue = Number(payload?.repeatMs);
+        const repeatMs = Number.isFinite(repeatMsValue) && repeatMsValue > 0 ? repeatMsValue : 0;
+
+        const missingApprovals = [];
+        if (agentIds.length > 0) {
+          for (const agentId of agentIds) {
+            for (const patchId of patchIds) {
+              if (!isPatchApproved(agentId, patchId)) {
+                missingApprovals.push({ agentId, patchId });
+              }
+            }
+          }
+
+          if (missingApprovals.length > 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({
+              error: 'All agents must approve the selected patches before scheduling',
+              missing: missingApprovals,
+            }));
+          }
+        }
+
+        const schedule = {
+          id: uuidv4(),
+          name: typeof payload?.name === 'string' && payload.name.trim()
+            ? payload.name.trim()
+            : `Patch run ${new Date().toISOString()}`,
+          patchIds,
+          agentIds,
+          category: typeof payload?.category === 'string' && payload.category.trim()
+            ? payload.category.trim()
+            : null,
+          dynamic: agentIds.length === 0,
+          runAt,
+          repeatMs,
+          nextRun: runAt,
+          lastRun: null,
+          createdAt: Date.now(),
+          pendingAgents: new Set(agentIds),
+        };
+
+        patchSchedules.set(schedule.id, schedule);
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(serializeSchedule(schedule)));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const clientActionMatch = pathname.match(/^\/clients\/([^/]+)\/action$/);
+  if (clientActionMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = clientActionMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const action = typeof payload?.action === 'string' ? payload.action.trim() : '';
+        if (!action) {
+          res.writeHead(400);
+          return res.end('Action required');
+        }
+
+        sendControl(entry.socket, 'invoke-action', { action });
+        logPatchEvent({
+          timestamp: new Date().toISOString(),
+          type: 'action',
+          agentId,
+          action,
+          scheduleId: payload?.scheduleId ?? null,
+        });
+        res.writeHead(202);
+        res.end();
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid JSON');
+      }
+    });
+
+    return;
+  }
+
+  const deleteScheduleMatch = pathname.match(/^\/patches\/schedules\/([^/]+)$/);
+  if (deleteScheduleMatch && req.method === 'DELETE') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const scheduleId = deleteScheduleMatch[1];
+    if (patchSchedules.has(scheduleId)) {
+      patchSchedules.delete(scheduleId);
+      logPatchEvent({
+        timestamp: new Date().toISOString(),
+        type: 'schedule-deleted',
+        scheduleId,
+      });
+      res.writeHead(204);
+      return res.end();
+    }
+
+    res.writeHead(404);
+    res.end('Schedule not found');
+    return;
+  }
+
+  const historyMatch = pathname === '/patches/history' && req.method === 'GET';
+  if (historyMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ history: patchHistory.slice() }));
     return;
   }
 
@@ -1270,6 +1570,7 @@ wss.on('connection', (socket, request) => {
     bsodSummary: null,
     processSnapshot: null,
     loggedInUser: 'Unknown',
+    pendingReboot: false,
     softwareSummary: null,
   };
 
@@ -1382,9 +1683,27 @@ wss.on('connection', (socket, request) => {
         info.bsodSummary = parsed.summary ?? null;
       } else if (parsed?.type === 'update-install-result') {
         console.log(`Update install result from ${info.name}: success=${parsed.success}, message="${parsed.message}", rebootRequired=${parsed.rebootRequired}`);
-      } else if (parsed?.type === 'process-list') {
-        info.processSnapshot = parsed.snapshot ?? null;
-      } else if (parsed?.type === 'process-kill-result') {
+        info.pendingReboot = Boolean(parsed.rebootRequired);
+        const scheduleId = typeof parsed.scheduleId === 'string' && parsed.scheduleId.trim()
+          ? parsed.scheduleId.trim()
+          : null;
+        if (scheduleId) {
+          const schedule = patchSchedules.get(scheduleId);
+          logPatchEvent({
+            timestamp: new Date().toISOString(),
+            type: 'result',
+            scheduleId,
+            scheduleName: schedule?.name ?? null,
+            agentId: info.id,
+            success: Boolean(parsed.success),
+            message: parsed.message ?? '',
+            rebootRequired: Boolean(parsed.rebootRequired),
+            patchIds: schedule?.patchIds ?? [],
+          });
+        }
+        } else if (parsed?.type === 'process-list') {
+          info.processSnapshot = parsed.snapshot ?? null;
+        } else if (parsed?.type === 'process-kill-result') {
         console.log(`Process kill result from ${info.name}: pid=${parsed.processId}, success=${parsed.success}, message=${parsed.message ?? 'n/a'}`);
       } else if (parsed?.type === 'file-list' && typeof parsed.requestId === 'string') {
         const pending = completeFileRequest(parsed.requestId);
@@ -1431,9 +1750,19 @@ wss.on('connection', (socket, request) => {
           recordChatHistory(info.id, chatEvent);
           dispatchChatEvent(info.id, chatEvent);
         }
-      } else if (parsed?.type === 'software-operation-result') {
-        console.log(`Software operation result from ${info.name}: ${parsed.softwareId ?? 'n/a'} ${parsed.operation ?? 'operation'} success=${parsed.success ? 'yes' : 'no'} message="${parsed.message ?? ''}"`);
-      } else if (parsed?.type === 'screen-list' && Array.isArray(parsed.screens)) {
+        } else if (parsed?.type === 'software-operation-result') {
+          console.log(`Software operation result from ${info.name}: ${parsed.softwareId ?? 'n/a'} ${parsed.operation ?? 'operation'} success=${parsed.success ? 'yes' : 'no'} message="${parsed.message ?? ''}"`);
+        } else if (parsed?.type === 'action-result') {
+          logPatchEvent({
+            timestamp: new Date().toISOString(),
+            type: 'result',
+            agentId: info.id,
+            action: parsed.action ?? null,
+            scheduleId: parsed.scheduleId ?? null,
+            success: Boolean(parsed.success),
+            message: parsed.message ?? '',
+          });
+        } else if (parsed?.type === 'screen-list' && Array.isArray(parsed.screens)) {
         const normalized = parsed.screens.map((screen, index) => ({
           id: typeof screen.id === 'string' && screen.id.trim() ? screen.id.trim() : `display-${index + 1}`,
           name: typeof screen.name === 'string' && screen.name.trim() ? screen.name.trim() : `Display ${index + 1}`,
@@ -1544,6 +1873,287 @@ function sendScreenEvent(session, eventName, data) {
     res.write(`data: ${payload}\n\n`);
   }
 }
+
+function isPatchApproved(agentId, updateId) {
+  if (!agentId || !updateId) {
+    return false;
+  }
+
+  return patchApprovals.has(`${agentId}:${updateId}`);
+}
+
+function buildPatchCatalog() {
+  const catalog = new Map();
+
+  for (const info of agents.values()) {
+    const summary = info.updatesSummary;
+    if (!summary?.categories?.length) {
+      continue;
+    }
+
+    for (const category of summary.categories) {
+      const updates = Array.isArray(category.updates) ? category.updates : [];
+      for (const update of updates) {
+        const updateId = typeof update?.id === 'string' && update.id.trim() ? update.id.trim() : '';
+        if (!updateId) {
+          continue;
+        }
+
+        let entry = catalog.get(updateId);
+        if (!entry) {
+          entry = {
+            id: updateId,
+            title: update.title ?? 'Unnamed update',
+            description: update.description ?? '',
+            categories: new Map(),
+            kbArticleIDs: new Set(),
+            agents: new Map(),
+          };
+          catalog.set(updateId, entry);
+        }
+
+        if (category?.name) {
+          entry.categories.set(category.name, category.purpose ?? '');
+        }
+
+        if (Array.isArray(update.kbArticleIDs)) {
+          for (const kb of update.kbArticleIDs) {
+            if (typeof kb === 'string' && kb.trim()) {
+              entry.kbArticleIDs.add(kb.trim());
+            }
+          }
+        }
+
+        const agentKey = info.id ?? '';
+        if (!agentKey) {
+          continue;
+        }
+
+        let agentRecord = entry.agents.get(agentKey);
+        if (!agentRecord) {
+          agentRecord = {
+            agentId: agentKey,
+            agentName: info.name ?? agentKey,
+            status: info.status ?? 'offline',
+            group: info.group ?? DEFAULT_GROUP,
+            approved: false,
+            pendingReboot: Boolean(info.pendingReboot),
+          };
+          entry.agents.set(agentKey, agentRecord);
+        }
+
+        agentRecord.status = info.status ?? 'offline';
+        agentRecord.pendingReboot = Boolean(info.pendingReboot);
+        agentRecord.group = info.group ?? DEFAULT_GROUP;
+        agentRecord.approved = isPatchApproved(agentKey, updateId);
+      }
+    }
+  }
+
+  return Array.from(catalog.values()).map((entry) => ({
+    id: entry.id,
+    title: entry.title,
+    description: entry.description,
+    categories: Array.from(entry.categories.entries()).map(([name, purpose]) => ({ name, purpose })),
+    kbArticleIDs: Array.from(entry.kbArticleIDs),
+    agents: Array.from(entry.agents.values()),
+    primaryCategory: selectPrimaryCategory(entry.categories),
+  }));
+}
+
+function buildPatchSummary(patches) {
+  const agentIds = new Set();
+  let approvedCount = 0;
+  let pendingCount = 0;
+  let rebootCount = 0;
+  for (const patch of patches) {
+    for (const agent of patch.agents) {
+      agentIds.add(agent.agentId);
+      if (agent.approved) {
+        approvedCount += 1;
+      } else {
+        pendingCount += 1;
+      }
+      if (agent.pendingReboot) {
+        rebootCount += 1;
+      }
+    }
+  }
+
+  return {
+    totalPatches: patches.length,
+    totalAgents: agentIds.size,
+    approvedPairs: approvedCount,
+    pendingApprovals: pendingCount,
+    pendingReboots: rebootCount,
+  };
+}
+
+function collectApprovedAgentsForPatches(patchIds) {
+  const patchSet = new Set(patchIds);
+  const targets = new Map();
+  for (const key of patchApprovals.keys()) {
+    const separator = key.indexOf(':');
+    if (separator === -1) {
+      continue;
+    }
+
+    const agentId = key.slice(0, separator);
+    const updateId = key.slice(separator + 1);
+    if (!patchSet.has(updateId)) {
+      continue;
+    }
+
+    const updates = targets.get(agentId) ?? new Set();
+    updates.add(updateId);
+    targets.set(agentId, updates);
+  }
+  return targets;
+}
+
+function resolveAgentPackageDir() {
+  if (fs.existsSync(AGENT_DOWNLOAD_DIR)) {
+    return AGENT_DOWNLOAD_DIR;
+  }
+
+  if (fs.existsSync(AGENT_BUILD_FALLBACK_DIR)) {
+    return AGENT_BUILD_FALLBACK_DIR;
+  }
+
+  return null;
+}
+
+function selectPrimaryCategory(categoryMap) {
+  for (const canonical of PATCH_CATEGORY_ORDER) {
+    if (categoryMap.has(canonical)) {
+      return { name: canonical, purpose: categoryMap.get(canonical) ?? '' };
+    }
+  }
+
+  for (const [name, purpose] of categoryMap.entries()) {
+    return { name, purpose: purpose ?? '' };
+  }
+
+  return null;
+}
+
+function serializeSchedule(schedule) {
+  return {
+    id: schedule.id,
+    name: schedule.name,
+    patchIds: schedule.patchIds,
+    agentIds: Array.isArray(schedule.agentIds) ? schedule.agentIds : [],
+    category: schedule.category ?? null,
+    dynamic: Boolean(schedule.dynamic ?? (!Array.isArray(schedule.agentIds) || schedule.agentIds.length === 0)),
+    createdAt: schedule.createdAt,
+    nextRun: schedule.nextRun,
+    lastRun: schedule.lastRun,
+    repeatMs: schedule.repeatMs > 0 ? schedule.repeatMs : null,
+    pendingAgents: Array.from(schedule.pendingAgents),
+  };
+}
+
+function serializeSchedules(schedules) {
+  return schedules.map((schedule) => serializeSchedule(schedule));
+}
+
+function logPatchEvent(entry) {
+  patchHistory.unshift(entry);
+  if (patchHistory.length > PATCH_HISTORY_LIMIT) {
+    patchHistory.pop();
+  }
+}
+
+function processPatchSchedules() {
+  const now = Date.now();
+  for (const schedule of Array.from(patchSchedules.values())) {
+    if (schedule.nextRun > now) {
+      continue;
+    }
+
+    const isDynamic = Boolean(schedule.dynamic || !Array.isArray(schedule.agentIds) || !schedule.agentIds.length);
+    const targetEntries = [];
+
+    if (isDynamic) {
+      const dynamicTargets = collectApprovedAgentsForPatches(schedule.patchIds);
+      dynamicTargets.forEach((patchSet, agentId) => {
+        targetEntries.push({
+          agentId,
+          patchIds: Array.from(patchSet),
+        });
+      });
+    } else {
+      const referenceIds = schedule.repeatMs > 0
+        ? schedule.agentIds
+        : Array.from(schedule.pendingAgents);
+      referenceIds.forEach((agentId) => {
+        targetEntries.push({
+          agentId,
+          patchIds: schedule.patchIds.slice(),
+        });
+      });
+    }
+
+    if (!targetEntries.length) {
+      schedule.nextRun = now + PATCH_SCHEDULE_RETRY_MS;
+      continue;
+    }
+
+    let delivered = false;
+    for (const target of targetEntries) {
+      const entry = clientsById.get(target.agentId);
+      if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+        continue;
+      }
+
+      const filteredIds = Array.from(new Set(target.patchIds)).filter(Boolean);
+      if (!filteredIds.length) {
+        continue;
+      }
+
+      console.log(`Triggering patch schedule ${schedule.name} (${schedule.id}) for agent ${target.agentId}`);
+      sendControl(entry.socket, 'install-updates', { ids: filteredIds, scheduleId: schedule.id });
+      logPatchEvent({
+        timestamp: new Date().toISOString(),
+        type: 'dispatch',
+        scheduleId: schedule.id,
+        scheduleName: schedule.name,
+        agentId: target.agentId,
+        patchIds: filteredIds,
+      });
+      delivered = true;
+      if (!isDynamic && schedule.repeatMs === 0) {
+        schedule.pendingAgents.delete(target.agentId);
+      }
+    }
+
+    schedule.lastRun = now;
+    if (schedule.repeatMs > 0) {
+      if (!isDynamic) {
+        schedule.pendingAgents = new Set(schedule.agentIds);
+      }
+      schedule.nextRun = now + schedule.repeatMs;
+      continue;
+    }
+
+    if (isDynamic) {
+      patchSchedules.delete(schedule.id);
+      continue;
+    }
+
+    if (schedule.pendingAgents.size === 0) {
+      patchSchedules.delete(schedule.id);
+      continue;
+    }
+
+    schedule.nextRun = now + PATCH_SCHEDULE_RETRY_MS;
+    if (!delivered) {
+      console.log(`Patch schedule ${schedule.name} waiting for offline targets`);
+    }
+  }
+}
+
+setInterval(processPatchSchedules, PATCH_SCHEDULE_TICK_MS);
 
 function addChatListener(agentId, res) {
   const listeners = chatListeners.get(agentId) ?? new Set();

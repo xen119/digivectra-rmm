@@ -1514,9 +1514,19 @@ internal static class Program
 
     private static async Task HandleInstallUpdatesAsync(ClientWebSocket socket, JsonElement element, CancellationToken cancellationToken)
     {
+        string? scheduleId = null;
+        if (element.TryGetProperty("scheduleId", out var scheduleElement) && scheduleElement.ValueKind == JsonValueKind.String)
+        {
+            var candidate = scheduleElement.GetString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                scheduleId = candidate;
+            }
+        }
+
         if (!element.TryGetProperty("ids", out var idsElement) || idsElement.ValueKind != JsonValueKind.Array)
         {
-            await SendUpdateInstallResultAsync(socket, false, "No updates selected.", false, cancellationToken);
+            await SendUpdateInstallResultAsync(socket, false, "No updates selected.", false, cancellationToken, scheduleId);
             return;
         }
 
@@ -1529,14 +1539,14 @@ internal static class Program
 
         if (ids.Length == 0)
         {
-            await SendUpdateInstallResultAsync(socket, false, "No updates selected.", false, cancellationToken);
+            await SendUpdateInstallResultAsync(socket, false, "No updates selected.", false, cancellationToken, scheduleId);
             return;
         }
 
         UpdateInstallResult result;
         try
         {
-            result = await Task.Run(() => InstallSelectedUpdates(ids), cancellationToken);
+            result = await Task.Run(() => InstallSelectedUpdates(ids, cancellationToken), cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -1544,18 +1554,18 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            await SendUpdateInstallResultAsync(socket, false, $"Install failed: {ex.Message}", false, cancellationToken);
+            await SendUpdateInstallResultAsync(socket, false, $"Install failed: {ex.Message}", false, cancellationToken, scheduleId);
             return;
         }
 
-        await SendUpdateInstallResultAsync(socket, result.Success, result.Message, result.RebootRequired, cancellationToken);
+        await SendUpdateInstallResultAsync(socket, result.Success, result.Message, result.RebootRequired, cancellationToken, scheduleId);
         if (result.Success)
         {
             await SendAgentUpdateSummaryAsync(socket, cancellationToken, true);
         }
     }
 
-    private static UpdateInstallResult InstallSelectedUpdates(string[] requestedIds)
+    private static UpdateInstallResult InstallSelectedUpdates(string[] requestedIds, CancellationToken cancellationToken)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
@@ -1583,7 +1593,35 @@ internal static class Program
         }
         dynamic results = searcher.Search("IsInstalled=0 and IsHidden=0");
         var requestedSet = new HashSet<string>(requestedIds, StringComparer.OrdinalIgnoreCase);
-        dynamic collection = session.CreateUpdateCollection();
+        dynamic collection;
+        var collectionType = Type.GetTypeFromProgID("Microsoft.Update.UpdateCollection");
+        if (collectionType is not null)
+        {
+            collection = Activator.CreateInstance(collectionType);
+        }
+        else
+        {
+            try
+            {
+                collection = session.CreateUpdateCollection();
+            }
+            catch
+            {
+                collection = null;
+            }
+        }
+
+        if (collection is null)
+        {
+            try
+            {
+                return InstallUpdatesViaPowerShell(requestedIds, cancellationToken).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                return new UpdateInstallResult(false, $"PowerShell fallback failed: {ex.Message}");
+            }
+        }
 
         foreach (dynamic update in results.Updates)
         {
@@ -1624,15 +1662,92 @@ internal static class Program
         return new UpdateInstallResult(success, message, reboot);
     }
 
-    private static Task SendUpdateInstallResultAsync(ClientWebSocket socket, bool success, string message, bool rebootRequired, CancellationToken cancellationToken)
+    private static Task SendUpdateInstallResultAsync(ClientWebSocket socket, bool success, string message, bool rebootRequired, CancellationToken cancellationToken, string? scheduleId = null)
     {
         return SendJsonAsync(socket, new
         {
             type = "update-install-result",
             success,
             message,
-            rebootRequired
+            rebootRequired,
+            scheduleId
         }, cancellationToken);
+    }
+
+    private static Task SendActionResultAsync(ClientWebSocket socket, bool success, string message, string action, string? scheduleId, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+        {
+            type = "action-result",
+            success,
+            message,
+            action,
+            scheduleId
+        }, cancellationToken);
+    }
+
+    private static async Task HandleInvokeActionAsync(ClientWebSocket socket, JsonElement element, CancellationToken cancellationToken)
+    {
+        var action = element.TryGetProperty("action", out var actionElement) && actionElement.ValueKind == JsonValueKind.String
+            ? actionElement.GetString()?.Trim()
+            : null;
+
+        var scheduleId = element.TryGetProperty("scheduleId", out var scheduleElement) && scheduleElement.ValueKind == JsonValueKind.String
+            ? scheduleElement.GetString()?.Trim()
+            : null;
+
+        if (string.IsNullOrWhiteSpace(action))
+        {
+            await SendActionResultAsync(socket, false, "Action missing.", string.Empty, scheduleId, cancellationToken);
+            return;
+        }
+
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            await SendActionResultAsync(socket, false, "Action requires Windows.", action, scheduleId, cancellationToken);
+            return;
+        }
+
+        var args = action switch
+        {
+            "restart" => "/r /t 0",
+            "shutdown" => "/s /t 0",
+            "update-restart" => "/g /t 0",
+            "update-shutdown" => "/s /t 0 /d p:4:1",
+            _ => null
+        };
+
+        if (args is null)
+        {
+            await SendActionResultAsync(socket, false, "Unknown action.", action, scheduleId, cancellationToken);
+            return;
+        }
+
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "shutdown",
+                    Arguments = args,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                }
+            };
+
+            if (!process.Start())
+            {
+                await SendActionResultAsync(socket, false, "Failed to start action.", action, scheduleId, cancellationToken);
+                return;
+            }
+
+            await SendActionResultAsync(socket, true, "Action triggered.", action, scheduleId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await SendActionResultAsync(socket, false, $"Action failed: {ex.Message}", action, scheduleId, cancellationToken);
+        }
     }
 
     private static async Task HandleUninstallRequestAsync(ClientWebSocket socket, JsonElement element, CancellationToken cancellationToken)
@@ -1754,6 +1869,26 @@ internal static class Program
         {
             return (false, $"Command failed: {ex.Message}");
         }
+    }
+
+    private static async Task<UpdateInstallResult> InstallUpdatesViaPowerShell(string[] requestedIds, CancellationToken cancellationToken)
+    {
+        var quotedIds = requestedIds
+            .Select(id => id?.Replace("'", "''"))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => $"'{id}'")
+            .ToArray();
+
+        if (quotedIds.Length == 0)
+        {
+            return new UpdateInstallResult(false, "No valid update ids for PowerShell fallback.");
+        }
+
+        var idsArray = string.Join(",", quotedIds);
+        var script = $"Import-Module PSWindowsUpdate -ErrorAction Stop; $ids=@({idsArray}); Install-WindowsUpdate -KBArticleID $ids -AcceptAll -AutoReboot:$false -IgnoreUserInput";
+        var command = $"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"{script}\"";
+        var (success, message) = await RunCommandAsync(command, cancellationToken);
+        return new UpdateInstallResult(success, success ? "Updates installed via PowerShell." : $"PowerShell install failed: {message}");
     }
 
     private static async Task HandleServerMessageAsync(string payload, ClientWebSocket socket, CancellationToken cancellationToken)
@@ -1901,6 +2036,9 @@ internal static class Program
                 break;
             case "install-updates":
                 await HandleInstallUpdatesAsync(socket, document.RootElement, cancellationToken);
+                break;
+            case "invoke-action":
+                await HandleInvokeActionAsync(socket, document.RootElement, cancellationToken);
                 break;
             case "run-remediation":
                 await RunRemediationScriptAsync(socket, document.RootElement, cancellationToken);

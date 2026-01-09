@@ -28,10 +28,13 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - Each agent card now exposes a **Chat** button that opens `chat.html`; messages stream over SSE, you can send secure requests, and the agent replies by typing `/chat <response>` in the console (the page now shows timestamps and the user name of the sender).
 - Each card also shows the agent’s logged-in user so you can tell whom you are talking to, and the chat window payload includes the dashboard user that initiated the request.
 - Each agent card now exposes an updates badge (green if there are no outstanding Windows updates, red otherwise); clicking it opens `updates.html`, where updates are grouped by category/purpose, bulk-selectable, and installable via the agent.
+- A **Patches** sidebar link launches `patches.html`, aggregating every pending Windows update across agents; the three tabs (approve/schedule/scheduled) now also let you trigger remote restart/shutdown/update+restart/shutdown commands per agent, log those intents plus their results, and reuse the log to confirm that reboot-required machines have been handled before scheduling the next wave.
 - A **Manage tasks** button opens `processes.html`, letting you view per-process CPU/RAM/disk/network percentages and send kill requests.
 - A **Files** button opens `files.html`, giving you a quick explorer for the selected agent so you can browse directories, download files, or upload content directly to a target path.
 - A **Software** button opens `software.html`, showing paginated results for all registry-installed and Microsoft Store apps and sending uninstall requests (using whatever uninstall string or Appx package ID was collected) back to the agent.
 - A **Monitoring** button opens `monitoring.html`, where you can define monitoring profiles (metric, threshold, window), map them to alert profiles (dashboard/email + optional remediation scripts), unassign agents/groups, delete outdated profiles, and watch a live alert/remediation log.
+- The **Scheduler** view lets you select one or more agent/group targets, choose an interval (seconds/minutes/etc.), pick from stored scripts, and save recurring jobs for future automation or patch campaigns.
+- A new **Scheduler** view (sidebar link) lets you sketch recurring script or patch jobs for future implementation and keeps a client-side list of the planned runs.
 - From that page you can also delete obsolete monitoring profiles so agents stop collecting the associated metrics.
 - A **BSODs** badge tracks Windows bug check counts; click it to open `bsod.html`, which lists timestamped events.
 
@@ -68,6 +71,19 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
    ```
 
 Press Enter on an empty line in the agent to close the connection gracefully.
+
+## Distributing the agent
+
+The dashboard now exposes a **Download agent** button (top-right of `https://localhost:8443`). Clicking it packages whatever is in `AgentPublished/` (or, when that folder is empty, the default `Agent/bin/Debug/net8.0-windows` build) into a zip, injects a `run-agent.bat` launcher plus a `server.json` containing the current `wss://` endpoint, and streams that archive back to the browser. Because the endpoint is computed from the request’s host header and protocol, the downloaded agent always points to the domain or IP address you used when visiting the dashboard—even when you host the server on another domain.
+
+Before clicking **Download agent**, publish your latest build:
+
+```powershell
+cd Agent
+dotnet publish -c Release -r win-x64 --self-contained false -o ..\AgentPublished
+```
+
+If you store the published files somewhere else, set `AGENT_DOWNLOAD_DIR` before launching the server so `/agent/download` packages the right directory.
 
 ## Running the agent as SYSTEM
 

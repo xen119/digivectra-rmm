@@ -204,6 +204,13 @@ function createAgentCard(agent, groups) {
   meta.textContent = `${formatPlatform(agent.platform)} · ${agent.os ?? 'Unknown OS'} · ${agent.remoteAddress} · connected at ${connectedAt}`;
   card.appendChild(meta);
 
+  if (agent.pendingReboot) {
+    const rebootPill = document.createElement('span');
+    rebootPill.className = 'reboot-pill';
+    rebootPill.textContent = 'Pending reboot';
+    card.appendChild(rebootPill);
+  }
+
   const specLine = document.createElement('div');
   specLine.className = 'agent-spec';
   specLine.textContent = formatDeviceSpecs(agent.specs);

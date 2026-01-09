@@ -24,9 +24,7 @@
       "name": "Monitor RAM",
       "description": "",
       "alertProfileId": "e4527840-687e-490a-98d4-994fb9810b84",
-      "assignedAgents": [
-        "7c0cf07f-f76b-4984-9385-ffa54c65d630"
-      ],
+      "assignedAgents": [],
       "assignedGroups": [],
       "rules": [
         {

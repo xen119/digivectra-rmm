@@ -3,19 +3,22 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Diagnostics.Eventing.Reader;
 using System.Net.WebSockets;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Microsoft.MixedReality.WebRTC;
 using System.Net.NetworkInformation;
+using Microsoft.Win32;
 
 namespace Agent;
 
@@ -754,6 +757,361 @@ internal static class Program
         await SendJsonAsync(socket, new { type = "process-list", snapshot }, cancellationToken);
     }
 
+    private static async Task SendSoftwareListAsync(ClientWebSocket socket, string requestId, CancellationToken cancellationToken)
+    {
+        IReadOnlyCollection<InstalledSoftwareEntry> entries;
+        try
+        {
+            entries = await CollectInstalledSoftwareAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to collect installed software: {ex.Message}");
+            entries = Array.Empty<InstalledSoftwareEntry>();
+        }
+
+        var payload = new
+        {
+            type = "software-list",
+            requestId,
+            entries,
+            retrievedAt = DateTime.UtcNow.ToString("o"),
+        };
+
+        await SendJsonAsync(socket, payload, cancellationToken);
+    }
+
+    private static async Task<IReadOnlyCollection<InstalledSoftwareEntry>> CollectInstalledSoftwareAsync(CancellationToken cancellationToken)
+    {
+        var entries = new List<InstalledSoftwareEntry>();
+        entries.AddRange(CollectRegistryInstalledSoftware());
+        entries.AddRange(await CollectAppxPackagesAsync(cancellationToken));
+
+        var unique = new Dictionary<string, InstalledSoftwareEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            var normalizedName = NormalizeForKey(entry.Name);
+            var normalizedVersion = NormalizeForKey(entry.Version);
+            if (string.IsNullOrEmpty(normalizedName) && string.IsNullOrEmpty(normalizedVersion))
+            {
+                continue;
+            }
+
+            var key = $"{normalizedName}|{normalizedVersion}";
+            if (unique.TryGetValue(key, out var existing))
+            {
+                unique[key] = PickPreferredSoftwareEntry(existing, entry);
+                continue;
+            }
+
+            unique[key] = entry;
+        }
+
+        return unique.Values.ToList();
+    }
+
+    private static InstalledSoftwareEntry PickPreferredSoftwareEntry(InstalledSoftwareEntry current, InstalledSoftwareEntry candidate)
+    {
+        if (current == null)
+        {
+            return candidate;
+        }
+
+        if (candidate == null)
+        {
+            return current;
+        }
+
+        if (string.IsNullOrEmpty(current.InstallLocation) && !string.IsNullOrEmpty(candidate.InstallLocation))
+        {
+            return candidate;
+        }
+
+        if (!string.IsNullOrEmpty(current.InstallLocation) && string.IsNullOrEmpty(candidate.InstallLocation))
+        {
+            return current;
+        }
+
+        var currentIs64 = current.Source?.Contains("64-bit", StringComparison.OrdinalIgnoreCase) ?? false;
+        var candidateIs64 = candidate.Source?.Contains("64-bit", StringComparison.OrdinalIgnoreCase) ?? false;
+        if (candidateIs64 && !currentIs64)
+        {
+            return candidate;
+        }
+
+        if (currentIs64 && !candidateIs64)
+        {
+            return current;
+        }
+
+        return current;
+    }
+
+    private static IEnumerable<InstalledSoftwareEntry> CollectRegistryInstalledSoftware()
+    {
+        var views = new (RegistryHive Hive, RegistryView View, string Label)[]
+        {
+            (RegistryHive.LocalMachine, RegistryView.Registry64, "HKLM 64-bit"),
+            (RegistryHive.LocalMachine, RegistryView.Registry32, "HKLM 32-bit"),
+            (RegistryHive.CurrentUser, RegistryView.Registry64, "HKCU"),
+        };
+
+        var results = new List<InstalledSoftwareEntry>();
+        foreach (var (hive, view, label) in views)
+        {
+            try
+            {
+                using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+                using var uninstallKey = baseKey.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
+                if (uninstallKey is null)
+                {
+                    continue;
+                }
+
+                foreach (var subKeyName in uninstallKey.GetSubKeyNames())
+                {
+                    using var subKey = uninstallKey.OpenSubKey(subKeyName);
+                    if (subKey is null)
+                    {
+                        continue;
+                    }
+
+                    var displayName = subKey.GetValue("DisplayName") as string;
+                    if (string.IsNullOrWhiteSpace(displayName))
+                    {
+                        continue;
+                    }
+
+                    var uninstallString = TrimToNull(subKey.GetValue("UninstallString") as string);
+                    var entry = new InstalledSoftwareEntry
+                    {
+                        Id = $"registry-{label}-{subKeyName}".Replace(" ", "-"),
+                        Name = displayName.Trim(),
+                        Version = (subKey.GetValue("DisplayVersion") as string ?? string.Empty).Trim(),
+                        Publisher = (subKey.GetValue("Publisher") as string ?? string.Empty).Trim(),
+                        Source = $"Registry ({label})",
+                        InstallLocation = TrimToNull(subKey.GetValue("InstallLocation") as string),
+                        UninstallCommand = uninstallString,
+                        ProductCode = TrimToNull(subKey.GetValue("ProductCode") as string),
+                    };
+                    if (string.IsNullOrEmpty(entry.ProductCode))
+                    {
+                        entry.ProductCode = ExtractGuidFromUninstallString(uninstallString);
+                    }
+
+                    var installDateRaw = subKey.GetValue("InstallDate") as string;
+                    if (!string.IsNullOrWhiteSpace(installDateRaw) &&
+                        DateTime.TryParseExact(installDateRaw.Trim(), "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var installDate))
+                    {
+                        entry.InstallDate = installDate.ToString("yyyy-MM-dd");
+                    }
+
+                    results.Add(entry);
+                }
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+        }
+
+        return results;
+    }
+
+    private static async Task<IEnumerable<InstalledSoftwareEntry>> CollectAppxPackagesAsync(CancellationToken cancellationToken)
+    {
+        var entries = new List<InstalledSoftwareEntry>();
+        try
+        {
+            const string command = "Get-AppxPackage | Select Name, PackageFullName, Publisher, Version | ConvertTo-Json -Compress";
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"{command}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+
+            using var process = Process.Start(psi);
+            if (process is null)
+            {
+                return entries;
+            }
+
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            var waitTask = process.WaitForExitAsync(cancellationToken);
+            await Task.WhenAll(stdoutTask, stderrTask, waitTask);
+
+            if (process.ExitCode != 0)
+            {
+                var stderr = await stderrTask;
+                if (!string.IsNullOrWhiteSpace(stderr))
+                {
+                    Console.WriteLine($"Appx enumeration failed: {stderr}");
+                }
+
+                return entries;
+            }
+
+            var output = (await stdoutTask).Trim();
+            if (string.IsNullOrWhiteSpace(output))
+            {
+                return entries;
+            }
+
+            using var document = JsonDocument.Parse(output);
+            static string GetString(JsonElement element, string key)
+            {
+                return element.TryGetProperty(key, out var property) && property.ValueKind == JsonValueKind.String
+                    ? property.GetString()?.Trim() ?? string.Empty
+                    : string.Empty;
+            }
+
+            void AddEntry(JsonElement element)
+            {
+                if (element.ValueKind != JsonValueKind.Object)
+                {
+                    return;
+                }
+
+                var packageFullName = GetString(element, "PackageFullName");
+                if (string.IsNullOrWhiteSpace(packageFullName))
+                {
+                    return;
+                }
+
+                entries.Add(new InstalledSoftwareEntry
+                {
+                    Id = $"appx-{packageFullName}",
+                    Name = GetString(element, "Name"),
+                    Version = GetString(element, "Version"),
+                    Publisher = GetString(element, "Publisher"),
+                    Source = "Microsoft Store",
+                    PackageFullName = packageFullName,
+                });
+            }
+
+            if (document.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var element in document.RootElement.EnumerateArray())
+                {
+                    AddEntry(element);
+                }
+            }
+            else
+            {
+                AddEntry(document.RootElement);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Appx enumeration failed: {ex.Message}");
+        }
+
+        return entries;
+    }
+
+    private static string? TrimToNull(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim();
+    }
+
+    private static string? ExtractGuidFromUninstallString(string? uninstall)
+    {
+        if (string.IsNullOrWhiteSpace(uninstall))
+        {
+            return null;
+        }
+
+        var match = Regex.Match(uninstall, @"\{[0-9A-Fa-f\-]{36}\}");
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        return match.Value;
+    }
+
+    private static string[] SplitCommandLine(string commandLine)
+    {
+        if (string.IsNullOrWhiteSpace(commandLine))
+        {
+            return Array.Empty<string>();
+        }
+
+        var ptr = CommandLineToArgvW(commandLine, out var count);
+        if (ptr == IntPtr.Zero || count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var args = new string[count];
+        try
+        {
+            for (var i = 0; i < count; i++)
+            {
+                var argPtr = Marshal.ReadIntPtr(ptr, i * IntPtr.Size);
+                args[i] = Marshal.PtrToStringUni(argPtr) ?? string.Empty;
+            }
+
+            return args;
+        }
+        finally
+        {
+            LocalFree(ptr);
+        }
+    }
+
+    private static string QuoteArgument(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        if (value.StartsWith("\"", StringComparison.Ordinal) && value.EndsWith("\"", StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        var needsQuotes = value.Any(char.IsWhiteSpace);
+        if (!needsQuotes)
+        {
+            return value;
+        }
+
+        var escaped = value.Replace("\"", "\\\"");
+        return $"\"{escaped}\"";
+    }
+
+    private static string NormalizeForKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim();
+        var collapsed = Regex.Replace(trimmed, @"\s+", " ");
+        return collapsed.ToLowerInvariant();
+    }
+
     private static async Task HandleKillProcessAsync(ClientWebSocket socket, JsonElement root, CancellationToken cancellationToken)
     {
         if (!root.TryGetProperty("processId", out var idElement) || !idElement.TryGetInt32(out var processId))
@@ -1277,6 +1635,127 @@ internal static class Program
         }, cancellationToken);
     }
 
+    private static async Task HandleUninstallRequestAsync(ClientWebSocket socket, JsonElement element, CancellationToken cancellationToken)
+    {
+        var requestId = element.TryGetProperty("requestId", out var requestIdElement) && requestIdElement.ValueKind == JsonValueKind.String
+            ? requestIdElement.GetString()?.Trim() ?? string.Empty
+            : string.Empty;
+
+        var softwareId = element.TryGetProperty("softwareId", out var idElement) && idElement.ValueKind == JsonValueKind.String
+            ? idElement.GetString()?.Trim() ?? string.Empty
+            : string.Empty;
+
+        var source = element.TryGetProperty("source", out var sourceElement) && sourceElement.ValueKind == JsonValueKind.String
+            ? sourceElement.GetString()?.Trim() ?? string.Empty
+            : string.Empty;
+
+        var uninstallCommand = element.TryGetProperty("uninstallCommand", out var uninstallElement) && uninstallElement.ValueKind == JsonValueKind.String
+            ? uninstallElement.GetString()
+            : null;
+
+        var packageFullName = element.TryGetProperty("packageFullName", out var packageElement) && packageElement.ValueKind == JsonValueKind.String
+            ? packageElement.GetString()
+            : null;
+
+        var productCode = element.TryGetProperty("productCode", out var codeElement) && codeElement.ValueKind == JsonValueKind.String
+            ? codeElement.GetString()?.Trim()
+            : null;
+
+        var success = false;
+        var message = "No uninstall instructions provided for this item.";
+
+        if (source.Equals("appx", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(packageFullName))
+        {
+            var safeName = packageFullName.Replace("'", "''");
+            var args = $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"Remove-AppxPackage -Package '{safeName}'\"";
+            (success, message) = await RunCommandAsync($"powershell.exe {args}", cancellationToken);
+        }
+        else if (!string.IsNullOrWhiteSpace(productCode))
+        {
+            var sanitized = productCode.Trim('{', '}');
+            var args = $"wmic product where \"IdentifyingNumber='{{{sanitized}}}'\" call uninstall /nointeractive";
+            (success, message) = await RunCommandAsync(args, cancellationToken);
+        }
+        else if (!string.IsNullOrWhiteSpace(uninstallCommand))
+        {
+            (success, message) = await RunCommandAsync(uninstallCommand, cancellationToken);
+        }
+
+        await SendSoftwareOperationResultAsync(socket, requestId, softwareId, "uninstall", success, message, cancellationToken);
+    }
+
+    private static Task SendSoftwareOperationResultAsync(ClientWebSocket socket, string requestId, string softwareId, string operation, bool success, string message, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+        {
+            type = "software-operation-result",
+            requestId,
+            softwareId,
+            operation,
+            success,
+            message
+        }, cancellationToken);
+    }
+
+    private static async Task<(bool success, string message)> RunCommandAsync(string commandLine, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var args = SplitCommandLine(commandLine);
+            if (args.Length == 0)
+            {
+                return (false, "Command line was empty.");
+            }
+
+            var target = args[0];
+            var commandArguments = args.Skip(1)
+                .Select(QuoteArgument)
+                .Where(arg => !string.IsNullOrEmpty(arg))
+                .ToArray();
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = target,
+                Arguments = string.Join(" ", commandArguments),
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+
+            using var process = Process.Start(psi);
+            if (process is null)
+            {
+                return (false, "Unable to launch command.");
+            }
+
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            var waitTask = process.WaitForExitAsync(cancellationToken);
+            await Task.WhenAll(stdoutTask, stderrTask, waitTask);
+
+            var outputParts = new[] { stdoutTask.Result, stderrTask.Result }
+                .Where(text => !string.IsNullOrWhiteSpace(text))
+                .Select(text => text.Trim())
+                .ToArray();
+            var combined = string.Join(Environment.NewLine, outputParts);
+            var success = process.ExitCode == 0;
+            var finalMessage = string.IsNullOrWhiteSpace(combined)
+                ? success ? "Command completed successfully." : $"Command failed with exit code {process.ExitCode}."
+                : combined;
+
+            return (success, finalMessage);
+        }
+        catch (OperationCanceledException)
+        {
+            return (false, "Operation canceled.");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Command failed: {ex.Message}");
+        }
+    }
+
     private static async Task HandleServerMessageAsync(string payload, ClientWebSocket socket, CancellationToken cancellationToken)
     {
         JsonDocument? document = null;
@@ -1390,6 +1869,17 @@ internal static class Program
                 break;
             case "kill-process":
                 await HandleKillProcessAsync(socket, document.RootElement, cancellationToken);
+                break;
+            case "list-software":
+                if (document.RootElement.TryGetProperty("requestId", out var requestIdElement) &&
+                    requestIdElement.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(requestIdElement.GetString()))
+                {
+                    await SendSoftwareListAsync(socket, requestIdElement.GetString()!, cancellationToken);
+                }
+                break;
+            case "uninstall-software":
+                await HandleUninstallRequestAsync(socket, document.RootElement, cancellationToken);
                 break;
             case "request-bsod":
                 await SendBsodSummaryAsync(socket, cancellationToken, true);
@@ -2845,11 +3335,50 @@ internal static class Program
         public ulong OtherTransferCount;
     }
 
+    private sealed class InstalledSoftwareEntry
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("version")]
+        public string Version { get; set; } = string.Empty;
+
+        [JsonPropertyName("publisher")]
+        public string Publisher { get; set; } = string.Empty;
+
+        [JsonPropertyName("source")]
+        public string Source { get; set; } = string.Empty;
+
+        [JsonPropertyName("installDate")]
+        public string? InstallDate { get; set; }
+
+        [JsonPropertyName("installLocation")]
+        public string? InstallLocation { get; set; }
+
+        [JsonPropertyName("uninstallCommand")]
+        public string? UninstallCommand { get; set; }
+
+        [JsonPropertyName("packageFullName")]
+        public string? PackageFullName { get; set; }
+
+        [JsonPropertyName("productCode")]
+        public string? ProductCode { get; set; }
+    }
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetProcessIoCounters(IntPtr handle, out IoCounters counters);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr CommandLineToArgvW(string lpCmdLine, out int pNumArgs);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr LocalFree(IntPtr hMem);
 
     private sealed class DeviceSpecs
     {

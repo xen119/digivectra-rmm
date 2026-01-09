@@ -260,6 +260,23 @@ function createAgentCard(agent, groups) {
     window.open(`files.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
   });
   actions.appendChild(filesButton);
+  const softwareButton = document.createElement('button');
+  softwareButton.type = 'button';
+  const softwareCount = typeof agent.softwareSummary?.totalCount === 'number'
+    ? agent.softwareSummary.totalCount
+    : '—';
+  softwareButton.textContent = `Software: ${softwareCount}`;
+  softwareButton.addEventListener('click', () => {
+    const params = new URLSearchParams();
+    if (agent.id) {
+      params.set('agent', agent.id);
+    }
+    if (agent.name) {
+      params.set('name', agent.name);
+    }
+    window.open(`software.html?${params.toString()}`, '_blank', 'noopener');
+  });
+  actions.appendChild(softwareButton);
   const chatButton = document.createElement('button');
   chatButton.type = 'button';
   chatButton.textContent = 'Chat';
@@ -366,8 +383,7 @@ function applyMonitoringPillState(pill, { label, status, enabled }) {
 
   const stateClass = status === 'triggered' ? 'alert' : enabled ? 'ok' : 'disabled';
   pill.className = `monitor-pill ${stateClass}`;
-  const suffix = status === 'triggered' ? ' • Alert' : status === 'resolved' ? ' • Resolved' : '';
-  pill.textContent = `${label}${suffix}`;
+  pill.textContent = label;
   pill.dataset.label = label;
   pill.dataset.status = status;
   pill.dataset.monitoringEnabled = enabled ? 'true' : 'false';

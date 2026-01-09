@@ -1,8 +1,8 @@
 {
   "monitoringProfiles": [
     {
-      "id": "b7f98b52-5ace-43ce-9a0a-fce961117f5a",
-      "name": "Monitor",
+      "id": "1b36f54d-7747-4c08-8faf-e1c1ce932624",
+      "name": "Monitor CPU",
       "description": "",
       "alertProfileId": "e4527840-687e-490a-98d4-994fb9810b84",
       "assignedAgents": [
@@ -11,17 +11,17 @@
       "assignedGroups": [],
       "rules": [
         {
-          "id": "86fdd772-5fa5-43d5-9e2b-fc114cbcff05",
+          "id": "309779d6-42fb-42f3-bb25-dda177b11d58",
           "metric": "cpu",
-          "threshold": 50,
+          "threshold": 20,
           "windowSeconds": 30,
           "comparison": "gte"
         }
       ]
     },
     {
-      "id": "19339513-48ed-4c51-b738-b346b4feff90",
-      "name": "Monitor ram",
+      "id": "44129c72-3703-4234-9839-8c703bf146c4",
+      "name": "Monitor RAM",
       "description": "",
       "alertProfileId": "e4527840-687e-490a-98d4-994fb9810b84",
       "assignedAgents": [
@@ -30,9 +30,9 @@
       "assignedGroups": [],
       "rules": [
         {
-          "id": "021c90a2-1520-4452-9fc3-d4868b91c002",
+          "id": "7924be6f-d514-4fcc-94f3-4969cf5802ef",
           "metric": "ram",
-          "threshold": 50,
+          "threshold": 90,
           "windowSeconds": 10,
           "comparison": "gte"
         }

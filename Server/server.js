@@ -37,6 +37,8 @@ const screenListRequests = new Map(); // agentId -> { resolvers: [], timer }
 const FILE_REQUEST_TIMEOUT_MS = 120_000;
 const FILE_UPLOAD_CHUNK_BYTES = 256 * 1024;
 const fileRequests = new Map(); // requestId -> { kind, agentId, resolve, reject, timer }
+const SOFTWARE_REQUEST_TIMEOUT_MS = 60_000;
+const softwareRequests = new Map(); // requestId -> { agentId, resolve, reject, timer }
 const MIN_SCREEN_SCALE = 0.35;
 const MAX_SCREEN_SCALE = 1.0;
 const DEFAULT_SCREEN_SCALE = 0.75;
@@ -106,6 +108,7 @@ server.on('request', (req, res) => {
       monitoringEnabled: shouldMonitorAgent(info),
       monitoringAlert: agentAlertStatus.get(info.id) ?? false,
       monitoringProfiles: getAgentMonitoringProfiles(info),
+      softwareSummary: info.softwareSummary ?? null,
     }));
     return res.end(JSON.stringify(payload));
   }
@@ -717,7 +720,39 @@ server.on('request', (req, res) => {
       }
     });
 
-    return;
+  return;
+}
+
+  const profileDeleteMatch = pathname.match(/^\/monitoring\/profiles\/([^/]+)$/);
+  if (profileDeleteMatch && req.method === 'DELETE') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const profileId = profileDeleteMatch[1];
+    const index = monitoringConfig.monitoringProfiles.findIndex((entry) => entry.id === profileId);
+    if (index === -1) {
+      res.writeHead(404);
+      return res.end('Profile not found');
+    }
+
+    const [removed] = monitoringConfig.monitoringProfiles.splice(index, 1);
+    clearMonitoringProfileState(profileId);
+    saveMonitoringConfig();
+
+    const affectedAgents = new Set(removed.assignedAgents ?? []);
+    for (const entry of clientsById.values()) {
+      const groupName = entry.info.group ?? DEFAULT_GROUP;
+      if ((removed.assignedGroups ?? []).includes(groupName)) {
+        affectedAgents.add(entry.info.id);
+      }
+    }
+    for (const agentId of affectedAgents) {
+      notifyAgentMonitoring(agentId);
+    }
+
+    res.writeHead(204);
+    return res.end();
   }
 
   if (pathname === '/alert-profiles' && req.method === 'GET') {
@@ -748,6 +783,52 @@ server.on('request', (req, res) => {
         saveMonitoringConfig();
         res.writeHead(201, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(profile));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  if (profileAssignMatch && req.method === 'DELETE') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const profileId = profileAssignMatch[1];
+    const profile = monitoringConfig.monitoringProfiles.find((entry) => entry.id === profileId);
+    if (!profile) {
+      res.writeHead(404);
+      return res.end('Profile not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const targetType = payload?.targetType;
+        const rawTargetId = typeof payload?.targetId === 'string' ? payload.targetId.trim() : '';
+        const targetId = targetType === 'group' ? normalizeGroupName(rawTargetId) : rawTargetId;
+        if (!targetType || !targetId) {
+          res.writeHead(400);
+          return res.end('Invalid assignment');
+        }
+
+        if (targetType === 'agent') {
+          profile.assignedAgents = (profile.assignedAgents ?? []).filter((id) => id !== targetId);
+          notifyAgentMonitoring(targetId);
+        } else if (targetType === 'group') {
+          profile.assignedGroups = (profile.assignedGroups ?? []).filter((id) => id !== targetId);
+          notifyGroupMonitoring(targetId);
+        } else {
+          res.writeHead(400);
+          return res.end('Unknown target type');
+        }
+
+        saveMonitoringConfig();
+        res.writeHead(204);
+        res.end();
       } catch (error) {
         res.writeHead(400);
         res.end('Invalid request');
@@ -978,6 +1059,104 @@ server.on('request', (req, res) => {
     return;
   }
 
+  const softwareListMatch = pathname.match(/^\/software\/([^/]+)\/list$/);
+  if (softwareListMatch && req.method === 'GET') {
+    const agentId = softwareListMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    const filterText = (requestedUrl.searchParams.get('filter') ?? '').trim().toLowerCase();
+    const sourceFilter = (requestedUrl.searchParams.get('source') ?? '').trim().toLowerCase();
+    const pageValue = Number(requestedUrl.searchParams.get('page') ?? '1');
+    const sizeValue = Number(requestedUrl.searchParams.get('pageSize') ?? '25');
+    const page = Math.max(Math.floor(pageValue) || 1, 1);
+    const pageSize = Math.min(Math.max(Math.floor(sizeValue) || 25, 5), 200);
+
+        requestAgentSoftwareList(entry)
+          .then((result) => {
+            const allEntries = Array.isArray(result.entries) ? result.entries : [];
+        const filtered = allEntries.filter((item) => {
+          if (!filterText) {
+            return true;
+          }
+          const haystack = `${item.name ?? ''} ${item.version ?? ''} ${item.publisher ?? ''} ${item.source ?? ''}`.toLowerCase();
+          return haystack.includes(filterText);
+        }).filter((item) => {
+          if (!sourceFilter) {
+            return true;
+          }
+          return (item.source ?? '').toLowerCase().includes(sourceFilter);
+        });
+
+        filtered.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'en', { sensitivity: 'base' }));
+        const total = filtered.length;
+        const offset = (page - 1) * pageSize;
+        const paged = filtered.slice(offset, offset + pageSize);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              agentId,
+              total,
+              page,
+              pageSize,
+              entries: paged,
+              retrievedAt: result.retrievedAt,
+            }));
+          })
+      .catch((error) => {
+        console.error('Software list request failed', error);
+        res.writeHead(504);
+        res.end('Software request timed out');
+      });
+    return;
+  }
+
+  const softwareUninstallMatch = pathname.match(/^\/software\/([^/]+)\/uninstall$/);
+  if (softwareUninstallMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = softwareUninstallMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const softwareId = typeof payload?.softwareId === 'string' ? payload.softwareId.trim() : '';
+        if (!softwareId) {
+          res.writeHead(400);
+          return res.end('softwareId is required');
+        }
+
+        const requestId = uuidv4();
+        sendControl(entry.socket, 'uninstall-software', {
+          requestId,
+          softwareId,
+          source: typeof payload?.source === 'string' ? payload.source : 'registry',
+          uninstallCommand: typeof payload?.uninstallCommand === 'string' ? payload.uninstallCommand : null,
+          packageFullName: typeof payload?.packageFullName === 'string' ? payload.packageFullName : null,
+          productCode: typeof payload?.productCode === 'string' ? payload.productCode : null,
+        });
+
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ requestId, success: true, message: 'Uninstall requested.' }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
   const screenAnswerMatch = pathname.match(/^\/screen\/([^/]+)\/answer$/);
   if (screenAnswerMatch && req.method === 'POST') {
     const sessionId = screenAnswerMatch[1];
@@ -1091,6 +1270,7 @@ wss.on('connection', (socket, request) => {
     bsodSummary: null,
     processSnapshot: null,
     loggedInUser: 'Unknown',
+    softwareSummary: null,
   };
 
   clients.set(socket, info);
@@ -1221,6 +1401,17 @@ wss.on('connection', (socket, request) => {
         if (pending) {
           pending.resolve(parsed);
         }
+      } else if (parsed?.type === 'software-list' && typeof parsed.requestId === 'string') {
+        const pending = completeSoftwareRequest(parsed.requestId);
+        if (pending) {
+          const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+          const retrievedAt = typeof parsed.retrievedAt === 'string' ? parsed.retrievedAt : new Date().toISOString();
+          pending.resolve({ entries, retrievedAt });
+          info.softwareSummary = {
+            totalCount: entries.length,
+            lastUpdated: retrievedAt,
+          };
+        }
       } else if (parsed?.type === 'chat-response') {
         const text = typeof parsed.text === 'string' ? parsed.text.trim() : '';
         if (text.length > 0) {
@@ -1240,6 +1431,8 @@ wss.on('connection', (socket, request) => {
           recordChatHistory(info.id, chatEvent);
           dispatchChatEvent(info.id, chatEvent);
         }
+      } else if (parsed?.type === 'software-operation-result') {
+        console.log(`Software operation result from ${info.name}: ${parsed.softwareId ?? 'n/a'} ${parsed.operation ?? 'operation'} success=${parsed.success ? 'yes' : 'no'} message="${parsed.message ?? ''}"`);
       } else if (parsed?.type === 'screen-list' && Array.isArray(parsed.screens)) {
         const normalized = parsed.screens.map((screen, index) => ({
           id: typeof screen.id === 'string' && screen.id.trim() ? screen.id.trim() : `display-${index + 1}`,
@@ -1283,6 +1476,13 @@ wss.on('connection', (socket, request) => {
     screenLists.delete(id);
     cancelScreenListRequest(id, new Error('agent disconnected'));
     agentProfileStatus.delete(id);
+    for (const [requestId, request] of softwareRequests) {
+      if (request.agentId === id) {
+        clearTimeout(request.timer);
+        request.reject(new Error('Agent disconnected'));
+        softwareRequests.delete(requestId);
+      }
+    }
     for (const [sessionId, session] of screenSessions) {
       if (session.agentId === id) {
         sendScreenEvent(session, 'closed', { reason: 'agent disconnected' });
@@ -1537,6 +1737,13 @@ function requestAgentFileUpload(entry, destinationPath, base64Data) {
   });
 }
 
+function requestAgentSoftwareList(entry) {
+  return new Promise((resolve, reject) => {
+    const requestId = enqueueSoftwareRequest(entry.info.id, resolve, reject);
+    sendControl(entry.socket, 'list-software', { requestId });
+  });
+}
+
 function enqueueFileRequest(kind, agentId, resolve, reject) {
   const requestId = uuidv4();
   const timer = setTimeout(() => {
@@ -1556,6 +1763,28 @@ function completeFileRequest(requestId) {
 
   clearTimeout(entry.timer);
   fileRequests.delete(requestId);
+  return entry;
+}
+
+function enqueueSoftwareRequest(agentId, resolve, reject) {
+  const requestId = uuidv4();
+  const timer = setTimeout(() => {
+    softwareRequests.delete(requestId);
+    reject(new Error('Software request timed out'));
+  }, SOFTWARE_REQUEST_TIMEOUT_MS);
+
+  softwareRequests.set(requestId, { agentId, resolve, reject, timer });
+  return requestId;
+}
+
+function completeSoftwareRequest(requestId) {
+  const entry = softwareRequests.get(requestId);
+  if (!entry) {
+    return null;
+  }
+
+  clearTimeout(entry.timer);
+  softwareRequests.delete(requestId);
   return entry;
 }
 
@@ -2208,4 +2437,28 @@ function updateAgentAlertStatus(info, triggered) {
     metrics: getRequiredMetricsForProfiles(getAssignedProfiles(info)),
     timestamp: new Date().toISOString(),
   });
+}
+
+function clearMonitoringProfileState(profileId) {
+  if (!profileId) {
+    return;
+  }
+
+  for (const profileMap of agentProfileStatus.values()) {
+    profileMap.delete(profileId);
+  }
+
+  for (const key of Array.from(alertStates.keys())) {
+    const [, id] = key.split(':');
+    if (id === profileId) {
+      alertStates.delete(key);
+    }
+  }
+
+  for (const agentId of clientsById.keys()) {
+    const entry = clientsById.get(agentId);
+    if (entry) {
+      updateAgentAlertStatus(entry.info, hasActiveAlertForAgent(agentId));
+    }
+  }
 }

@@ -12,6 +12,7 @@ const assignmentAgentSelect = document.getElementById('assignmentAgentSelect');
 const assignmentGroupSelect = document.getElementById('assignmentGroupSelect');
 const agentTargetLabel = document.getElementById('agentTargetLabel');
 const groupTargetLabel = document.getElementById('groupTargetLabel');
+const unassignButton = document.getElementById('unassignButton');
 const eventLog = document.getElementById('eventLog');
 
 let monitoringProfiles = [];
@@ -26,6 +27,7 @@ function init() {
   document.getElementById('alertProfileForm')?.addEventListener('submit', handleAlertProfileSubmit);
   document.getElementById('monitoringProfileForm')?.addEventListener('submit', handleMonitoringProfileSubmit);
   assignmentForm?.addEventListener('submit', handleAssignment);
+  unassignButton?.addEventListener('click', handleUnassign);
   assignmentTargetType?.addEventListener('change', handleTargetTypeChange);
   handleTargetTypeChange();
   refreshAll();
@@ -118,8 +120,41 @@ function renderMonitoringProfiles() {
       <div>Rules: ${rules?.join(' | ') ?? 'none'}</div>
       <div>Alert: ${profile.alertProfileId ?? 'none'}</div>
       <div>${assignments.length ? assignments.join(' | ') : 'Not assigned'}</div>`;
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'secondary delete-btn';
+    deleteButton.textContent = 'Delete';
+    deleteButton.addEventListener('click', () => handleDeleteMonitoringProfile(profile.id, profile.name));
+    item.appendChild(deleteButton);
     monitoringProfilesList.appendChild(item);
   });
+}
+
+async function handleDeleteMonitoringProfile(profileId, profileName) {
+  if (!profileId) {
+    return;
+  }
+
+  const targetName = profileName || 'this monitoring profile';
+  if (!confirm(`Delete "${targetName}"? This cannot be undone.`)) {
+    return;
+  }
+
+  try {
+    const response = await authFetch(`/monitoring/profiles/${encodeURIComponent(profileId)}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `Server returned ${response.status}`);
+    }
+
+    statusMessage.textContent = `Deleted profile ${targetName}.`;
+    await loadMonitoringProfiles();
+  } catch (error) {
+    console.error(error);
+    statusMessage.textContent = `Failed to delete profile: ${error.message}`;
+  }
 }
 
 async function loadRemediationScripts() {
@@ -413,6 +448,40 @@ async function handleAssignment(event) {
     await loadMonitoringProfiles();
   } catch (error) {
     statusMessage.textContent = `Assignment failed: ${error.message}`;
+  }
+}
+
+async function handleUnassign(event) {
+  event?.preventDefault();
+  const profileId = assignmentProfileSelect?.value;
+  const targetType = assignmentTargetType?.value ?? 'agent';
+  const targetId = targetType === 'group'
+    ? assignmentGroupSelect?.value?.trim()
+    : assignmentAgentSelect?.value?.trim();
+
+  if (!profileId || !targetType || !targetId) {
+    statusMessage.textContent = 'Select a profile and specify a target.';
+    return;
+  }
+
+  try {
+    const response = await authFetch(`/monitoring/profiles/${encodeURIComponent(profileId)}/assign`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetType, targetId }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `HTTP ${response.status}`);
+    }
+
+    statusMessage.textContent = 'Profile unassignment saved.';
+    assignmentForm?.reset();
+    handleTargetTypeChange();
+    await loadMonitoringProfiles();
+  } catch (error) {
+    statusMessage.textContent = `Unassignment failed: ${error.message}`;
   }
 }
 

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Script Repository</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem;
+        background: #0d1117;
+        color: #cdd9e5;
+      }
+
+      h1 {
+        margin-top: 0;
+      }
+
+      .grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      section {
+        border: 1px solid #22272d;
+        border-radius: 0.75rem;
+        background: #0f141a;
+        padding: 1.25rem;
+      }
+
+      section h2 {
+        margin-top: 0;
+      }
+
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        font-size: 0.9rem;
+      }
+
+      input[type="text"],
+      select,
+      textarea {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 0.35rem;
+        padding: 0.45rem 0.6rem;
+        color: #cdd9e5;
+      }
+
+      textarea {
+        font-family: Consolas, 'Courier New', monospace;
+      }
+
+      button {
+        border: none;
+        border-radius: 0.35rem;
+        padding: 0.45rem 0.8rem;
+        background: #2563eb;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #0d1117;
+        border: 1px solid #30363d;
+      }
+
+      .list {
+        border: 1px solid #1f2937;
+        border-radius: 0.5rem;
+        background: #0d1117;
+        padding: 0.75rem;
+        max-height: 280px;
+        overflow: auto;
+      }
+
+      .script-item {
+        border-bottom: 1px solid #1f2937;
+        padding: 0.6rem 0;
+      }
+
+      .script-item:last-child {
+        border-bottom: none;
+      }
+
+      .script-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 0.4rem;
+      }
+
+      .log {
+        border: 1px solid #1f2937;
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        max-height: 260px;
+        overflow: auto;
+      }
+
+      .log-entry {
+        border-bottom: 1px solid #1f2937;
+        padding: 0.45rem 0;
+        font-size: 0.9rem;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 0.1rem 0.5rem;
+        font-size: 0.75rem;
+        border-radius: 0.35rem;
+        background: #2563eb;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Script Repository</h1>
+    <p>Select agents, view scripts, or upload new automation for use anywhere in the RMM.</p>
+    <div class="grid">
+      <section>
+        <h2>Create script</h2>
+        <form id="scriptForm">
+          <label>
+            Name
+            <input id="scriptName" type="text" required />
+          </label>
+          <label>
+            Description
+            <input id="scriptDescription" type="text" />
+          </label>
+          <label>
+            Language
+            <select id="scriptLanguage">
+              <option value="powershell">PowerShell</option>
+              <option value="python">Python</option>
+            </select>
+          </label>
+          <label>
+            Content
+            <textarea id="scriptContent" rows="10" placeholder="# PowerShell or Python code"></textarea>
+          </label>
+          <button type="submit">Save script</button>
+        </form>
+      </section>
+      <section>
+        <h2>Agent targets</h2>
+        <p class="status">Select agents to run scripts</p>
+        <select id="agentSelect" multiple size="8" style="width:100%; background:#0d1117; color:#cdd9e5; border:1px solid #30363d; border-radius:0.35rem;"></select>
+      </section>
+    </div>
+    <section>
+      <h2>Stored scripts</h2>
+      <div class="list" id="scriptList"></div>
+    </section>
+    <section>
+      <h2>Execution log</h2>
+      <div class="log" id="scriptLog"></div>
+    </section>
+    <script src="scripts.js"></script>
+  </body>
+</html>

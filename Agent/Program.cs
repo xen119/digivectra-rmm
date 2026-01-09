@@ -15,6 +15,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Forms;
 using Microsoft.MixedReality.WebRTC;
+using System.Net.NetworkInformation;
 
 namespace Agent;
 
@@ -41,6 +42,15 @@ internal static class Program
     private const int MaxFileEntries = 512;
     private static readonly Dictionary<string, PendingUpload> uploadSessions = new(StringComparer.OrdinalIgnoreCase);
     private static Action? screenDataChannelStateHandler;
+    private static PerformanceCounter? totalCpuCounter;
+    private static CancellationTokenSource? monitoringCts;
+    private static Task? monitoringTask;
+    private const int MonitoringIntervalMs = 5_000;
+    private static bool monitoringEnabled;
+    private static PerformanceCounter? diskTimeCounter;
+    private static long previousNetworkBytes = -1;
+    private static DateTime previousNetworkSample = DateTime.MinValue;
+    private static string[] activeMonitoringMetrics = Array.Empty<string>();
     private static readonly ImageCodecInfo? JpegEncoder = ImageCodecInfo.GetImageEncoders()
         .FirstOrDefault(codec => codec.FormatID == ImageFormat.Jpeg.Guid);
     private static readonly Dictionary<string, ushort> VirtualKeyMap = new(StringComparer.OrdinalIgnoreCase)
@@ -118,6 +128,9 @@ internal static class Program
         }
         finally
         {
+            StopMonitoringLoop();
+            totalCpuCounter?.Dispose();
+            totalCpuCounter = null;
             TrayIconManager.Stop();
         }
     }
@@ -226,6 +239,273 @@ internal static class Program
         await SendTextAsync(socket, identity, cancellationToken);
         await SendAgentUpdateSummaryAsync(socket, cancellationToken);
         await SendBsodSummaryAsync(socket, cancellationToken);
+    }
+
+    private static Task StartMonitoringLoopAsync(ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        monitoringCts?.Cancel();
+        monitoringCts?.Dispose();
+        monitoringCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        monitoringTask = Task.Run(() => MonitoringLoopAsync(socket, monitoringCts.Token), monitoringCts.Token);
+        return monitoringTask;
+    }
+
+    private static void StopMonitoringLoop()
+    {
+        monitoringCts?.Cancel();
+        monitoringCts?.Dispose();
+        monitoringCts = null;
+        monitoringTask = null;
+    }
+
+    private static void UpdateMonitoringStatus(bool enabled, string[] metrics, ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        if (enabled)
+        {
+            UpdateActiveMonitoringMetrics(metrics);
+        }
+        else
+        {
+            UpdateActiveMonitoringMetrics(null);
+        }
+
+        if (monitoringEnabled == enabled)
+        {
+            return;
+        }
+
+        monitoringEnabled = enabled;
+        if (enabled)
+        {
+            _ = StartMonitoringLoopAsync(socket, cancellationToken);
+        }
+        else
+        {
+            StopMonitoringLoop();
+        }
+    }
+
+    private static void UpdateActiveMonitoringMetrics(IEnumerable<string>? metrics)
+    {
+        if (metrics is null)
+        {
+            activeMonitoringMetrics = Array.Empty<string>();
+            return;
+        }
+
+        activeMonitoringMetrics = metrics
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim().ToLowerInvariant())
+            .Where(value => value == "cpu" || value == "ram" || value == "disk-usage" || value == "disk-performance" || value == "network")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static async Task MonitoringLoopAsync(ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var metricsSnapshot = activeMonitoringMetrics;
+                if (metricsSnapshot.Length == 0)
+                {
+                    await Task.Delay(MonitoringIntervalMs, cancellationToken);
+                    continue;
+                }
+
+                var payload = new Dictionary<string, double>();
+
+                if (MonitoringMetricRequested(metricsSnapshot, "cpu"))
+                {
+                    if (totalCpuCounter is null)
+                    {
+                        totalCpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
+                        _ = totalCpuCounter.NextValue();
+                        try
+                        {
+                            await Task.Delay(1000, cancellationToken);
+                        }
+                        catch (TaskCanceledException)
+                        {
+                            break;
+                        }
+                    }
+
+                    var cpu = Math.Clamp(Math.Round(totalCpuCounter?.NextValue() ?? 0.0, 2), 0.0, 100.0);
+                    payload["cpuPercent"] = cpu;
+                }
+                else if (totalCpuCounter is not null)
+                {
+                    totalCpuCounter.Dispose();
+                    totalCpuCounter = null;
+                }
+
+                if (MonitoringMetricRequested(metricsSnapshot, "ram"))
+                {
+                    var ram = Math.Clamp(Math.Round(GetMemoryUsagePercent(), 2), 0.0, 100.0);
+                    payload["ramPercent"] = ram;
+                }
+
+                if (MonitoringMetricRequested(metricsSnapshot, "disk-usage"))
+                {
+                    payload["diskUsagePercent"] = GetDiskUsagePercent();
+                }
+
+                if (MonitoringMetricRequested(metricsSnapshot, "disk-performance"))
+                {
+                    payload["diskPerformancePercent"] = GetDiskPerformancePercent();
+                }
+
+                if (MonitoringMetricRequested(metricsSnapshot, "network"))
+                {
+                    payload["networkKbSec"] = GetNetworkThroughputKbPerSec();
+                }
+
+                if (payload.Count > 0)
+                {
+                    await SendJsonAsync(socket, new
+                    {
+                        type = "monitoring-metrics",
+                        metrics = payload,
+                    }, cancellationToken);
+                }
+
+                await Task.Delay(MonitoringIntervalMs, cancellationToken);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+            catch (Exception)
+            {
+                // ignore transient monitoring failures
+                await Task.Delay(MonitoringIntervalMs, cancellationToken);
+            }
+        }
+    }
+
+    private static string[] ParseMonitoringMetrics(JsonElement root)
+    {
+        if (!root.TryGetProperty("metrics", out var metricsElement) || metricsElement.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<string>();
+        }
+
+        var values = new List<string>();
+        foreach (var metricElement in metricsElement.EnumerateArray())
+        {
+            if (metricElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var metric = metricElement.GetString()?.Trim();
+            if (string.IsNullOrWhiteSpace(metric))
+            {
+                continue;
+            }
+
+            var normalized = metric.ToLowerInvariant();
+            if (normalized == "cpu" || normalized == "ram" || normalized == "disk-usage" || normalized == "disk-performance" || normalized == "network")
+            {
+                values.Add(normalized);
+            }
+        }
+
+        return values.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static bool MonitoringMetricRequested(string[] metrics, string metric)
+    {
+        if (metrics.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var value in metrics)
+        {
+            if (string.Equals(value, metric, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static double GetDiskUsagePercent()
+    {
+        long totalSpace = 0;
+        long usedSpace = 0;
+        foreach (var drive in DriveInfo.GetDrives())
+        {
+            if (!drive.IsReady || drive.TotalSize <= 0)
+            {
+                continue;
+            }
+
+            totalSpace += drive.TotalSize;
+            usedSpace += drive.TotalSize - drive.AvailableFreeSpace;
+        }
+
+        if (totalSpace <= 0)
+        {
+            return 0.0;
+        }
+
+        var percent = (double)usedSpace / totalSpace * 100.0;
+        return Math.Clamp(Math.Round(percent, 2), 0.0, 100.0);
+    }
+
+    private static double GetDiskPerformancePercent()
+    {
+        if (diskTimeCounter is null)
+        {
+            diskTimeCounter = new PerformanceCounter("PhysicalDisk", "% Disk Time", "_Total");
+            _ = diskTimeCounter.NextValue();
+        }
+
+        var value = diskTimeCounter.NextValue();
+        return Math.Clamp(Math.Round(value, 2), 0.0, 100.0);
+    }
+
+    private static double GetNetworkThroughputKbPerSec()
+    {
+        long totalBytes = 0;
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up || nic.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+            {
+                continue;
+            }
+
+            var stats = nic.GetIPv4Statistics();
+            totalBytes += stats.BytesSent + stats.BytesReceived;
+        }
+
+        var now = DateTime.UtcNow;
+        if (previousNetworkBytes < 0 || previousNetworkSample == DateTime.MinValue)
+        {
+            previousNetworkBytes = totalBytes;
+            previousNetworkSample = now;
+            return 0.0;
+        }
+
+        var deltaSeconds = (now - previousNetworkSample).TotalSeconds;
+        if (deltaSeconds <= 0)
+        {
+            previousNetworkBytes = totalBytes;
+            previousNetworkSample = now;
+            return 0.0;
+        }
+
+        var deltaBytes = Math.Max(0, totalBytes - previousNetworkBytes);
+        previousNetworkBytes = totalBytes;
+        previousNetworkSample = now;
+
+        var kbPerSec = (deltaBytes / 1024.0) / deltaSeconds;
+        return Math.Round(kbPerSec, 2);
     }
 
     private static string GetAgentId()
@@ -413,6 +693,19 @@ internal static class Program
         specs.Storages = drives.ToArray();
         deviceSpecs = specs;
         return specs;
+    }
+
+    private static double GetMemoryUsagePercent()
+    {
+        var status = new MEMORYSTATUSEX();
+        status.dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>();
+        if (!GlobalMemoryStatusEx(ref status) || status.ullTotalPhys == 0)
+        {
+            return 0.0;
+        }
+
+        var used = status.ullTotalPhys - status.ullAvailPhys;
+        return Math.Round(used / (double)status.ullTotalPhys * 100, 2);
     }
 
     private static async Task SendAgentUpdateSummaryAsync(ClientWebSocket socket, CancellationToken cancellationToken, bool force = false)
@@ -1119,6 +1412,20 @@ internal static class Program
             case "install-updates":
                 await HandleInstallUpdatesAsync(socket, document.RootElement, cancellationToken);
                 break;
+            case "run-remediation":
+                await RunRemediationScriptAsync(socket, document.RootElement, cancellationToken);
+                break;
+            case "monitoring-status":
+            {
+                if (document.RootElement.TryGetProperty("enabled", out var enabledElement) &&
+                    (enabledElement.ValueKind == JsonValueKind.True || enabledElement.ValueKind == JsonValueKind.False))
+                {
+                    var metrics = ParseMonitoringMetrics(document.RootElement);
+                    UpdateMonitoringStatus(enabledElement.GetBoolean(), metrics, socket, cancellationToken);
+                }
+
+                break;
+            }
             }
         }
         catch (JsonException)
@@ -2330,6 +2637,100 @@ internal static class Program
         }, cancellationToken);
     }
 
+    private static Task SendRemediationResultAsync(ClientWebSocket socket, string? requestId, string scriptName, bool success, string message, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+        {
+            type = "remediation-result",
+            requestId,
+            scriptName,
+            success,
+            message,
+        }, cancellationToken);
+    }
+
+    private static async Task RunRemediationScriptAsync(ClientWebSocket socket, JsonElement root, CancellationToken cancellationToken)
+    {
+        var requestId = ExtractRequestId(root);
+        var scriptName = root.TryGetProperty("scriptName", out var scriptNameElement) ? scriptNameElement.GetString() : null;
+        if (string.IsNullOrWhiteSpace(requestId) || string.IsNullOrWhiteSpace(scriptName))
+        {
+            return;
+        }
+
+        var language = root.TryGetProperty("language", out var languageElement) ? languageElement.GetString()?.ToLowerInvariant() : null;
+        var content = root.TryGetProperty("content", out var contentElement) ? contentElement.GetString() : null;
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            await SendRemediationResultAsync(socket, requestId, scriptName, false, "Script content missing", cancellationToken);
+            return;
+        }
+
+        var extension = language == "python" ? ".py" : ".ps1";
+        var interpreter = language == "python" ? "python" : "powershell.exe";
+        var tempPath = Path.Combine(Path.GetTempPath(), $"{scriptName}-{Guid.NewGuid():N}{extension}");
+
+        try
+        {
+            await File.WriteAllTextAsync(tempPath, content, cancellationToken);
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = interpreter,
+                Arguments = language == "python"
+                    ? $"\"{tempPath}\""
+                    : $"-NoProfile -ExecutionPolicy Bypass -File \"{tempPath}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                await SendRemediationResultAsync(socket, requestId, scriptName, false, "Failed to start remediation process", cancellationToken);
+                return;
+            }
+
+            var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+            var output = await outputTask;
+            var error = await errorTask;
+            var lines = new List<string>();
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                lines.Add(output.Trim());
+            }
+
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                lines.Add(error.Trim());
+            }
+
+            var message = lines.Count > 0 ? string.Join(Environment.NewLine, lines) : "Remediation completed.";
+            await SendRemediationResultAsync(socket, requestId, scriptName, process.ExitCode == 0, message, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await SendRemediationResultAsync(socket, requestId, scriptName, false, ex.Message, cancellationToken);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
+            catch
+            {
+                // ignore cleanup failures
+            }
+        }
+    }
+
     private static async Task SendTextAsync(ClientWebSocket socket, string text, CancellationToken cancellationToken)
     {
         var data = Encoding.UTF8.GetBytes(text);
@@ -2447,6 +2848,9 @@ internal static class Program
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetProcessIoCounters(IntPtr handle, out IoCounters counters);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
+
     private sealed class DeviceSpecs
     {
         public string? Manufacturer { get; set; }
@@ -2465,6 +2869,20 @@ internal static class Program
         public string? Name { get; set; }
         public long TotalBytes { get; set; }
         public long FreeBytes { get; set; }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MEMORYSTATUSEX
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
     }
 
     private sealed class BsodSummary

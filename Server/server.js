@@ -45,11 +45,22 @@ const chatHistories = new Map(); // agentId -> [{ sessionId, text, direction, ag
 const CHAT_HISTORY_LIMIT = 200;
 const SCREEN_LIST_TTL_MS = 60_000;
 const SCREEN_LIST_TIMEOUT_MS = 5_000;
+const DATA_DIR = path.join(__dirname, 'data');
+const MONITORING_CONFIG_PATH = path.join(DATA_DIR, 'monitoring.json');
 const SESSION_TTL_MS = 30 * 60_1000;
 const SSO_SECRET = process.env.SSO_SECRET ?? 'CHANGE_ME-SSO-KEY';
 const SSO_WINDOW_MS = 5 * 60_1000;
+const REMEDIATION_DIR = path.join(__dirname, 'scripts', 'remediation');
 
 const USERS_CONFIG = loadUsersConfig();
+const monitoringEvents = new Set();
+const monitoringConfig = loadMonitoringConfig();
+const monitoringHistory = [];
+const MONITORING_HISTORY_LIMIT = 100;
+const agentMetrics = new Map(); // agentId -> [{ timestamp, cpuPercent?, ramPercent? }]
+const alertStates = new Map(); // `${agentId}:${profileId}:${ruleId}` -> boolean
+const agentAlertStatus = new Map(); // agentId -> boolean
+const agentProfileStatus = new Map(); // agentId -> Map<profileId, boolean>
 const sessions = new Map();
 const roleWeight = { viewer: 0, operator: 1, admin: 2 };
 
@@ -77,7 +88,7 @@ server.on('request', (req, res) => {
 
   if (pathname === '/clients' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    const payload = Array.from(agents.values()).map((info) => ({
+  const payload = Array.from(agents.values()).map((info) => ({
       id: info.id,
       name: info.name,
       os: info.os,
@@ -92,6 +103,9 @@ server.on('request', (req, res) => {
       status: info.status ?? 'offline',
       lastSeen: info.lastSeen ?? null,
       loggedInUser: info.loggedInUser ?? null,
+      monitoringEnabled: shouldMonitorAgent(info),
+      monitoringAlert: agentAlertStatus.get(info.id) ?? false,
+      monitoringProfiles: getAgentMonitoringProfiles(info),
     }));
     return res.end(JSON.stringify(payload));
   }
@@ -573,6 +587,293 @@ server.on('request', (req, res) => {
     return;
   }
 
+  if (pathname === '/monitoring/events' && req.method === 'GET') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write(': connected\n\n');
+    monitoringEvents.add(res);
+    res.on('close', () => monitoringEvents.delete(res));
+    return;
+  }
+
+  if (pathname === '/monitoring/events/history' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const queryAgentId = requestedUrl.searchParams.get('agentId')?.trim();
+    const queryProfileId = requestedUrl.searchParams.get('profileId')?.trim();
+    const limitParam = parseInt(requestedUrl.searchParams.get('limit') ?? '', 10);
+    const limit = Number.isNaN(limitParam) || limitParam <= 0 ? 200 : limitParam;
+    let entries = monitoringHistory;
+    if (queryAgentId) {
+      entries = entries.filter((entry) => entry.payload?.agentId === queryAgentId);
+    }
+    if (queryProfileId) {
+      entries = entries.filter((entry) => entry.payload?.profileId === queryProfileId);
+    }
+    res.end(JSON.stringify(entries.slice(-limit)));
+    return;
+  }
+
+  if (pathname === '/monitoring/profiles' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(monitoringConfig.monitoringProfiles));
+    return;
+  }
+
+  if (pathname === '/monitoring/profiles' && req.method === 'POST') {
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+        if (!name) {
+          res.writeHead(400);
+          return res.end('Profile name required');
+        }
+
+        const profile = {
+          id: uuidv4(),
+          name,
+          description: typeof payload?.description === 'string' ? payload.description.trim() : '',
+          alertProfileId: typeof payload?.alertProfileId === 'string' ? payload.alertProfileId.trim() : null,
+          assignedAgents: [],
+          assignedGroups: [],
+          rules: [],
+        };
+
+        const rules = Array.isArray(payload?.rules) ? payload.rules : [payload?.rule].filter(Boolean);
+        for (const entry of rules) {
+          if (entry?.metric && typeof entry?.threshold === 'number') {
+            profile.rules.push({
+              id: uuidv4(),
+              metric: entry.metric,
+              threshold: entry.threshold,
+              windowSeconds: typeof entry?.windowSeconds === 'number' ? entry.windowSeconds : 30,
+              comparison: entry?.comparison || 'gte',
+            });
+          }
+        }
+
+        if (profile.rules.length === 0) {
+          res.writeHead(400);
+          return res.end('At least one rule is required');
+        }
+
+        monitoringConfig.monitoringProfiles.push(profile);
+        saveMonitoringConfig();
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(profile));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const profileAssignMatch = pathname.match(/^\/monitoring\/profiles\/([^/]+)\/assign$/);
+  if (profileAssignMatch && req.method === 'POST') {
+    const profileId = profileAssignMatch[1];
+    const profile = monitoringConfig.monitoringProfiles.find((entry) => entry.id === profileId);
+    if (!profile) {
+      res.writeHead(404);
+      return res.end('Profile not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const targetType = payload?.targetType;
+        const rawTargetId = typeof payload?.targetId === 'string' ? payload.targetId.trim() : '';
+        const targetId = targetType === 'group' ? normalizeGroupName(rawTargetId) : rawTargetId;
+        if (!targetType || !targetId) {
+          res.writeHead(400);
+          return res.end('Invalid assignment');
+        }
+
+        if (targetType === 'agent') {
+          if (!profile.assignedAgents.includes(targetId)) {
+            profile.assignedAgents.push(targetId);
+          }
+          notifyAgentMonitoring(targetId);
+        } else if (targetType === 'group') {
+          if (!profile.assignedGroups.includes(targetId)) {
+            profile.assignedGroups.push(targetId);
+          }
+          notifyGroupMonitoring(targetId);
+        } else {
+          res.writeHead(400);
+          return res.end('Unknown target type');
+        }
+
+        saveMonitoringConfig();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(profile));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  if (pathname === '/alert-profiles' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(monitoringConfig.alertProfiles));
+    return;
+  }
+
+  if (pathname === '/alert-profiles' && req.method === 'POST') {
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+        if (!name) {
+          res.writeHead(400);
+          return res.end('Alert profile name required');
+        }
+
+        const profile = {
+          id: uuidv4(),
+          name,
+          emails: Array.isArray(payload?.emails) ? payload.emails.filter((email) => typeof email === 'string' && email.trim()) : [],
+          dashboard: Boolean(payload?.dashboard),
+          remediationScript: typeof payload?.remediationScript === 'string' ? payload.remediationScript.trim() : null,
+        };
+
+        monitoringConfig.alertProfiles.push(profile);
+        saveMonitoringConfig();
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(profile));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  if (pathname === '/remediation/scripts' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(monitoringConfig.remediationScripts));
+    return;
+  }
+
+  if (pathname === '/scripts' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(monitoringConfig.remediationScripts));
+    return;
+  }
+
+  const scriptContentMatch = pathname.match(/^\/scripts\/([^/]+)\/content$/);
+  if (scriptContentMatch && req.method === 'GET') {
+    const scriptName = scriptContentMatch[1];
+    const script = getScriptByName(scriptName);
+    if (!script) {
+      res.writeHead(404);
+      return res.end('Script not found');
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ name: script.name, content: readScriptContent(script) }));
+    return;
+  }
+
+  if (pathname === '/scripts' && req.method === 'POST') {
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+        const description = typeof payload?.description === 'string' ? payload.description.trim() : '';
+        const language = typeof payload?.language === 'string' ? payload.language.toLowerCase() : 'powershell';
+        const content = typeof payload?.content === 'string' ? payload.content : '';
+
+        if (!name || !content) {
+          res.writeHead(400);
+          return res.end('Name and content are required');
+        }
+
+        if (getScriptByName(name)) {
+          res.writeHead(409);
+          return res.end('Script name already exists');
+        }
+
+        ensureRemediationDirectory();
+        const fileName = sanitizeScriptFileName(name, language);
+        fs.writeFileSync(path.join(REMEDIATION_DIR, fileName), content, 'utf-8');
+
+        const scriptEntry = {
+          name,
+          description,
+          language,
+          file: fileName,
+        };
+
+        monitoringConfig.remediationScripts.push(scriptEntry);
+        saveMonitoringConfig();
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(scriptEntry));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  if (pathname === '/scripts/run' && req.method === 'POST') {
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const scriptName = typeof payload?.scriptName === 'string' ? payload.scriptName.trim() : '';
+        const agentIds = Array.isArray(payload?.agentIds) ? payload.agentIds : [];
+
+        const script = getScriptByName(scriptName);
+        if (!script || agentIds.length === 0) {
+          res.writeHead(400);
+          return res.end('Script name and agent list are required');
+        }
+
+        const missing = [];
+        const triggered = [];
+        for (const agentId of agentIds) {
+          const entry = clientsById.get(agentId);
+          if (!entry) {
+            missing.push(agentId);
+            continue;
+          }
+
+          runRemediation(entry.info, entry.socket, script.name, {
+            type: 'script-run',
+            metric: script.language,
+            message: `Manual run of ${script.name}`,
+          });
+          triggered.push(agentId);
+        }
+
+        sendMonitoringEvent('script-run', {
+          type: 'script-run',
+          scriptName: script.name,
+          agentIds: triggered,
+          timestamp: new Date().toISOString(),
+        });
+
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ triggered, missing }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
   const fileListMatch = pathname.match(/^\/files\/([^/]+)\/list$/);
   if (fileListMatch && req.method === 'GET') {
     const agentId = fileListMatch[1];
@@ -839,6 +1140,7 @@ wss.on('connection', (socket, request) => {
         console.log(`Identified client as ${info.name}`);
         clients.set(socket, info);
         clientsById.set(info.id, { socket, info });
+        notifyMonitoringState({ socket, info });
       } else if (parsed?.type === 'shell-output') {
         emitShellOutput(info.id, parsed);
       } else if (parsed?.type === 'screen-offer') {
@@ -949,9 +1251,22 @@ wss.on('connection', (socket, request) => {
           primary: Boolean(screen.primary),
         }));
 
-      screenLists.set(info.id, { screens: normalized, updatedAt: Date.now() });
-      fulfillScreenListRequest(info.id, normalized);
-    }
+        screenLists.set(info.id, { screens: normalized, updatedAt: Date.now() });
+        fulfillScreenListRequest(info.id, normalized);
+      } else if (parsed?.type === 'monitoring-metrics') {
+        handleMonitoringMetrics(info, socket, parsed);
+      } else if (parsed?.type === 'remediation-result') {
+        sendMonitoringEvent('remediation-result', {
+          type: 'remediation-result',
+          agentId: info.id,
+          agentName: info.name,
+          requestId: parsed.requestId,
+          success: Boolean(parsed.success),
+          message: parsed.message ?? '',
+          scriptName: parsed.scriptName ?? '',
+          timestamp: new Date().toISOString(),
+        });
+      }
     } catch (error) {
       // ignore invalid JSON and continue echoing
     }
@@ -967,6 +1282,7 @@ wss.on('connection', (socket, request) => {
     shellStreams.delete(id);
     screenLists.delete(id);
     cancelScreenListRequest(id, new Error('agent disconnected'));
+    agentProfileStatus.delete(id);
     for (const [sessionId, session] of screenSessions) {
       if (session.agentId === id) {
         sendScreenEvent(session, 'closed', { reason: 'agent disconnected' });
@@ -1464,4 +1780,432 @@ function getScreenName(agentId, screenId) {
 
   const stored = screenLists.get(agentId);
   return stored?.screens.find((screen) => screen.id === screenId)?.name ?? null;
+}
+
+function getAssignedProfiles(info) {
+  if (!info) {
+    return [];
+  }
+
+  const group = info.group ?? DEFAULT_GROUP;
+  return monitoringConfig.monitoringProfiles.filter((profile) => {
+    const agents = Array.isArray(profile.assignedAgents) ? profile.assignedAgents : [];
+    const groups = Array.isArray(profile.assignedGroups) ? profile.assignedGroups : [];
+    return agents.includes(info.id) || groups.includes(group);
+  });
+}
+
+function getAgentMonitoringProfiles(info) {
+  const profiles = getAssignedProfiles(info);
+  if (!info || !info.id) {
+    return profiles.map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+      alert: false,
+      metrics: getRequiredMetricsForProfiles([profile]),
+    }));
+  }
+
+  const statusMap = agentProfileStatus.get(info.id) ?? new Map();
+  return profiles.map((profile) => ({
+    id: profile.id,
+    name: profile.name,
+    alert: statusMap.get(profile.id) ?? false,
+    metrics: getRequiredMetricsForProfiles([profile]),
+  }));
+}
+
+function shouldMonitorAgent(info) {
+  return getAssignedProfiles(info).length > 0;
+}
+
+function notifyMonitoringState(entry) {
+  if (!entry || !entry.socket || !entry.info) {
+    return;
+  }
+
+  const profiles = getAssignedProfiles(entry.info);
+  const enabled = profiles.length > 0;
+  const metrics = getRequiredMetricsForProfiles(profiles);
+  sendControl(entry.socket, 'monitoring-status', {
+    enabled,
+    profiles: profiles.map((profile) => profile.id),
+    metrics,
+  });
+}
+
+function notifyAgentMonitoring(agentId) {
+  const entry = clientsById.get(agentId);
+  if (!entry) {
+    return;
+  }
+
+  notifyMonitoringState(entry);
+}
+
+function notifyGroupMonitoring(groupName) {
+  for (const entry of clientsById.values()) {
+    if ((entry.info.group ?? DEFAULT_GROUP) === groupName) {
+      notifyMonitoringState(entry);
+    }
+  }
+}
+
+function ensureDataDirectory() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+function ensureRemediationDirectory() {
+  if (!fs.existsSync(REMEDIATION_DIR)) {
+    fs.mkdirSync(REMEDIATION_DIR, { recursive: true });
+  }
+}
+
+function loadMonitoringConfig() {
+  ensureDataDirectory();
+  try {
+    if (fs.existsSync(MONITORING_CONFIG_PATH)) {
+      let raw = fs.readFileSync(MONITORING_CONFIG_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      return JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load monitoring config', error);
+  }
+
+  const defaultConfig = {
+    monitoringProfiles: [],
+    alertProfiles: [],
+    remediationScripts: [],
+  };
+  fs.writeFileSync(MONITORING_CONFIG_PATH, JSON.stringify(defaultConfig, null, 2));
+  return defaultConfig;
+}
+
+function getScriptByName(name) {
+  if (!name) {
+    return null;
+  }
+
+  return monitoringConfig.remediationScripts.find((entry) => entry.name === name) ?? null;
+}
+
+function sanitizeScriptFileName(value, language) {
+  const extension = language === 'python' ? '.py' : '.ps1';
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+  return `${normalized || 'script'}${extension}`;
+}
+
+function readScriptContent(entry) {
+  try {
+    const filePath = path.join(REMEDIATION_DIR, entry.file);
+    return fs.readFileSync(filePath, 'utf-8');
+  } catch (error) {
+    return '';
+  }
+}
+
+function saveMonitoringConfig() {
+  ensureDataDirectory();
+  fs.writeFileSync(MONITORING_CONFIG_PATH, JSON.stringify(monitoringConfig, null, 2));
+}
+
+function handleMonitoringMetrics(info, socket, payload) {
+  if (!payload?.metrics || typeof payload.metrics !== 'object') {
+    return;
+  }
+
+  const entry = {
+    timestamp: Date.now(),
+    cpuPercent: typeof payload.metrics.cpuPercent === 'number' ? payload.metrics.cpuPercent : null,
+    ramPercent: typeof payload.metrics.ramPercent === 'number' ? payload.metrics.ramPercent : null,
+    diskUsagePercent: typeof payload.metrics.diskUsagePercent === 'number' ? payload.metrics.diskUsagePercent : null,
+    diskPerformancePercent: typeof payload.metrics.diskPerformancePercent === 'number' ? payload.metrics.diskPerformancePercent : null,
+    networkKbSec: typeof payload.metrics.networkKbSec === 'number' ? payload.metrics.networkKbSec : null,
+  };
+
+  const history = agentMetrics.get(info.id) ?? [];
+  history.push(entry);
+  while (history.length > 120) {
+    history.shift();
+  }
+
+  agentMetrics.set(info.id, history);
+  evaluateMonitoringProfiles(info, history, socket);
+}
+
+function evaluateMonitoringProfiles(info, history, socket) {
+  const now = Date.now();
+  const profileTriggers = new Map();
+
+  for (const profile of monitoringConfig.monitoringProfiles) {
+    if (!canProfileMonitor(profile, info)) {
+      continue;
+    }
+
+    let profileTriggered = false;
+    for (const rule of profile.rules) {
+      const metricKey = mapMetricToProperty(rule.metric);
+      if (!metricKey) {
+        continue;
+      }
+
+      const windowMs = Math.max((rule.windowSeconds ?? 30) * 1000, 1000);
+      const threshold = typeof rule.threshold === 'number' ? rule.threshold : null;
+      if (threshold === null) {
+        continue;
+      }
+
+      const since = now - windowMs;
+      const samples = history.filter((entry) => entry.timestamp >= since && typeof entry[metricKey] === 'number');
+      if (samples.length === 0) {
+        continue;
+      }
+
+      const average = samples.reduce((sum, entry) => sum + (entry[metricKey] ?? 0), 0) / samples.length;
+      const comparison = (rule.comparison ?? 'gte').toLowerCase();
+      const triggered = comparison === 'gt' ? average > threshold : average >= threshold;
+      const key = `${info.id}:${profile.id}:${rule.id}`;
+      const previouslyTriggered = alertStates.get(key) ?? false;
+
+      if (triggered && !previouslyTriggered) {
+        alertStates.set(key, true);
+        triggerAlert(info, socket, profile, rule, average);
+      } else if (!triggered && previouslyTriggered) {
+        alertStates.set(key, false);
+      }
+
+      profileTriggered = profileTriggered || triggered;
+    }
+
+    profileTriggers.set(profile.id, profileTriggered);
+  }
+
+  for (const [profileId, triggered] of profileTriggers.entries()) {
+    const profile = monitoringConfig.monitoringProfiles.find((entry) => entry.id === profileId);
+    if (profile) {
+      updateAgentProfileStatus(info, profile, triggered);
+    }
+  }
+
+  const overallTriggered = Array.from(agentProfileStatus.get(info.id) ?? new Map()).some((value) => value);
+  updateAgentAlertStatus(info, overallTriggered);
+}
+
+function canProfileMonitor(profile, info) {
+  if (profile.assignedAgents && profile.assignedAgents.includes(info.id)) {
+    return true;
+  }
+
+  const group = info.group ?? DEFAULT_GROUP;
+  if (profile.assignedGroups && profile.assignedGroups.includes(group)) {
+    return true;
+  }
+
+  return false;
+}
+
+function mapMetricToProperty(metric) {
+  switch ((metric ?? '').toLowerCase()) {
+    case 'cpu':
+      return 'cpuPercent';
+    case 'ram':
+    case 'memory':
+      return 'ramPercent';
+    case 'disk-usage':
+      return 'diskUsagePercent';
+    case 'disk-performance':
+      return 'diskPerformancePercent';
+    case 'network':
+      return 'networkKbSec';
+    default:
+      return null;
+  }
+}
+
+function getRequiredMetricsForProfiles(profiles) {
+  if (!Array.isArray(profiles)) {
+    return [];
+  }
+
+  const metrics = new Set();
+  for (const profile of profiles) {
+    if (!profile || !Array.isArray(profile.rules)) {
+      continue;
+    }
+
+    for (const rule of profile.rules) {
+      const property = mapMetricToProperty(rule.metric);
+      if (property === 'cpuPercent') {
+        metrics.add('cpu');
+      } else if (property === 'ramPercent') {
+        metrics.add('ram');
+      } else if (property === 'diskUsagePercent') {
+        metrics.add('disk-usage');
+      } else if (property === 'diskPerformancePercent') {
+        metrics.add('disk-performance');
+      } else if (property === 'networkKbSec') {
+        metrics.add('network');
+      }
+    }
+  }
+
+  return Array.from(metrics);
+}
+
+function triggerAlert(info, socket, profile, rule, value) {
+  const alertProfile = monitoringConfig.alertProfiles.find((entry) => entry.id === profile.alertProfileId) ?? null;
+  const eventPayload = {
+    type: 'alert',
+    agentId: info.id,
+    agentName: info.name,
+    profileId: profile.id,
+    profileName: profile.name,
+    ruleId: rule.id,
+    metric: rule.metric,
+    threshold: rule.threshold,
+    value,
+    timestamp: new Date().toISOString(),
+    alertProfileId: alertProfile?.id ?? null,
+    emails: alertProfile?.emails ?? [],
+    dashboard: Boolean(alertProfile?.dashboard),
+  };
+
+  console.log(`Alert triggered for ${info.name}: ${rule.metric} = ${value.toFixed(1)} (${rule.threshold})`);
+  sendMonitoringEvent('alert', eventPayload);
+  if (alertProfile?.emails?.length > 0) {
+    console.log(`Stub email: sending alert to ${alertProfile.emails.join(', ')}`);
+  }
+
+  if (alertProfile?.remediationScript) {
+    runRemediation(info, socket, alertProfile.remediationScript, eventPayload);
+  }
+}
+
+function runRemediation(info, socket, scriptName, eventPayload) {
+  const script = monitoringConfig.remediationScripts.find((entry) => entry.name === scriptName);
+  if (!script) {
+    console.warn(`Remediation script ${scriptName} not found`);
+    return;
+  }
+
+  const scriptPath = path.join(REMEDIATION_DIR, script.file);
+  let content = '';
+  try {
+    content = fs.readFileSync(scriptPath, 'utf-8');
+  } catch (error) {
+    console.warn(`Unable to load remediation script ${script.file}: ${error.message}`);
+    return;
+  }
+
+  const requestId = uuidv4();
+  sendControl(socket, 'run-remediation', {
+    requestId,
+    scriptName: script.name,
+    language: script.language,
+    content,
+  });
+  sendMonitoringEvent('remediation-request', {
+    type: 'remediation-request',
+    agentId: info.id,
+    agentName: info.name,
+    scriptName: script.name,
+    requestId,
+    timestamp: new Date().toISOString(),
+    originalEvent: eventPayload,
+  });
+}
+
+function sendMonitoringEvent(eventName, payload) {
+  monitoringHistory.push({
+    eventName,
+    payload: JSON.parse(JSON.stringify(payload)),
+  });
+  while (monitoringHistory.length > MONITORING_HISTORY_LIMIT) {
+    monitoringHistory.shift();
+  }
+
+  const data = JSON.stringify(payload);
+  for (const res of monitoringEvents) {
+    res.write(`event: ${eventName}\n`);
+    res.write(`data: ${data}\n\n`);
+  }
+}
+
+function hasActiveAlertForAgent(agentId) {
+  if (!agentId) {
+    return false;
+  }
+
+  const prefix = `${agentId}:`;
+  for (const [key, value] of alertStates) {
+    if (value && key.startsWith(prefix)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function updateAgentProfileStatus(info, profile, triggered) {
+  if (!info || !info.id || !profile) {
+    return;
+  }
+
+  const agentId = info.id;
+  let profileMap = agentProfileStatus.get(agentId);
+  if (!profileMap) {
+    profileMap = new Map();
+    agentProfileStatus.set(agentId, profileMap);
+  }
+
+  const previous = profileMap.get(profile.id) ?? false;
+  if (previous === triggered) {
+    return;
+  }
+
+  profileMap.set(profile.id, Boolean(triggered));
+
+  sendMonitoringEvent('monitoring-state', {
+    agentId,
+    agentName: info.name ?? 'Unknown agent',
+    profileId: profile.id,
+    profileName: profile.name,
+    triggered: Boolean(triggered),
+    status: triggered ? 'triggered' : 'resolved',
+    monitoringEnabled: shouldMonitorAgent(info),
+    metrics: getRequiredMetricsForProfiles([profile]),
+    timestamp: new Date().toISOString(),
+  });
+}
+
+function updateAgentAlertStatus(info, triggered) {
+  if (!info || !info.id) {
+    return;
+  }
+
+  const normalized = Boolean(triggered);
+  const previous = agentAlertStatus.get(info.id) ?? false;
+  if (previous === normalized) {
+    return;
+  }
+
+  agentAlertStatus.set(info.id, normalized);
+  sendMonitoringEvent('monitoring-state', {
+    agentId: info.id,
+    agentName: info.name ?? 'Unknown agent',
+    triggered: normalized,
+    monitoringEnabled: shouldMonitorAgent(info),
+    status: normalized ? 'triggered' : 'resolved',
+    metrics: getRequiredMetricsForProfiles(getAssignedProfiles(info)),
+    timestamp: new Date().toISOString(),
+  });
 }

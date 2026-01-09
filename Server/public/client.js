@@ -5,6 +5,7 @@ const newGroupForm = document.getElementById('newGroupForm');
 const newGroupInput = document.getElementById('newGroupName');
 const logoutButton = document.getElementById('logoutButton');
 const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
+let monitoringStateSource;
 
 const OS_ICONS = {
   windows: '🪟',
@@ -132,6 +133,7 @@ function renderAgentGroups(agents, groups) {
 function createAgentCard(agent, groups) {
   const card = document.createElement('div');
   card.className = 'agent-card';
+  card.dataset.agentId = agent.id ?? '';
 
   const header = document.createElement('div');
   header.className = 'agent-row';
@@ -171,6 +173,30 @@ function createAgentCard(agent, groups) {
 
   header.appendChild(groupSelect);
   card.appendChild(header);
+
+  if (Array.isArray(agent.monitoringProfiles) && agent.monitoringProfiles.length > 0) {
+    const monitoringRow = document.createElement('div');
+    monitoringRow.className = 'monitoring-pill-row';
+    agent.monitoringProfiles.forEach((profile) => {
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'monitor-pill';
+      pill.dataset.profileId = profile.id ?? '';
+      pill.dataset.label = profile.name ?? 'Monitor';
+      const label = profile.name ?? 'Monitor';
+      const status = profile.alert ? 'triggered' : 'resolved';
+      const enabled = Boolean(agent.monitoringEnabled);
+      pill.title = profile.metrics?.length ? `Metrics: ${profile.metrics.join(', ')}` : 'Monitoring';
+      applyMonitoringPillState(pill, { label, status, enabled });
+      pill.addEventListener('click', () => {
+        const agentId = agent.id ?? '';
+        const profileId = profile.id ?? '';
+        window.open(`monitoring-history.html?agent=${encodeURIComponent(agentId)}&profile=${encodeURIComponent(profileId)}&name=${encodeURIComponent(label)}`, '_blank', 'noopener');
+      });
+      monitoringRow.appendChild(pill);
+    });
+    card.appendChild(monitoringRow);
+  }
 
   const meta = document.createElement('span');
   meta.className = 'agent-meta';
@@ -273,6 +299,7 @@ async function assignAgentGroup(agentId, groupName) {
 
 refreshAgents();
 setInterval(refreshAgents, 5000);
+startMonitoringStateStream();
 
 logoutButton?.addEventListener('click', async () => {
   try {
@@ -281,6 +308,70 @@ logoutButton?.addEventListener('click', async () => {
     window.location.href = '/login.html';
   }
 });
+
+function startMonitoringStateStream() {
+  if (monitoringStateSource) {
+    monitoringStateSource.close();
+  }
+
+  monitoringStateSource = new EventSource('/monitoring/events');
+  monitoringStateSource.addEventListener('monitoring-state', (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      updateAgentMonitoringIndicator(payload);
+    } catch (error) {
+      console.error('Monitoring state event parsing failed', error);
+    }
+  });
+  monitoringStateSource.onerror = (error) => {
+    console.error('Monitoring state SSE error', error);
+    monitoringStateSource?.close();
+    setTimeout(startMonitoringStateStream, 5000);
+  };
+}
+
+function updateAgentMonitoringIndicator(payload) {
+  const agentId = payload?.agentId;
+  if (!agentId) {
+    return;
+  }
+
+  const card = document.querySelector(`.agent-card[data-agent-id="${agentId}"]`);
+  if (!card) {
+    return;
+  }
+
+  const profileId = payload?.profileId;
+  if (!profileId) {
+    return;
+  }
+
+  const pill = card.querySelector(`.monitor-pill[data-profile-id="${profileId}"]`);
+  if (!pill) {
+    return;
+  }
+
+  const label = payload.profileName ?? pill.dataset.label ?? 'Monitor';
+  const status = payload.status ?? (payload.triggered ? 'triggered' : 'resolved');
+  const enabled = typeof payload.monitoringEnabled === 'boolean'
+    ? payload.monitoringEnabled
+    : pill.dataset.monitoringEnabled === 'true';
+  applyMonitoringPillState(pill, { label, status, enabled });
+}
+
+function applyMonitoringPillState(pill, { label, status, enabled }) {
+  if (!pill) {
+    return;
+  }
+
+  const stateClass = status === 'triggered' ? 'alert' : enabled ? 'ok' : 'disabled';
+  pill.className = `monitor-pill ${stateClass}`;
+  const suffix = status === 'triggered' ? ' • Alert' : status === 'resolved' ? ' • Resolved' : '';
+  pill.textContent = `${label}${suffix}`;
+  pill.dataset.label = label;
+  pill.dataset.status = status;
+  pill.dataset.monitoringEnabled = enabled ? 'true' : 'false';
+}
 
 function getOsIcon(platform) {
   if (!platform) {

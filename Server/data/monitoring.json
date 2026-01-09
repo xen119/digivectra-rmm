@@ -1,0 +1,71 @@
+{
+  "monitoringProfiles": [
+    {
+      "id": "b7f98b52-5ace-43ce-9a0a-fce961117f5a",
+      "name": "Monitor",
+      "description": "",
+      "alertProfileId": "e4527840-687e-490a-98d4-994fb9810b84",
+      "assignedAgents": [
+        "7c0cf07f-f76b-4984-9385-ffa54c65d630"
+      ],
+      "assignedGroups": [],
+      "rules": [
+        {
+          "id": "86fdd772-5fa5-43d5-9e2b-fc114cbcff05",
+          "metric": "cpu",
+          "threshold": 50,
+          "windowSeconds": 30,
+          "comparison": "gte"
+        }
+      ]
+    },
+    {
+      "id": "19339513-48ed-4c51-b738-b346b4feff90",
+      "name": "Monitor ram",
+      "description": "",
+      "alertProfileId": "e4527840-687e-490a-98d4-994fb9810b84",
+      "assignedAgents": [
+        "7c0cf07f-f76b-4984-9385-ffa54c65d630"
+      ],
+      "assignedGroups": [],
+      "rules": [
+        {
+          "id": "021c90a2-1520-4452-9fc3-d4868b91c002",
+          "metric": "ram",
+          "threshold": 50,
+          "windowSeconds": 10,
+          "comparison": "gte"
+        }
+      ]
+    }
+  ],
+  "alertProfiles": [
+    {
+      "id": "e4527840-687e-490a-98d4-994fb9810b84",
+      "name": "Alerts",
+      "emails": [],
+      "dashboard": true,
+      "remediationScript": null
+    }
+  ],
+  "remediationScripts": [
+    {
+      "name": "cleanup_temp",
+      "description": "Deletes temporary files older than 7 days.",
+      "language": "powershell",
+      "file": "cleanup_temp.ps1"
+    },
+    {
+      "name": "restart_service",
+      "description": "Restarts the Print Spooler service.",
+      "language": "python",
+      "file": "restart_service.py"
+    },
+    {
+      "name": "collect_event_logs",
+      "description": "Dumps the System event log to a temporary file.",
+      "language": "powershell",
+      "file": "collect_event_logs.ps1"
+    }
+  ]
+}

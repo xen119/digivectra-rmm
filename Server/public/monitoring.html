@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Monitoring Profiles</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem;
+        background: #0d1117;
+        color: #cdd9e5;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      main {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+      section {
+        border: 1px solid #22272d;
+        border-radius: 0.75rem;
+        background: #0f141a;
+        padding: 1rem 1.25rem;
+      }
+      form {
+        display: grid;
+        gap: 0.75rem;
+        margin-bottom: 0.5rem;
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        font-size: 0.9rem;
+      }
+      input[type="text"],
+      input[type="number"],
+      select,
+      textarea {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 0.35rem;
+        color: #cdd9e5;
+        padding: 0.45rem 0.6rem;
+      }
+      button {
+        border: none;
+        border-radius: 0.35rem;
+        padding: 0.5rem 0.9rem;
+        background: #238636;
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+        max-width: 180px;
+      }
+      button.secondary {
+        background: #0d1117;
+        border: 1px solid #30363d;
+      }
+      .grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .list {
+        max-height: 220px;
+        overflow: auto;
+        border: 1px solid #1f2937;
+        border-radius: 0.4rem;
+        padding: 0.75rem;
+        background: #0d1117;
+      }
+      .list-item {
+        padding: 0.35rem 0;
+        border-bottom: 1px solid #1f2937;
+      }
+      .list-item:last-child {
+        border-bottom: none;
+      }
+      .events {
+        max-height: 280px;
+        overflow: auto;
+      }
+      .event {
+        border-bottom: 1px solid #1f2937;
+        padding: 0.5rem 0;
+        font-size: 0.9rem;
+      }
+      .badge {
+        display: inline-block;
+        border-radius: 0.35rem;
+        padding: 0.1rem 0.5rem;
+        font-size: 0.75rem;
+        background: #1e3a8a;
+        color: white;
+        margin-bottom: 0.25rem;
+      }
+      .status {
+        color: #8b949e;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Monitoring Profiles</h1>
+    <p class="status" id="statusMessage">Loading configuration…</p>
+    <main>
+      <section>
+        <h2>Create alert profile</h2>
+        <form id="alertProfileForm">
+          <div class="grid">
+            <label>
+              Name
+              <input id="alertName" type="text" required />
+            </label>
+            <label>
+              Emails (comma separated)
+              <input id="alertEmails" type="text" placeholder="ops@example.com, support@example.com" />
+            </label>
+          </div>
+          <div class="grid">
+            <label>
+              Remediation script
+              <select id="remediationScriptSelect"></select>
+            </label>
+            <label>
+              Dashboard alert
+              <select id="alertDashboard">
+                <option value="true" selected>Yes</option>
+                <option value="false">No</option>
+              </select>
+            </label>
+          </div>
+          <button type="submit">Create alert profile</button>
+        </form>
+        <div class="list" id="alertProfilesList"></div>
+      </section>
+
+      <section>
+        <h2>Create monitoring profile</h2>
+        <form id="monitoringProfileForm">
+          <div class="grid">
+            <label>
+              Name
+              <input id="profileName" type="text" required />
+            </label>
+            <label>
+              Metric
+              <select id="metricSelect">
+                <option value="cpu">CPU (%)</option>
+                <option value="ram">RAM (%)</option>
+                <option value="disk-usage">Disk usage (%)</option>
+                <option value="disk-performance">Disk performance (%)</option>
+                <option value="network">Network (KB/s)</option>
+              </select>
+            </label>
+          </div>
+          <div class="grid">
+            <label>
+              Threshold
+              <input id="threshold" type="number" min="1" max="100" step="0.1" required />
+            </label>
+            <label>
+              Averaging window (seconds)
+              <input id="windowSeconds" type="number" min="5" max="600" step="5" value="30" required />
+            </label>
+            <label>
+              Alert profile
+              <select id="profileAlertSelect"></select>
+            </label>
+          </div>
+          <label>
+            Description
+            <textarea id="profileDescription" rows="2" placeholder="Optional context"></textarea>
+          </label>
+          <button type="submit">Create monitoring profile</button>
+        </form>
+        <div class="list" id="monitoringProfilesList"></div>
+      </section>
+
+      <section>
+        <h2>Assign profile</h2>
+        <form id="assignmentForm">
+          <div class="grid">
+            <label>
+              Monitoring profile
+              <select id="assignmentProfileSelect"></select>
+            </label>
+            <label>
+              Target type
+              <select id="assignmentTargetType">
+                <option value="agent">Agent</option>
+                <option value="group">Group</option>
+              </select>
+            </label>
+            <label id="agentTargetLabel">
+              Agent target
+              <select id="assignmentAgentSelect"></select>
+            </label>
+            <label id="groupTargetLabel" style="display: none;">
+              Group target
+              <select id="assignmentGroupSelect"></select>
+            </label>
+          </div>
+          <button type="submit">Assign</button>
+        </form>
+        <p class="status">Use the agent list or group selector to copy valid IDs.</p>
+      </section>
+
+      <section>
+        <h2>Monitoring events</h2>
+        <p class="status">Realtime alerts and remediation logs.</p>
+        <div class="events" id="eventLog"></div>
+      </section>
+    </main>
+    <script src="monitoring.js"></script>
+  </body>
+</html>

@@ -155,7 +155,17 @@ internal static class Program
 
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
-                    await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Server requested close", cancellationToken);
+                    if (socket.State == WebSocketState.Open)
+                    {
+                        try
+                        {
+                            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Server requested close", cancellationToken);
+                        }
+                        catch (WebSocketException) when (socket.State == WebSocketState.Closed)
+                        {
+                            // already closed, ignore
+                        }
+                    }
                     return;
                 }
 

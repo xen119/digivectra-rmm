@@ -6,7 +6,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 
 - Located in `Agent/`.
 - A .NET 8 console app that connects to a `wss://` endpoint, echoes server messages, and lets you type outgoing payloads.
-- Displays an RMM-branded tray icon so the console stays accessible while running in the background.
+  - Loads a multi-resolution `assets/rmm-icon.ico` so the tray icon renders the RMM-blue ring/arrow artwork correctly at all scales while the console stays accessible in the background.
 - Collects installed software listings (registry uninstall entries plus Microsoft Store packages) on demand and handles uninstall requests using the stored uninstall string or `Remove-AppxPackage`.
 - Supports secure chat requests from the dashboard; a tray chat popup appears in the lower-right, showing the server user/role, timestamps and no redundant header, and you reply by typing `/chat <your response>` or using the popup.
 - Incoming chat requests now pop up as a small window near the agent’s system tray so you always see the server user, and replies are sent with the local logged-in username.
@@ -34,6 +34,7 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - A **Software** button opens `software.html`, showing paginated results for all registry-installed and Microsoft Store apps and sending uninstall requests (using whatever uninstall string or Appx package ID was collected) back to the agent.
 - A **Software Inventory** sidebar entry opens `software-management.html` where you can see a catalog of every title, approve or reject entries, watch an hourly retry log, and let the server automatically request silent uninstalls on agents that still list rejected software.
 - A **Services** button on each agent card opens `services.html`, letting you refresh the agent’s Windows services list and start/stop/restart items with immediate success/failure feedback from the agent.
+- The agent ships with `install-service.ps1`, a PowerShell helper that registers the published `Agent.exe` as the `RMM.Agent` Windows service (auto-start + status control). Run it from an elevated PowerShell prompt inside the `Agent` directory after publishing (`dotnet publish -c Release`) to install or update the service.
 - A **Monitoring** button opens `monitoring.html`, where you can define monitoring profiles (metric, threshold, window), map them to alert profiles (dashboard/email + optional remediation scripts), unassign agents/groups, delete outdated profiles, and watch a live alert/remediation log.
 - The **Scheduler** view lets you select one or more agent/group targets, choose an interval (seconds/minutes/etc.), pick from stored scripts, and save recurring jobs for future automation or patch campaigns.
 - A new **Scheduler** view (sidebar link) lets you sketch recurring script or patch jobs for future implementation and keeps a client-side list of the planned runs.

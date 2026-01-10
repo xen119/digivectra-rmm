@@ -1,0 +1,14 @@
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\Agent.exe
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\mrwebrtc.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\assets\\rmm-icon.png
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\Agent.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\Agent.deps.json
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\Agent.runtimeconfig.json
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\Agent.pdb
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\Microsoft.MixedReality.WebRTC.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\System.Management.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\System.ServiceProcess.ServiceController.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\runtimes\win10-x64\native\mrwebrtc.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\runtimes\win10-x86\native\mrwebrtc.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\runtimes\win\lib\net8.0\System.Management.dll
+C:\Users\DavidNefdt\Desktop\Projects\RMM\Agent\bin\Release\net8.0-windows\publish\runtimes\win\lib\net8.0\System.ServiceProcess.ServiceController.dll

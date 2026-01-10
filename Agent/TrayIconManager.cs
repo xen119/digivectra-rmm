@@ -247,13 +247,21 @@ internal static class TrayIconManager
 
         private static (Icon?, IntPtr) LoadIcon()
         {
-            var path = Path.Combine(AppContext.BaseDirectory, "rmm-icon.png");
-            if (!File.Exists(path))
+            var assetDir = Path.Combine(AppContext.BaseDirectory, "assets");
+            var icoPath = Path.Combine(assetDir, "rmm-icon.ico");
+            if (File.Exists(icoPath))
+            {
+                var ico = new Icon(icoPath);
+                return (ico, ico.Handle);
+            }
+
+            var pngPath = Path.Combine(assetDir, "rmm-icon.png");
+            if (!File.Exists(pngPath))
             {
                 return (SystemIcons.Application, IntPtr.Zero);
             }
 
-            using var bitmap = new Bitmap(path);
+            using var bitmap = new Bitmap(pngPath);
             var handle = bitmap.GetHicon();
             var icon = Icon.FromHandle(handle);
             return (icon, handle);

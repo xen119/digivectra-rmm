@@ -1,0 +1,70 @@
+:root {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+body {
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.page,
+.patch-panel,
+.group-block,
+.agent-card,
+.summary-card,
+.history-entry,
+.software-card,
+.patch-card,
+.table-wrapper,
+.log-panel,
+.log-entry,
+.scheduler-panel {
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+table th,
+table td {
+  padding: 0.5rem;
+}
+
+.toolbar button,
+.actions button,
+button {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.summary-grid {
+  gap: 0.8rem;
+}
+
+.sidebar-link,
+.group-header,
+.agent-row,
+.form-row {
+  padding: 0.35rem 0.5rem;
+}
+
+.input-row input,
+select,
+input,
+textarea {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.card,
+.agent-card,
+.patch-card,
+.history-entry,
+.software-card,
+.summary-card {
+  border-radius: 0.5rem;
+}

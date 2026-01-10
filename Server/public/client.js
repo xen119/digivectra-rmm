@@ -271,7 +271,7 @@ function createAgentCard(agent, groups) {
   softwareButton.type = 'button';
   const softwareCount = typeof agent.softwareSummary?.totalCount === 'number'
     ? agent.softwareSummary.totalCount
-    : '—';
+    : '-';
   softwareButton.textContent = `Software: ${softwareCount}`;
   softwareButton.addEventListener('click', () => {
     const params = new URLSearchParams();
@@ -284,6 +284,20 @@ function createAgentCard(agent, groups) {
     window.open(`software.html?${params.toString()}`, '_blank', 'noopener');
   });
   actions.appendChild(softwareButton);
+  const servicesButton = document.createElement('button');
+  servicesButton.type = 'button';
+  servicesButton.textContent = 'Services';
+  servicesButton.addEventListener('click', () => {
+    const params = new URLSearchParams();
+    if (agent.id) {
+      params.set('agent', agent.id);
+    }
+    if (agent.name) {
+      params.set('name', agent.name);
+    }
+    window.open(`services.html?${params.toString()}`, '_blank', 'noopener');
+  });
+  actions.appendChild(servicesButton);
   const chatButton = document.createElement('button');
   chatButton.type = 'button';
   chatButton.textContent = 'Chat';

@@ -19,6 +19,7 @@ using System.Windows.Forms;
 using Microsoft.MixedReality.WebRTC;
 using System.Net.NetworkInformation;
 using Microsoft.Win32;
+using System.ServiceProcess;
 
 namespace Agent;
 
@@ -783,6 +784,138 @@ internal static class Program
         };
 
         await SendJsonAsync(socket, payload, cancellationToken);
+    }
+
+    private static async Task SendServiceListAsync(ClientWebSocket socket, string requestId, CancellationToken cancellationToken)
+    {
+        var services = new List<object>();
+        try
+        {
+            foreach (var controller in ServiceController.GetServices().OrderBy(s => s.DisplayName))
+            {
+                services.Add(new
+                {
+                    name = controller.ServiceName,
+                    displayName = controller.DisplayName,
+                    status = controller.Status.ToString(),
+                    serviceType = controller.ServiceType.ToString(),
+                    startType = GetServiceStartMode(controller.ServiceName) ?? "Unknown"
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to enumerate services: {ex.Message}");
+        }
+
+        var payload = new
+        {
+            type = "service-list",
+            requestId,
+            services
+        };
+
+        await SendJsonAsync(socket, payload, cancellationToken);
+    }
+
+    private static async Task HandleServiceActionAsync(ClientWebSocket socket, JsonElement element, CancellationToken cancellationToken)
+    {
+        var requestId = element.TryGetProperty("requestId", out var requestIdElement) && requestIdElement.ValueKind == JsonValueKind.String
+            ? requestIdElement.GetString()?.Trim() ?? string.Empty
+            : string.Empty;
+
+        var serviceName = element.TryGetProperty("serviceName", out var serviceElement) && serviceElement.ValueKind == JsonValueKind.String
+            ? serviceElement.GetString()?.Trim() ?? string.Empty
+            : string.Empty;
+
+        var action = element.TryGetProperty("action", out var actionElement) && actionElement.ValueKind == JsonValueKind.String
+            ? actionElement.GetString()?.Trim().ToLowerInvariant() ?? string.Empty
+            : string.Empty;
+
+        var message = string.Empty;
+        var success = false;
+
+        if (string.IsNullOrWhiteSpace(serviceName) || string.IsNullOrWhiteSpace(action))
+        {
+            message = "Missing service name or action";
+        }
+        else
+        {
+            try
+            {
+                using var controller = new ServiceController(serviceName);
+                switch (action)
+                {
+                    case "start":
+                        if (controller.Status != ServiceControllerStatus.Running)
+                        {
+                            controller.Start();
+                            controller.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(15));
+                        }
+                        success = true;
+                        message = "Service started";
+                        break;
+                    case "stop":
+                        if (controller.Status != ServiceControllerStatus.Stopped)
+                        {
+                            controller.Stop();
+                            controller.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(15));
+                        }
+                        success = true;
+                        message = "Service stopped";
+                        break;
+                    case "restart":
+                        if (controller.Status != ServiceControllerStatus.Stopped)
+                        {
+                            controller.Stop();
+                            controller.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(15));
+                        }
+                        controller.Start();
+                        controller.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(15));
+                        success = true;
+                        message = "Service restarted";
+                        break;
+                    default:
+                        message = $"Unsupported action '{action}'";
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                message = ex.Message;
+            }
+        }
+
+        var result = new
+        {
+            type = "service-action-result",
+            requestId,
+            serviceName,
+            action,
+            success,
+            message
+        };
+
+        await SendJsonAsync(socket, result, cancellationToken);
+    }
+
+    private static string? GetServiceStartMode(string serviceName)
+    {
+        try
+        {
+            var safeName = serviceName.Replace("'", "''");
+            using var searcher = new ManagementObjectSearcher($"SELECT StartMode FROM Win32_Service WHERE Name = '{safeName}'");
+            foreach (ManagementObject obj in searcher.Get())
+            {
+                return obj["StartMode"] as string;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return null;
     }
 
     private static async Task<IReadOnlyCollection<InstalledSoftwareEntry>> CollectInstalledSoftwareAsync(CancellationToken cancellationToken)
@@ -1593,6 +1726,7 @@ internal static class Program
         }
         dynamic results = searcher.Search("IsInstalled=0 and IsHidden=0");
         var requestedSet = new HashSet<string>(requestedIds, StringComparer.OrdinalIgnoreCase);
+        #pragma warning disable CS8600
         dynamic collection;
         var collectionType = Type.GetTypeFromProgID("Microsoft.Update.UpdateCollection");
         if (collectionType is not null)
@@ -1610,6 +1744,8 @@ internal static class Program
                 collection = null;
             }
         }
+
+        #pragma warning restore CS8600
 
         if (collection is null)
         {
@@ -2006,15 +2142,26 @@ internal static class Program
                 await HandleKillProcessAsync(socket, document.RootElement, cancellationToken);
                 break;
             case "list-software":
-                if (document.RootElement.TryGetProperty("requestId", out var requestIdElement) &&
-                    requestIdElement.ValueKind == JsonValueKind.String &&
-                    !string.IsNullOrWhiteSpace(requestIdElement.GetString()))
+                 if (document.RootElement.TryGetProperty("requestId", out var requestIdElement) &&
+                     requestIdElement.ValueKind == JsonValueKind.String &&
+                     !string.IsNullOrWhiteSpace(requestIdElement.GetString()))
+                 {
+                     await SendSoftwareListAsync(socket, requestIdElement.GetString()!, cancellationToken);
+                 }
+                 break;
+            case "list-services":
+                if (document.RootElement.TryGetProperty("requestId", out var serviceRequestId) &&
+                    serviceRequestId.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(serviceRequestId.GetString()))
                 {
-                    await SendSoftwareListAsync(socket, requestIdElement.GetString()!, cancellationToken);
+                    await SendServiceListAsync(socket, serviceRequestId.GetString()!, cancellationToken);
                 }
                 break;
             case "uninstall-software":
                 await HandleUninstallRequestAsync(socket, document.RootElement, cancellationToken);
+                break;
+            case "manage-service":
+                await HandleServiceActionAsync(socket, document.RootElement, cancellationToken);
                 break;
             case "request-bsod":
                 await SendBsodSummaryAsync(socket, cancellationToken, true);

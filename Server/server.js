@@ -45,6 +45,8 @@ const FILE_UPLOAD_CHUNK_BYTES = 256 * 1024;
 const fileRequests = new Map(); // requestId -> { kind, agentId, resolve, reject, timer }
 const SOFTWARE_REQUEST_TIMEOUT_MS = 60_000;
 const softwareRequests = new Map(); // requestId -> { agentId, resolve, reject, timer }
+const SERVICE_REQUEST_TIMEOUT_MS = 60_000;
+const serviceRequests = new Map();
 const patchApprovals = new Map(); // `${agentId}:${updateId}` -> { approvedAt }
 const patchSchedules = new Map(); // scheduleId -> schedule data
 const PATCH_SCHEDULE_TICK_MS = 5_000;
@@ -76,6 +78,13 @@ const SESSION_TTL_MS = 30 * 60_1000;
 const SSO_SECRET = process.env.SSO_SECRET ?? 'CHANGE_ME-SSO-KEY';
 const SSO_WINDOW_MS = 5 * 60_1000;
 const REMEDIATION_DIR = path.join(__dirname, 'scripts', 'remediation');
+const SOFTWARE_UNINSTALL_INTERVAL_MS = 60 * 60_1000;
+const softwareApprovals = new Map(); // softwareId -> { state: 'approved'|'rejected'|'pending' }
+const softwareUninstallQueue = new Map(); // softwareId -> { pending: Set<agentId>, lastAttempt: Map<agentId, timestamp> }
+const softwareUninstallLog = [];
+const SOFTWARE_UNINSTALL_LOG_LIMIT = 200;
+const SERVICE_ACTION_TIMEOUT_MS = 30_000;
+const serviceActionRequests = new Map();
 
 let USERS_CONFIG = loadUsersConfig();
 const monitoringEvents = new Set();
@@ -89,7 +98,7 @@ const agentProfileStatus = new Map(); // agentId -> Map<profileId, boolean>
 const sessions = new Map();
 const roleWeight = { viewer: 0, operator: 1, admin: 2 };
 
-server.on('request', (req, res) => {
+server.on('request', async (req, res) => {
   const requestedUrl = new URL(req.url ?? '/', `https://${req.headers.host ?? 'localhost'}`);
   const pathname = requestedUrl.pathname;
 
@@ -1526,6 +1535,145 @@ server.on('request', (req, res) => {
     return;
   }
 
+  const softwareInventoryMatch = pathname === '/software' && req.method === 'GET';
+  if (softwareInventoryMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    try {
+      await refreshSoftwareEntriesFromAgents();
+    } catch (error) {
+      console.warn('Software inventory refresh failed', error);
+    }
+
+    const snapshot = buildSoftwareCatalog();
+    const pendingUninstalls = Array.from(softwareUninstallQueue.values()).reduce((sum, queue) => sum + queue.pending.size, 0);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      software: snapshot.list,
+      summary: {
+        totalSoftware: snapshot.list.length,
+        totalAgents: snapshot.agentCount,
+        rejectedPairs: snapshot.rejectedPairs,
+        pendingUninstalls,
+      },
+    }));
+  }
+
+  const softwareApprovalMatch = pathname === '/software/approval' && req.method === 'POST';
+  if (softwareApprovalMatch) {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    collectBody(req, async (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const softwareId = (payload?.softwareId ?? '').toString().trim();
+        const action = (payload?.action ?? '').toString().trim().toLowerCase();
+        if (!softwareId || (action !== 'approve' && action !== 'reject')) {
+          res.writeHead(400);
+          return res.end('softwareId and valid action are required');
+        }
+
+        const state = action === 'reject' ? 'rejected' : 'approved';
+        softwareApprovals.set(softwareId, { state });
+        if (state === 'rejected') {
+          queueRejectedSoftwareNow(softwareId);
+        } else {
+          softwareUninstallQueue.delete(softwareId);
+        }
+
+        res.writeHead(204);
+        res.end();
+      } catch (error) {
+        console.error('Software approval failed', error);
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const softwareLogsMatch = pathname === '/software/logs' && req.method === 'GET';
+  if (softwareLogsMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ logs: softwareUninstallLog.slice(0, SOFTWARE_UNINSTALL_LOG_LIMIT) }));
+    return;
+  }
+
+  const agentServicesMatch = pathname.match(/^\/agent\/([^/]+)\/services$/);
+  if (agentServicesMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const agentId = agentServicesMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    requestAgentServiceList(entry)
+      .then((services) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ services }));
+      })
+      .catch(() => {
+        res.writeHead(504);
+        res.end('Unable to retrieve services');
+      });
+
+    return;
+  }
+
+  const agentServiceActionMatch = pathname.match(/^\/agent\/([^/]+)\/service\/([^/]+)\/action$/);
+  if (agentServiceActionMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = agentServiceActionMatch[1];
+    const serviceName = decodeURIComponent(agentServiceActionMatch[2]);
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    collectBody(req, async (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const action = (payload?.action ?? '').toString().trim().toLowerCase();
+        if (!['start', 'stop', 'restart'].includes(action)) {
+          res.writeHead(400);
+          return res.end('Invalid action');
+        }
+
+        const result = await performServiceAction(entry, serviceName, action);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: Boolean(result.success),
+          message: result.message ?? 'Action completed',
+        }));
+      } catch (error) {
+        console.error('Service action failed', error);
+        res.writeHead(500);
+        res.end('Service action failed');
+      }
+    });
+
+    return;
+  }
+
   const screenAnswerMatch = pathname.match(/^\/screen\/([^/]+)\/answer$/);
   if (screenAnswerMatch && req.method === 'POST') {
     const sessionId = screenAnswerMatch[1];
@@ -1789,16 +1937,31 @@ wss.on('connection', (socket, request) => {
         if (pending) {
           pending.resolve(parsed);
         }
-      } else if (parsed?.type === 'software-list' && typeof parsed.requestId === 'string') {
-        const pending = completeSoftwareRequest(parsed.requestId);
+    } else if (parsed?.type === 'software-list' && typeof parsed.requestId === 'string') {
+      const pending = completeSoftwareRequest(parsed.requestId);
+      if (pending) {
+        const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+        const retrievedAt = typeof parsed.retrievedAt === 'string' ? parsed.retrievedAt : new Date().toISOString();
+        pending.resolve({ entries, retrievedAt });
+        info.softwareSummary = {
+          totalCount: entries.length,
+          lastUpdated: retrievedAt,
+        };
+      }
+      } else if (parsed?.type === 'service-list' && typeof parsed.requestId === 'string') {
+        const pending = completeServiceRequest(parsed.requestId);
         if (pending) {
-          const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
-          const retrievedAt = typeof parsed.retrievedAt === 'string' ? parsed.retrievedAt : new Date().toISOString();
-          pending.resolve({ entries, retrievedAt });
-          info.softwareSummary = {
-            totalCount: entries.length,
-            lastUpdated: retrievedAt,
-          };
+          pending.resolve(Array.isArray(parsed.services) ? parsed.services : []);
+        }
+      } else if (parsed?.type === 'service-action-result' && typeof parsed.requestId === 'string') {
+        const pending = completeServiceActionRequest(parsed.requestId);
+        if (pending) {
+          pending.resolve({
+            success: Boolean(parsed.success),
+            message: parsed.message ?? '',
+            serviceName: parsed.serviceName ?? '',
+            action: parsed.action ?? '',
+          });
         }
       } else if (parsed?.type === 'chat-response') {
         const text = typeof parsed.text === 'string' ? parsed.text.trim() : '';
@@ -1820,7 +1983,7 @@ wss.on('connection', (socket, request) => {
           dispatchChatEvent(info.id, chatEvent);
         }
         } else if (parsed?.type === 'software-operation-result') {
-          console.log(`Software operation result from ${info.name}: ${parsed.softwareId ?? 'n/a'} ${parsed.operation ?? 'operation'} success=${parsed.success ? 'yes' : 'no'} message="${parsed.message ?? ''}"`);
+          handleSoftwareOperationResult(info, parsed);
         } else if (parsed?.type === 'action-result') {
           logPatchEvent({
             timestamp: new Date().toISOString(),
@@ -2080,6 +2243,306 @@ function collectApprovedAgentsForPatches(patchIds) {
   return targets;
 }
 
+function getSoftwareCatalogKey(software) {
+  if (!software) {
+    return 'unknown';
+  }
+
+  const idPart = typeof software.id === 'string' && software.id.trim();
+  if (idPart) {
+    return idPart.trim();
+  }
+
+  const namePart = (software.name ?? '').toString().trim() || 'unknown';
+  const versionPart = (software.version ?? '').toString().trim();
+  const publisherPart = (software.publisher ?? '').toString().trim();
+  return `${namePart}::${versionPart}::${publisherPart}`;
+}
+
+function getSoftwareState(softwareId) {
+  const record = softwareApprovals.get(softwareId);
+  return record?.state ?? 'pending';
+}
+
+function buildSoftwareCatalog() {
+  const catalog = new Map();
+  const agentSet = new Set();
+  for (const { info } of clientsById.values()) {
+    const agentId = info.id;
+    if (!agentId) {
+      continue;
+    }
+
+    agentSet.add(agentId);
+    const entries = Array.isArray(info.softwareEntries) ? info.softwareEntries : [];
+    entries.forEach((softwareItem) => {
+      const softwareId = softwareItem.__catalogId ?? getSoftwareCatalogKey(softwareItem);
+      softwareItem.__catalogId = softwareId;
+      let record = catalog.get(softwareId);
+      if (!record) {
+        record = {
+          id: softwareId,
+          name: softwareItem.name ?? 'Unknown',
+          version: softwareItem.version ?? '',
+          publisher: softwareItem.publisher ?? '',
+          source: softwareItem.source ?? '',
+          agents: new Map(),
+        };
+        catalog.set(softwareId, record);
+      }
+
+      record.agents.set(agentId, {
+        agentId,
+        agentName: info.name ?? agentId,
+        status: info.status ?? 'offline',
+        source: softwareItem.source ?? '',
+        version: softwareItem.version ?? '',
+        publisher: softwareItem.publisher ?? '',
+        installDate: softwareItem.installDate ?? '',
+        location: softwareItem.location ?? '',
+        uninstallCommand: softwareItem.uninstallCommand ?? '',
+        packageFullName: softwareItem.packageFullName ?? '',
+        productCode: softwareItem.productCode ?? '',
+        softwareId: softwareId,
+      });
+    });
+  }
+
+  const list = Array.from(catalog.values()).map((entry) => {
+    const status = getSoftwareState(entry.id);
+    return {
+      id: entry.id,
+      name: entry.name,
+      version: entry.version,
+      publisher: entry.publisher,
+      source: entry.source,
+      status,
+      agents: Array.from(entry.agents.values()),
+      agentCount: entry.agents.size,
+    };
+  });
+
+  updateSoftwareUninstallQueue(list);
+  return {
+    list,
+    agentCount: agentSet.size,
+    rejectedPairs: list.reduce((total, software) => {
+      if (software.status === 'rejected') {
+        return total + software.agentCount;
+      }
+      return total;
+    }, 0),
+  };
+}
+
+function updateSoftwareUninstallQueue(softwareList) {
+  const rejectedSet = new Set();
+
+  softwareList.forEach((software) => {
+    if (software.status !== 'rejected') {
+      softwareUninstallQueue.delete(software.id);
+      return;
+    }
+
+    rejectedSet.add(software.id);
+    let queue = softwareUninstallQueue.get(software.id);
+    if (!queue) {
+      queue = { pending: new Set(), lastAttempt: new Map() };
+    }
+
+    const currentAgents = new Set();
+    software.agents.forEach((agent) => {
+      queue.pending.add(agent.agentId);
+      currentAgents.add(agent.agentId);
+    });
+
+    for (const agentId of Array.from(queue.pending)) {
+      if (!currentAgents.has(agentId)) {
+        queue.pending.delete(agentId);
+      }
+    }
+
+    if (queue.pending.size === 0) {
+      return softwareUninstallQueue.delete(software.id);
+    }
+
+    softwareUninstallQueue.set(software.id, queue);
+  });
+
+  for (const softwareId of Array.from(softwareUninstallQueue.keys())) {
+    if (!rejectedSet.has(softwareId)) {
+      softwareUninstallQueue.delete(softwareId);
+    }
+  }
+}
+
+async function refreshSoftwareEntriesFromAgents() {
+  const clients = Array.from(clientsById.values());
+  await Promise.allSettled(clients.map(async (entry) => {
+    if (entry.socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    try {
+      const result = await requestAgentSoftwareList(entry);
+      const normalized = Array.isArray(result.entries)
+        ? result.entries.map((item) => {
+            const clone = { ...item };
+            clone.__catalogId = getSoftwareCatalogKey(clone);
+            return clone;
+          })
+        : [];
+      entry.info.softwareEntries = normalized;
+      entry.info.softwareRetrievedAt = result.retrievedAt;
+    } catch (error) {
+      console.warn('Software refresh failed for', entry.info.id, error);
+    }
+  }));
+}
+
+function logSoftwareEvent(entry) {
+  softwareUninstallLog.unshift(entry);
+  if (softwareUninstallLog.length > SOFTWARE_UNINSTALL_LOG_LIMIT) {
+    softwareUninstallLog.pop();
+  }
+}
+
+function handleSoftwareOperationResult(info, parsed) {
+  const softwareId = parsed.softwareId;
+  if (!softwareId) {
+    return;
+  }
+
+  const queue = softwareUninstallQueue.get(softwareId);
+  if (!queue) {
+    return;
+  }
+
+  if (parsed.success) {
+    queue.pending.delete(info.id);
+    queue.lastAttempt.delete(info.id);
+    logSoftwareEvent({
+      timestamp: new Date().toISOString(),
+      type: 'uninstall-success',
+      softwareId,
+      agentId: info.id,
+      agentName: info.name,
+      softwareName: parsed.softwareName ?? '',
+      message: parsed.message ?? 'Uninstall completed',
+    });
+  } else {
+    queue.lastAttempt.set(info.id, Date.now());
+    logSoftwareEvent({
+      timestamp: new Date().toISOString(),
+      type: 'uninstall-failure',
+      softwareId,
+      agentId: info.id,
+      agentName: info.name,
+      softwareName: parsed.softwareName ?? '',
+      message: parsed.message ?? 'Uninstall failed',
+    });
+  }
+
+  if (!queue.pending.size) {
+    softwareUninstallQueue.delete(softwareId);
+  } else {
+    // ensure we attempt again soon
+    setTimeout(processSoftwareUninstalls, 5_000);
+  }
+}
+
+function findAgentSoftwareEntry(info, softwareId) {
+  const entries = Array.isArray(info.softwareEntries) ? info.softwareEntries : [];
+  return entries.find((item) => (item.__catalogId ?? getSoftwareCatalogKey(item)) === softwareId) ?? null;
+}
+
+function queueRejectedSoftwareNow(softwareId) {
+  const queue = softwareUninstallQueue.get(softwareId) ?? { pending: new Set(), lastAttempt: new Map() };
+  queue.pending.clear();
+  for (const { info } of clientsById.values()) {
+    const softwareEntry = findAgentSoftwareEntry(info, softwareId);
+    if (softwareEntry && info.id) {
+      queue.pending.add(info.id);
+    }
+  }
+
+  if (!queue.pending.size) {
+    return softwareUninstallQueue.delete(softwareId);
+  }
+
+  softwareUninstallQueue.set(softwareId, queue);
+  processSoftwareUninstalls();
+}
+
+  function processSoftwareUninstalls() {
+  if (!softwareUninstallQueue.size) {
+    return;
+  }
+
+  for (const [softwareId, queue] of Array.from(softwareUninstallQueue.entries())) {
+    if (!queue.pending.size) {
+      softwareUninstallQueue.delete(softwareId);
+      continue;
+    }
+
+    for (const agentId of Array.from(queue.pending)) {
+      const entry = clientsById.get(agentId);
+      if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+        continue;
+      }
+
+        const softwareEntry = findAgentSoftwareEntry(entry.info, softwareId);
+        if (!softwareEntry) {
+          queue.pending.delete(agentId);
+          continue;
+        }
+
+        const hasPackageFullName = typeof softwareEntry.packageFullName === 'string' && softwareEntry.packageFullName.trim().length > 0;
+        const hasUninstallCommand = typeof softwareEntry.uninstallCommand === 'string' && softwareEntry.uninstallCommand.trim().length > 0;
+        const hasProductCode = typeof softwareEntry.productCode === 'string' && softwareEntry.productCode.trim().length > 0;
+
+        if (!hasPackageFullName && !hasUninstallCommand && !hasProductCode) {
+          queue.pending.delete(agentId);
+          logSoftwareEvent({
+            timestamp: new Date().toISOString(),
+            type: 'uninstall-failure',
+            softwareId,
+            agentId,
+            agentName: entry.info.name,
+            softwareName: softwareEntry.name ?? '',
+            message: 'No uninstall payload available (missing appx name, command, and product code).',
+          });
+          continue;
+        }
+
+        const requestId = uuidv4();
+        const payload = {
+          requestId,
+          softwareId,
+          source: hasPackageFullName ? 'appx' : 'registry',
+          uninstallCommand: hasUninstallCommand ? softwareEntry.uninstallCommand?.trim() ?? null : null,
+          packageFullName: hasPackageFullName ? softwareEntry.packageFullName?.trim() ?? null : null,
+          productCode: hasProductCode ? softwareEntry.productCode?.trim() ?? null : null,
+        };
+
+        sendControl(entry.socket, 'uninstall-software', payload);
+        logSoftwareEvent({
+          timestamp: new Date().toISOString(),
+          type: 'uninstall-attempt',
+          softwareId,
+          agentId,
+          agentName: entry.info.name,
+          softwareName: softwareEntry.name ?? '',
+          message: 'Automatic uninstall requested',
+        });
+    }
+
+    if (queue.pending.size === 0) {
+      softwareUninstallQueue.delete(softwareId);
+    }
+  }
+}
+
 function resolveAgentPackageDir() {
   if (fs.existsSync(AGENT_DOWNLOAD_DIR)) {
     return AGENT_DOWNLOAD_DIR;
@@ -2223,6 +2686,7 @@ function processPatchSchedules() {
 }
 
 setInterval(processPatchSchedules, PATCH_SCHEDULE_TICK_MS);
+setInterval(processSoftwareUninstalls, SOFTWARE_UNINSTALL_INTERVAL_MS);
 
 function addChatListener(agentId, res) {
   const listeners = chatListeners.get(agentId) ?? new Set();
@@ -2445,27 +2909,69 @@ function completeFileRequest(requestId) {
   return entry;
 }
 
-function enqueueSoftwareRequest(agentId, resolve, reject) {
-  const requestId = uuidv4();
-  const timer = setTimeout(() => {
-    softwareRequests.delete(requestId);
-    reject(new Error('Software request timed out'));
-  }, SOFTWARE_REQUEST_TIMEOUT_MS);
+  function enqueueSoftwareRequest(agentId, resolve, reject) {
+    const requestId = uuidv4();
+    const timer = setTimeout(() => {
+      softwareRequests.delete(requestId);
+      reject(new Error('Software request timed out'));
+    }, SOFTWARE_REQUEST_TIMEOUT_MS);
 
-  softwareRequests.set(requestId, { agentId, resolve, reject, timer });
-  return requestId;
-}
-
-function completeSoftwareRequest(requestId) {
-  const entry = softwareRequests.get(requestId);
-  if (!entry) {
-    return null;
+    softwareRequests.set(requestId, { agentId, resolve, reject, timer });
+    return requestId;
   }
+
+  function completeSoftwareRequest(requestId) {
+    const entry = softwareRequests.get(requestId);
+    if (!entry) {
+      return null;
+    }
 
   clearTimeout(entry.timer);
   softwareRequests.delete(requestId);
-  return entry;
-}
+    return entry;
+  }
+
+  function enqueueServiceRequest(agentId, resolve, reject) {
+    const requestId = uuidv4();
+    const timer = setTimeout(() => {
+      serviceRequests.delete(requestId);
+      reject(new Error('Service request timed out'));
+    }, SERVICE_REQUEST_TIMEOUT_MS);
+
+    serviceRequests.set(requestId, { agentId, resolve, reject, timer });
+    return requestId;
+  }
+
+  function completeServiceRequest(requestId) {
+    const entry = serviceRequests.get(requestId);
+    if (!entry) {
+      return null;
+    }
+
+    clearTimeout(entry.timer);
+    serviceRequests.delete(requestId);
+    return entry;
+  }
+
+  function enqueueServiceActionRequest(requestId, resolve, reject) {
+    const timer = setTimeout(() => {
+      serviceActionRequests.delete(requestId);
+      reject(new Error('Service action timed out'));
+    }, SERVICE_ACTION_TIMEOUT_MS);
+
+    serviceActionRequests.set(requestId, { resolve, reject, timer });
+  }
+
+  function completeServiceActionRequest(requestId) {
+    const entry = serviceActionRequests.get(requestId);
+    if (!entry) {
+      return null;
+    }
+
+    clearTimeout(entry.timer);
+    serviceActionRequests.delete(requestId);
+    return entry;
+  }
 
 function handleAuthRoute(req, res, pathname, requestedUrl) {
   if (req.method === 'POST' && pathname === '/auth/login') {
@@ -2678,6 +3184,25 @@ function loadUsersConfig() {
     console.error('Failed to load users config', error);
     return [];
   }
+}
+
+function requestAgentServiceList(entry) {
+  return new Promise((resolve, reject) => {
+    const requestId = enqueueServiceRequest(entry.info.id, resolve, reject);
+    sendControl(entry.socket, 'list-services', { requestId });
+  });
+}
+
+function performServiceAction(entry, serviceName, action) {
+  return new Promise((resolve, reject) => {
+    const requestId = uuidv4();
+    enqueueServiceActionRequest(requestId, resolve, reject);
+    sendControl(entry.socket, 'manage-service', {
+      requestId,
+      serviceName,
+      action,
+    });
+  });
 }
 
 function persistUsersConfig() {

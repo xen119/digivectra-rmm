@@ -11,6 +11,7 @@
     <PackageReference Include="Microsoft.MixedReality.WebRTC" Version="2.0.2" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
     <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
   </ItemGroup>
   <ItemGroup>
     <None Include="$(NuGetPackageRoot)microsoft.mixedreality.webrtc\$(MixedRealityWebRtcVersion)\runtimes\win10-x64\native\mrwebrtc.dll">

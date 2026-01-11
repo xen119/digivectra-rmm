@@ -74,6 +74,7 @@ const SCREEN_LIST_TTL_MS = 60_000;
 const SCREEN_LIST_TIMEOUT_MS = 5_000;
 const DATA_DIR = path.join(__dirname, 'data');
 const MONITORING_CONFIG_PATH = path.join(DATA_DIR, 'monitoring.json');
+const FIREWALL_BASELINE_PATH = path.join(DATA_DIR, 'firewall-baseline.json');
 const SESSION_TTL_MS = 30 * 60_1000;
 const SSO_SECRET = process.env.SSO_SECRET ?? 'CHANGE_ME-SSO-KEY';
 const SSO_WINDOW_MS = 5 * 60_1000;
@@ -85,10 +86,18 @@ const softwareUninstallLog = [];
 const SOFTWARE_UNINSTALL_LOG_LIMIT = 200;
 const SERVICE_ACTION_TIMEOUT_MS = 30_000;
 const serviceActionRequests = new Map();
+const FIREWALL_REQUEST_TIMEOUT_MS = 30_000;
+const firewallRequests = new Map();
+const EVENT_STATS_TIMEOUT_MS = 30_000;
+const EVENT_ENTRIES_TIMEOUT_MS = 30_000;
+const eventStatsRequests = new Map();
+const eventEntriesRequests = new Map();
+const agentEventStatsCache = new Map();
 
 let USERS_CONFIG = loadUsersConfig();
 const monitoringEvents = new Set();
 const monitoringConfig = loadMonitoringConfig();
+const firewallBaselines = loadFirewallBaselines();
 const monitoringHistory = [];
 const MONITORING_HISTORY_LIMIT = 100;
 const agentMetrics = new Map(); // agentId -> [{ timestamp, cpuPercent?, ramPercent? }]
@@ -142,6 +151,7 @@ server.on('request', async (req, res) => {
       monitoringAlert: agentAlertStatus.get(info.id) ?? false,
       monitoringProfiles: getAgentMonitoringProfiles(info),
       softwareSummary: info.softwareSummary ?? null,
+      features: Array.isArray(info.features) ? info.features : [],
     }));
     return res.end(JSON.stringify(payload));
   }
@@ -1609,6 +1619,611 @@ server.on('request', async (req, res) => {
     return;
   }
 
+  const ruleLibraryMatch = pathname === '/firewall/rule-library' && req.method === 'GET';
+  if (ruleLibraryMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const requestedAgentId = requestedUrl.searchParams.get('agent');
+    let entry = requestedAgentId ? clientsById.get(requestedAgentId) : null;
+    if (!entry) {
+      entry = Array.from(clientsById.values()).find((client) => client.socket.readyState === WebSocket.OPEN) ?? null;
+    }
+
+    if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+      res.writeHead(404);
+      res.end('Agent not found');
+      return;
+    }
+
+    requestAgentFirewallRules(entry)
+      .then((payload) => {
+        const rules = Array.isArray(payload.rules) ? payload.rules : [];
+        const unique = new Map();
+        for (const rule of rules) {
+          if (!rule?.name) {
+            continue;
+          }
+          if (!unique.has(rule.name)) {
+            unique.set(rule.name, { name: rule.name, enabled: Boolean(rule.enabled) });
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          agentId: entry.info.id,
+          agentName: entry.info.name,
+          rules: Array.from(unique.values()),
+        }));
+      })
+      .catch((error) => {
+        console.error('Rule library request failed', error);
+        res.writeHead(504, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unable to load rule library' }));
+      });
+
+    return;
+  }
+
+  const firewallRulesMatch = pathname.match(/^\/firewall\/([^/]+)\/rules$/);
+  if (firewallRulesMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const agentId = firewallRulesMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+      res.writeHead(404);
+      res.end('Agent not found');
+      return;
+    }
+
+    try {
+      const result = await requestAgentFirewallRules(entry);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        firewallEnabled: result.firewallEnabled ?? null,
+        profiles: result.profiles ?? null,
+        defaultInboundAction: result.defaultInboundAction ?? null,
+        defaultOutboundAction: result.defaultOutboundAction ?? null,
+        rules: Array.isArray(result.rules) ? result.rules : [],
+      }));
+    } catch (error) {
+      console.error('Firewall rules request failed', error);
+      const message = typeof error?.message === 'string' ? error.message : '';
+      if (message.includes('unsupported')) {
+        res.writeHead(501, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Firewall unsupported' }));
+      } else {
+        res.writeHead(504, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Firewall request timed out' }));
+      }
+    }
+
+    return;
+  }
+
+  const firewallRuleActionMatch = pathname.match(/^\/firewall\/([^/]+)\/rule\/action$/);
+  if (firewallRuleActionMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = firewallRuleActionMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+      res.writeHead(404);
+      res.end('Agent not found');
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const ruleName = typeof payload?.ruleName === 'string' ? payload.ruleName.trim() : '';
+        const enabled = payload?.enabled === true;
+        if (!ruleName) {
+          res.writeHead(400);
+          return res.end('ruleName is required');
+        }
+
+        if (entry.socket.readyState !== WebSocket.OPEN) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Agent offline' }));
+          return;
+        }
+
+        requestAgentFirewallAction(entry, { type: 'rule', ruleName, enabled })
+          .then((result) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: Boolean(result.success),
+              message: result.message ?? 'Rule update requested',
+            }));
+          })
+        .catch((error) => {
+          console.error('Firewall rule update failed', error);
+          const message = typeof error?.message === 'string' ? error.message : '';
+          if (message.includes('unsupported')) {
+            res.writeHead(501, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Firewall unsupported' }));
+          } else {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Firewall request timed out' }));
+          }
+        });
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const firewallRuleAddMatch = pathname.match(/^\/firewall\/([^/]+)\/rule\/add$/);
+  if (firewallRuleAddMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = firewallRuleAddMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+      res.writeHead(404);
+      res.end('Agent not found');
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const ruleName = typeof payload?.name === 'string' ? payload.name.trim() : '';
+        const direction = payload?.direction === 'outbound' ? 'outbound' : 'inbound';
+        const action = payload?.action === 'block' ? 'block' : 'allow';
+        const protocol = typeof payload?.protocol === 'string' ? payload.protocol : 'any';
+        const localPorts = typeof payload?.localPorts === 'string' ? payload.localPorts : '';
+        const remotePorts = typeof payload?.remotePorts === 'string' ? payload.remotePorts : '';
+        const application = typeof payload?.application === 'string' ? payload.application : '';
+
+        if (!ruleName) {
+          res.writeHead(400);
+          return res.end('Rule name is required');
+        }
+
+        requestAgentFirewallAction(entry, {
+          type: 'add-rule',
+          ruleName,
+          direction,
+          action,
+          protocol,
+          localPorts,
+          remotePorts,
+          applicationName: application,
+        })
+          .then((result) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: Boolean(result.success),
+              message: result.message ?? 'Rule add requested',
+            }));
+          })
+          .catch((error) => {
+            console.error('Firewall rule add failed', error);
+            const message = typeof error?.message === 'string' ? error.message : '';
+            if (message.includes('unsupported')) {
+              res.writeHead(501, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Firewall unsupported' }));
+            } else {
+              res.writeHead(504, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Firewall request timed out' }));
+            }
+          });
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const firewallRuleDeleteMatch = pathname.match(/^\/firewall\/([^/]+)\/rule\/delete$/);
+  if (firewallRuleDeleteMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = firewallRuleDeleteMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+      res.writeHead(404);
+      res.end('Agent not found');
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const ruleName = typeof payload?.ruleName === 'string' ? payload.ruleName.trim() : '';
+        if (!ruleName) {
+          res.writeHead(400);
+          return res.end('Rule name is required');
+        }
+
+        requestAgentFirewallAction(entry, {
+          type: 'delete-rule',
+          ruleName,
+        })
+          .then((result) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: Boolean(result.success),
+              message: result.message ?? 'Rule removal requested',
+            }));
+          })
+          .catch((error) => {
+            console.error('Firewall rule removal failed', error);
+            const message = typeof error?.message === 'string' ? error.message : '';
+            if (message.includes('unsupported')) {
+              res.writeHead(501, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Firewall unsupported' }));
+            } else {
+              res.writeHead(504, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Firewall request timed out' }));
+            }
+          });
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+  const firewallStateMatch = pathname.match(/^\/firewall\/([^/]+)\/state$/);
+  if (firewallStateMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = firewallStateMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+      res.writeHead(404);
+      res.end('Agent not found');
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const profile = typeof payload?.profile === 'string' ? payload.profile.toLowerCase() : 'all';
+        const enabled = payload?.enabled === true;
+        if (entry.socket.readyState !== WebSocket.OPEN) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Agent offline' }));
+          return;
+        }
+
+        requestAgentFirewallAction(entry, { type: 'state', profile, enabled })
+          .then((result) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: Boolean(result.success),
+              message: result.message ?? 'Firewall state updated',
+            }));
+          })
+            .catch((error) => {
+              console.error('Firewall state update failed', error);
+              const message = typeof error?.message === 'string' ? error.message : '';
+              if (message.includes('unsupported')) {
+                res.writeHead(501, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Firewall unsupported' }));
+              } else {
+                res.writeHead(504, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Firewall request timed out' }));
+              }
+            });
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+  return;
+}
+
+  const baselineListMatch = pathname === '/firewall/baseline' && req.method === 'GET';
+  if (baselineListMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ profiles: firewallBaselines }));
+    return;
+  }
+
+  const baselineCreateMatch = pathname === '/firewall/baseline' && req.method === 'POST';
+  if (baselineCreateMatch) {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const name = (payload?.name ?? '').toString().trim();
+        const description = (payload?.description ?? '').toString().trim();
+        const rules = Array.isArray(payload?.rules)
+          ? payload.rules.map((rule) => ({
+            ruleName: (rule?.ruleName ?? '').toString().trim(),
+            enabled: Boolean(rule?.enabled),
+          })).filter((rule) => rule.ruleName)
+          : [];
+
+        if (!name) {
+          res.writeHead(400);
+          return res.end('Profile name is required');
+        }
+
+        const profile = {
+          id: uuidv4(),
+          name,
+          description,
+          rules,
+          assignedAgents: [],
+          assignedGroups: [],
+          createdAt: new Date().toISOString(),
+        };
+        firewallBaselines.push(profile);
+        persistFirewallBaselines();
+
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(profile));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const baselineAssignMatch = pathname.match(/^\/firewall\/baseline\/([^/]+)\/assign$/);
+  if (baselineAssignMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const profileId = baselineAssignMatch[1];
+    const profile = firewallBaselines.find((entry) => entry.id === profileId);
+    if (!profile) {
+      res.writeHead(404);
+      return res.end('Baseline not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const agents = Array.isArray(payload?.agents) ? payload.agents : [];
+        const groups = Array.isArray(payload?.groups) ? payload.groups : [];
+        profile.assignedAgents = Array.from(new Set(agents.filter((id) => typeof id === 'string' && id.trim())));
+        profile.assignedGroups = Array.from(new Set(groups.filter((name) => typeof name === 'string' && name.trim())));
+        persistFirewallBaselines();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, profile }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const baselineApplyMatch = pathname.match(/^\/firewall\/baseline\/([^/]+)\/apply$/);
+  if (baselineApplyMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const profileId = baselineApplyMatch[1];
+    const profile = firewallBaselines.find((entry) => entry.id === profileId);
+    if (!profile) {
+      res.writeHead(404);
+      return res.end('Baseline not found');
+    }
+
+    const targetAgentIds = getBaselineTargetAgentIds(profile);
+    const agentEntries = targetAgentIds
+      .map((agentId) => clientsById.get(agentId))
+      .filter((entry) => entry && entry.socket.readyState === WebSocket.OPEN);
+
+    if (!agentEntries.length) {
+      res.writeHead(400);
+      return res.end('No connected agents available for this profile');
+    }
+
+    const applyPromises = [];
+    for (const entry of agentEntries) {
+      for (const rule of profile.rules) {
+        if (!rule.ruleName) {
+          continue;
+        }
+
+        applyPromises.push(
+          requestAgentFirewallAction(entry, {
+            type: 'rule',
+            ruleName: rule.ruleName,
+            enabled: Boolean(rule.enabled),
+          }).catch(() => null),
+        );
+      }
+    }
+
+    Promise.allSettled(applyPromises)
+      .then(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          message: 'Baseline push requested',
+          targetCount: agentEntries.length,
+        }));
+      })
+      .catch(() => {
+        res.writeHead(500);
+        res.end('Unable to dispatch baseline');
+      });
+
+    return;
+  }
+
+  const systemHealthMatch = pathname === '/system-health/agents' && req.method === 'GET';
+  if (systemHealthMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const agentInfos = Array.from(agents.values());
+    const statsPromises = agentInfos.map(async (info) => {
+      const clientEntry = clientsById.get(info.id);
+      if (clientEntry?.socket?.readyState === WebSocket.OPEN) {
+        try {
+          const result = await requestAgentEventStats(clientEntry);
+          const record = {
+            stats: typeof result.stats === 'object' && result.stats !== null ? result.stats : {},
+            since: typeof result.since === 'string' ? result.since : new Date().toISOString(),
+            retrievedAt: new Date().toISOString(),
+          };
+          agentEventStatsCache.set(info.id, record);
+          return formatSystemHealthPayload(info, record.stats, record.since, record.retrievedAt, { source: 'live' });
+        } catch (error) {
+          const cache = agentEventStatsCache.get(info.id);
+          return formatSystemHealthPayload(info, cache?.stats ?? null, cache?.since ?? null, cache?.retrievedAt ?? null, {
+            offline: true,
+            error: error?.message ?? 'Event stats request failed',
+          });
+        }
+      }
+
+      const cache = agentEventStatsCache.get(info.id);
+      return formatSystemHealthPayload(info, cache?.stats ?? null, cache?.since ?? null, cache?.retrievedAt ?? null, { offline: true });
+    });
+
+    try {
+      const payload = await Promise.all(statsPromises);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        agents: payload,
+        summary: {
+          totalAgents: agentInfos.length,
+          retrievedAt: new Date().toISOString(),
+        },
+      }));
+    } catch (error) {
+      console.error('System health stats failed', error);
+      res.writeHead(500);
+      res.end('Unable to gather event log stats');
+    }
+
+    return;
+  }
+
+  const systemHealthAgentMatch = pathname.match(/^\/system-health\/agent\/([^/]+)$/);
+  if (systemHealthAgentMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const agentId = systemHealthAgentMatch[1];
+    const agentInfo = agents.get(agentId) ?? clientsById.get(agentId)?.info ?? null;
+    const clientEntry = clientsById.get(agentId);
+    let record = agentEventStatsCache.get(agentId);
+    let offline = true;
+    let errorMessage = null;
+
+    if (clientEntry?.socket?.readyState === WebSocket.OPEN) {
+      try {
+        const result = await requestAgentEventStats(clientEntry);
+        record = {
+          stats: typeof result.stats === 'object' && result.stats !== null ? result.stats : {},
+          since: typeof result.since === 'string' ? result.since : new Date().toISOString(),
+          retrievedAt: new Date().toISOString(),
+        };
+        agentEventStatsCache.set(agentId, record);
+        offline = false;
+      } catch (error) {
+        offline = true;
+        errorMessage = error?.message ?? 'Event stats request failed';
+      }
+    }
+
+    if (!record) {
+      record = {
+        stats: null,
+        since: null,
+        retrievedAt: null,
+      };
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      agentId,
+      name: agentInfo?.name ?? agentId,
+      os: agentInfo?.os ?? agentInfo?.platform ?? 'unknown',
+      platform: agentInfo?.platform ?? null,
+      status: agentInfo?.status ?? (clientEntry ? 'online' : 'offline'),
+      loggedInUser: agentInfo?.loggedInUser ?? null,
+      group: agentInfo?.group ?? DEFAULT_GROUP,
+      pendingReboot: Boolean(agentInfo?.pendingReboot),
+      eventStats: record.stats,
+      since: record.since,
+      retrievedAt: record.retrievedAt,
+      offline,
+      error: errorMessage,
+    }));
+
+    return;
+  }
+
+  const systemHealthEntriesMatch = pathname.match(/^\/system-health\/([^/]+)\/entries$/);
+  if (systemHealthEntriesMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const agentId = systemHealthEntriesMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent unavailable' }));
+      return;
+    }
+
+    const requestedLevel = (requestedUrl.searchParams.get('level') ?? '').trim();
+    const level = requestedLevel || 'Information';
+
+    try {
+      const result = await requestAgentEventEntries(entry, level);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        agentId,
+        level: result.level ?? level,
+        entries: Array.isArray(result.entries) ? result.entries : [],
+        retrievedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      res.writeHead(504, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: error?.message ?? 'Event entries request timed out' }));
+    }
+
+    return;
+  }
+
   const agentServicesMatch = pathname.match(/^\/agent\/([^/]+)\/services$/);
   if (agentServicesMatch && req.method === 'GET') {
     if (!ensureRole(req, res, 'viewer')) {
@@ -1789,6 +2404,7 @@ wss.on('connection', (socket, request) => {
     loggedInUser: 'Unknown',
     pendingReboot: false,
     softwareSummary: null,
+    features: [],
   };
 
   clients.set(socket, info);
@@ -1820,19 +2436,22 @@ wss.on('connection', (socket, request) => {
           agents.set(requestedId, info);
         }
 
-        info.name = parsed.name.trim();
-        if (typeof parsed.os === 'string' && parsed.os.trim()) {
-          info.os = parsed.os.trim();
-        }
-        if (typeof parsed.platform === 'string' && parsed.platform.trim()) {
-          info.platform = parsed.platform.trim();
-        }
-        if (typeof parsed.loggedInUser === 'string' && parsed.loggedInUser.trim()) {
-          info.loggedInUser = parsed.loggedInUser.trim();
-        }
-        if (parsed.specs != null) {
-          info.specs = parsed.specs;
-        }
+      info.name = parsed.name.trim();
+      if (typeof parsed.os === 'string' && parsed.os.trim()) {
+        info.os = parsed.os.trim();
+      }
+      if (typeof parsed.platform === 'string' && parsed.platform.trim()) {
+        info.platform = parsed.platform.trim();
+      }
+      if (typeof parsed.loggedInUser === 'string' && parsed.loggedInUser.trim()) {
+        info.loggedInUser = parsed.loggedInUser.trim();
+      }
+      if (parsed.specs != null) {
+        info.specs = parsed.specs;
+      }
+      if (Array.isArray(parsed.features)) {
+        info.features = parsed.features.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim());
+      }
         info.status = 'online';
         info.lastSeen = null;
         console.log(`Identified client as ${info.name}`);
@@ -1963,6 +2582,42 @@ wss.on('connection', (socket, request) => {
             action: parsed.action ?? '',
           });
         }
+      } else if (parsed?.type === 'firewall-rules' && typeof parsed.requestId === 'string') {
+        const pending = completeFirewallRequest(parsed.requestId);
+        if (pending && pending.kind === 'rules') {
+          pending.resolve(parsed);
+        }
+      } else if (parsed?.type === 'firewall-action-result' && typeof parsed.requestId === 'string') {
+        const pending = completeFirewallRequest(parsed.requestId);
+        if (pending && pending.kind === 'action') {
+          pending.resolve(parsed);
+        }
+      } else if (parsed?.type === 'event-stats' && typeof parsed.requestId === 'string') {
+        const pending = completeEventStatsRequest(parsed.requestId);
+        if (pending) {
+          const stats = typeof parsed.stats === 'object' && parsed.stats !== null ? parsed.stats : {};
+          const since = typeof parsed.since === 'string' ? parsed.since : new Date().toISOString();
+          const record = {
+            stats,
+            since,
+            retrievedAt: new Date().toISOString(),
+          };
+          agentEventStatsCache.set(info.id, record);
+          pending.resolve({
+            stats: record.stats,
+            since: record.since,
+            retrievedAt: record.retrievedAt,
+          });
+        }
+      } else if (parsed?.type === 'event-entries' && typeof parsed.requestId === 'string') {
+        const pending = completeEventEntriesRequest(parsed.requestId);
+        if (pending) {
+          const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+          pending.resolve({
+            entries,
+            level: typeof parsed.level === 'string' ? parsed.level : 'Information',
+          });
+        }
       } else if (parsed?.type === 'chat-response') {
         const text = typeof parsed.text === 'string' ? parsed.text.trim() : '';
         if (text.length > 0) {
@@ -2042,6 +2697,27 @@ wss.on('connection', (socket, request) => {
         clearTimeout(request.timer);
         request.reject(new Error('Agent disconnected'));
         softwareRequests.delete(requestId);
+      }
+    }
+    for (const [requestId, request] of eventStatsRequests) {
+      if (request.agentId === id) {
+        clearTimeout(request.timer);
+        request.reject(new Error('Agent disconnected'));
+        eventStatsRequests.delete(requestId);
+      }
+    }
+    for (const [requestId, request] of eventEntriesRequests) {
+      if (request.agentId === id) {
+        clearTimeout(request.timer);
+        request.reject(new Error('Agent disconnected'));
+        eventEntriesRequests.delete(requestId);
+      }
+    }
+    for (const [requestId, request] of firewallRequests) {
+      if (request.agentId === id) {
+        clearTimeout(request.timer);
+        request.reject(new Error('Agent disconnected'));
+        firewallRequests.delete(requestId);
       }
     }
     for (const [sessionId, session] of screenSessions) {
@@ -2953,25 +3629,130 @@ function completeFileRequest(requestId) {
     return entry;
   }
 
-  function enqueueServiceActionRequest(requestId, resolve, reject) {
-    const timer = setTimeout(() => {
-      serviceActionRequests.delete(requestId);
-      reject(new Error('Service action timed out'));
-    }, SERVICE_ACTION_TIMEOUT_MS);
+function enqueueServiceActionRequest(requestId, resolve, reject) {
+  const timer = setTimeout(() => {
+    serviceActionRequests.delete(requestId);
+    reject(new Error('Service action timed out'));
+  }, SERVICE_ACTION_TIMEOUT_MS);
 
     serviceActionRequests.set(requestId, { resolve, reject, timer });
   }
 
-  function completeServiceActionRequest(requestId) {
-    const entry = serviceActionRequests.get(requestId);
-    if (!entry) {
-      return null;
-    }
-
-    clearTimeout(entry.timer);
-    serviceActionRequests.delete(requestId);
-    return entry;
+function completeServiceActionRequest(requestId) {
+  const entry = serviceActionRequests.get(requestId);
+  if (!entry) {
+    return null;
   }
+
+  clearTimeout(entry.timer);
+  serviceActionRequests.delete(requestId);
+  return entry;
+}
+
+function enqueueFirewallRequest(agentId, kind, resolve, reject) {
+  const requestId = uuidv4();
+  const timer = setTimeout(() => {
+    firewallRequests.delete(requestId);
+    reject(new Error('Firewall request timed out'));
+  }, FIREWALL_REQUEST_TIMEOUT_MS);
+
+  firewallRequests.set(requestId, { agentId, kind, resolve, reject, timer });
+  return requestId;
+}
+
+function completeFirewallRequest(requestId) {
+  const entry = firewallRequests.get(requestId);
+  if (!entry) {
+    return null;
+  }
+
+  clearTimeout(entry.timer);
+  firewallRequests.delete(requestId);
+  return entry;
+}
+
+function requestAgentEventStats(entry) {
+  return new Promise((resolve, reject) => {
+    const requestId = enqueueEventStatsRequest(entry.info.id, resolve, reject);
+    sendControl(entry.socket, 'request-event-stats', { requestId });
+  });
+}
+
+function requestAgentEventEntries(entry, level) {
+  return new Promise((resolve, reject) => {
+    const normalized = typeof level === 'string' && level.trim()
+      ? `${level.charAt(0).toUpperCase()}${level.slice(1).toLowerCase()}`
+      : 'Information';
+    const requestId = enqueueEventEntriesRequest(entry.info.id, resolve, reject);
+    sendControl(entry.socket, 'request-event-entries', { requestId, level: normalized });
+  });
+}
+
+function enqueueEventStatsRequest(agentId, resolve, reject) {
+  const requestId = uuidv4();
+  const timer = setTimeout(() => {
+    eventStatsRequests.delete(requestId);
+    reject(new Error('Event stats request timed out'));
+  }, EVENT_STATS_TIMEOUT_MS);
+
+  eventStatsRequests.set(requestId, { agentId, resolve, reject, timer });
+  return requestId;
+}
+
+function completeEventStatsRequest(requestId) {
+  const entry = eventStatsRequests.get(requestId);
+  if (!entry) {
+    return null;
+  }
+
+  clearTimeout(entry.timer);
+  eventStatsRequests.delete(requestId);
+  return entry;
+}
+
+function enqueueEventEntriesRequest(agentId, resolve, reject) {
+  const requestId = uuidv4();
+  const timer = setTimeout(() => {
+    eventEntriesRequests.delete(requestId);
+    reject(new Error('Event entries request timed out'));
+  }, EVENT_ENTRIES_TIMEOUT_MS);
+
+  eventEntriesRequests.set(requestId, { agentId, resolve, reject, timer });
+  return requestId;
+}
+
+function completeEventEntriesRequest(requestId) {
+  const entry = eventEntriesRequests.get(requestId);
+  if (!entry) {
+    return null;
+  }
+
+  clearTimeout(entry.timer);
+  eventEntriesRequests.delete(requestId);
+  return entry;
+}
+
+function formatSystemHealthPayload(info, stats, since, retrievedAt, options = {}) {
+  const agentId = info?.id ?? '';
+  const status = info?.status ?? (clientsById.has(agentId) ? 'online' : 'offline');
+  return {
+    agentId,
+    name: info?.name ?? agentId,
+    status,
+    os: info?.os ?? info?.platform ?? 'unknown',
+    platform: info?.platform ?? null,
+    group: info?.group ?? DEFAULT_GROUP,
+    loggedInUser: info?.loggedInUser ?? null,
+    pendingReboot: Boolean(info?.pendingReboot),
+    lastSeen: info?.lastSeen ?? null,
+    eventStats: stats ?? null,
+    since: since ?? null,
+    retrievedAt: retrievedAt ?? null,
+    error: options.error ?? null,
+    source: options.source ?? 'cache',
+    offline: Boolean(options.offline) || status !== 'online',
+  };
+}
 
 function handleAuthRoute(req, res, pathname, requestedUrl) {
   if (req.method === 'POST' && pathname === '/auth/login') {
@@ -3140,6 +3921,15 @@ function getSessionFromRequest(req) {
   return session;
 }
 
+function agentSupports(info, feature) {
+  if (!info || !feature) {
+    return false;
+  }
+
+  const features = Array.isArray(info.features) ? info.features : [];
+  return features.includes(feature);
+}
+
 function createSession(user) {
   const id = uuidv4();
   const session = { id, user, expires: Date.now() + SESSION_TTL_MS };
@@ -3190,6 +3980,28 @@ function requestAgentServiceList(entry) {
   return new Promise((resolve, reject) => {
     const requestId = enqueueServiceRequest(entry.info.id, resolve, reject);
     sendControl(entry.socket, 'list-services', { requestId });
+  });
+}
+
+function requestAgentFirewallRules(entry) {
+  if (!agentSupports(entry.info, 'firewall')) {
+    return Promise.reject(new Error('Firewall feature unsupported by this agent'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const requestId = enqueueFirewallRequest(entry.info.id, 'rules', resolve, reject);
+    sendControl(entry.socket, 'list-firewall', { requestId });
+  });
+}
+
+function requestAgentFirewallAction(entry, payload) {
+  if (!agentSupports(entry.info, 'firewall')) {
+    return Promise.reject(new Error('Firewall feature unsupported by this agent'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const requestId = enqueueFirewallRequest(entry.info.id, 'action', resolve, reject);
+    sendControl(entry.socket, 'firewall-action', { requestId, ...payload });
   });
 }
 
@@ -3326,6 +4138,36 @@ function loadMonitoringConfig() {
   };
   fs.writeFileSync(MONITORING_CONFIG_PATH, JSON.stringify(defaultConfig, null, 2));
   return defaultConfig;
+}
+
+function loadFirewallBaselines() {
+  ensureDataDirectory();
+  try {
+    if (fs.existsSync(FIREWALL_BASELINE_PATH)) {
+      let raw = fs.readFileSync(FIREWALL_BASELINE_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      return JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load firewall baseline config', error);
+  }
+
+  const defaultProfiles = [];
+  fs.writeFileSync(FIREWALL_BASELINE_PATH, JSON.stringify(defaultProfiles, null, 2));
+  return defaultProfiles;
+}
+
+function persistFirewallBaselines() {
+  try {
+    ensureDataDirectory();
+    fs.writeFileSync(FIREWALL_BASELINE_PATH, JSON.stringify(firewallBaselines, null, 2));
+    return true;
+  } catch (error) {
+    console.error('Failed to persist firewall baseline config', error);
+    return false;
+  }
 }
 
 function getScriptByName(name) {
@@ -3650,6 +4492,23 @@ function updateAgentAlertStatus(info, triggered) {
     metrics: getRequiredMetricsForProfiles(getAssignedProfiles(info)),
     timestamp: new Date().toISOString(),
   });
+}
+
+function getBaselineTargetAgentIds(profile) {
+  if (!profile) {
+    return [];
+  }
+
+  const ids = new Set(Array.isArray(profile.assignedAgents) ? profile.assignedAgents : []);
+  const groups = Array.isArray(profile.assignedGroups) ? profile.assignedGroups : [];
+  for (const entry of clientsById.values()) {
+    const group = entry.info.group ?? DEFAULT_GROUP;
+    if (groups.includes(group)) {
+      ids.add(entry.info.id);
+    }
+  }
+
+  return Array.from(ids).filter((value) => typeof value === 'string' && value);
 }
 
 function clearMonitoringProfileState(profileId) {

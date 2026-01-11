@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Firewall Management</title>
+    <link rel="stylesheet" href="compact.css" />
+    <style>
+      body {
+        margin: 0;
+        background: #05070f;
+        color: #cdd9e5;
+        font-family: system-ui, sans-serif;
+      }
+
+      .page {
+        width: 100%;
+        margin: 0 auto;
+        max-width: 1100px;
+        padding: 1rem 1rem 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+      }
+
+      .panel {
+        background: #0d1117;
+        border: 1px solid #161b22;
+        border-radius: 0.75rem;
+        padding: 1rem 1.25rem;
+        box-shadow: 0 12px 45px rgba(2, 6, 23, 0.45);
+        width: 100%;
+        max-width: none;
+        margin: 0;
+      }
+
+      .hero {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+
+      .hero h1 {
+        margin: 0;
+      }
+
+      .hero p {
+        margin: 0;
+        color: #94a3b8;
+      }
+
+      .status-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        margin-top: 1rem;
+      }
+
+      .status-message {
+        color: #94a3b8;
+        font-size: 0.95rem;
+      }
+
+      .badge-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        margin-top: 1rem;
+      }
+
+      .badge {
+        border-radius: 0.5rem;
+        padding: 0.5rem 0.9rem;
+        border: 1px solid #1e293b;
+        background: #161b22;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .badge.active {
+        background: #0f766e;
+        border-color: #14b8a6;
+        color: #d1fae5;
+      }
+
+      .badge.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .rules-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1rem;
+        margin-top: 1.5rem;
+      }
+
+      .rules-column {
+        border: 1px solid #1e293b;
+        border-radius: 0.45rem;
+        padding: 0.75rem;
+        background: #0f172a;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        flex: 1 1 0;
+      }
+
+      .rules-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+
+      .pill {
+        border-radius: 999px;
+        padding: 0.2rem 0.75rem;
+        font-size: 0.85rem;
+        background: #151a2b;
+        border: 1px solid #1e293b;
+      }
+
+      .rules-list {
+        border: 1px solid #161b22;
+        border-radius: 0.35rem;
+        background: #05070f;
+        overflow: auto;
+        flex: 1;
+      }
+
+      .rules-list table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.65rem;
+        table-layout: fixed;
+        border-spacing: 0;
+      }
+
+      .rules-list th,
+      .rules-list td {
+        padding: 0.15rem 0.1rem;
+        border-bottom: 1px solid #141b24;
+        word-break: break-word;
+        white-space: normal;
+      }
+
+      .rules-list thead th {
+        font-weight: 600;
+        font-size: 0.65rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .rules-list thead th.col-name {
+        width: 30%;
+      }
+
+      .rules-list thead th.col-ports {
+        width: 17%;
+      }
+
+      .rules-list thead th.col-action {
+        width: 9%;
+      }
+
+      .rules-list thead th.col-enable,
+      .rules-list thead th.col-protocol,
+      .rules-list thead th.col-actions {
+        width: 5%;
+      }
+
+      .rules-list tbody tr:hover {
+        background: rgba(148, 163, 184, 0.1);
+      }
+
+      .detail {
+        color: #8b949e;
+        font-size: 0.85rem;
+      }
+
+      .toggle-button {
+        border-radius: 0.35rem;
+        padding: 0.15rem 0.4rem;
+        border: none;
+        font-weight: 600;
+        font-size: 0.75rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+      }
+
+      .toggle-button.enabled {
+        background: #0f5132;
+        color: #dcfce7;
+      }
+
+      .toggle-button.disabled {
+        background: #2f1c22;
+        color: #fee2e2;
+      }
+
+      .actions-row {
+        display: flex;
+        gap: 0.15rem;
+        justify-content: flex-end;
+      }
+
+      .btn {
+        border-radius: 0.3rem;
+        padding: 0.2rem 0.4rem;
+        font-weight: 600;
+        font-size: 0.72rem;
+        border: none;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+      }
+
+      .btn.delete {
+        background: #6b1b1b;
+        color: #fee2e2;
+      }
+
+      .button-icon {
+        font-size: 0.9rem;
+        display: inline-flex;
+        align-items: center;
+      }
+
+      .rule-form {
+        margin-top: 1.5rem;
+        border-top: 1px dashed #1e293b;
+        padding-top: 1rem;
+      }
+
+      .rule-form h3 {
+        margin: 0 0 0.35rem;
+      }
+
+      .form-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        margin-bottom: 0.7rem;
+      }
+
+      label {
+        font-size: 0.75rem;
+        color: #94a3b8;
+      }
+
+      input,
+      select {
+        border-radius: 0.35rem;
+        border: 1px solid #1e293b;
+        background: #05070f;
+        color: #e2e8f0;
+        padding: 0.4rem 0.6rem;
+        font-size: 0.95rem;
+      }
+
+      .form-actions {
+        text-align: right;
+      }
+
+      .form-actions button {
+        background: #14b8a6;
+        color: #021012;
+        border: none;
+        border-radius: 0.45rem;
+        padding: 0.4rem 1rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .placeholder {
+        color: #94a3b8;
+      }
+
+      @media (max-width: 720px) {
+        table {
+          font-size: 0.75rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="panel hero">
+        <h1>Firewall Management</h1>
+        <p id="heroSubtitle">Loading firewall status.</p>
+        <div class="status-row">
+          <span id="statusMessage" class="status-message">Waiting for the agent.</span>
+          <button id="refreshButton" type="button">Refresh</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Firewall profiles</h2>
+        <div id="profileBadges" class="badge-row">
+          <div class="placeholder">Profile data pending.</div>
+        </div>
+        <p id="profileDetail" class="detail"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Firewall rules</h2>
+        <p id="rulesSummary" class="detail">Loading rules.</p>
+        <div class="rules-grid">
+          <div class="rules-column">
+            <div class="rules-header">
+              <h3>Inbound rules</h3>
+              <span id="inboundCount" class="pill">0 rules</span>
+            </div>
+            <div class="rules-list">
+              <table>
+                <thead>
+          <tr>
+            <th class="col-name">Name</th>
+            <th class="col-enable">Enable</th>
+            <th class="col-action">Action</th>
+            <th class="col-protocol">Proto</th>
+            <th class="col-ports">Ports</th>
+            <th class="col-actions">Actions</th>
+          </tr>
+                </thead>
+                <tbody id="inboundRulesBody">
+                  <tr><td class="placeholder" colspan="7">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="rules-column">
+            <div class="rules-header">
+              <h3>Outbound rules</h3>
+              <span id="outboundCount" class="pill">0 rules</span>
+            </div>
+            <div class="rules-list">
+              <table>
+                <thead>
+              <tr>
+                <th>Name</th>
+                <th>Enable</th>
+                <th>Action</th>
+                <th>Protocol</th>
+                <th>Ports</th>
+                <th>Actions</th>
+              </tr>
+                </thead>
+                <tbody id="outboundRulesBody">
+                  <tr><td class="placeholder" colspan="7">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="rule-form">
+          <h3>Add a rule</h3>
+          <p class="detail">Rules apply immediately once added.</p>
+          <div class="form-row">
+            <label>Name</label>
+            <input id="ruleName" type="text" placeholder="e.g., Allow SSH" />
+          </div>
+          <div class="form-row">
+            <label>Direction</label>
+            <select id="ruleDirection">
+              <option value="inbound">Inbound</option>
+              <option value="outbound">Outbound</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Action</label>
+            <select id="ruleAction">
+              <option value="allow">Allow</option>
+              <option value="block">Block</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Protocol</label>
+            <select id="ruleProtocol">
+              <option value="any">Any</option>
+              <option value="tcp">TCP</option>
+              <option value="udp">UDP</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Local ports</label>
+            <input id="ruleLocalPorts" type="text" placeholder="e.g., 3389 or 80-90" />
+          </div>
+          <div class="form-row">
+            <label>Remote ports</label>
+            <input id="ruleRemotePorts" type="text" placeholder="Optional" />
+          </div>
+          <div class="form-row">
+            <label>Application / service</label>
+            <input id="ruleApplication" type="text" placeholder="C:\\Program Files\\App\\app.exe" />
+          </div>
+          <div class="form-actions">
+            <button id="ruleAddButton" type="button">Add rule</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <script src="firewall.js"></script>
+  </body>
+</html>

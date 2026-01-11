@@ -317,6 +317,35 @@ function createAgentCard(agent, groups) {
     window.open(`bsod.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
   });
   actions.appendChild(bsodButton);
+  const eventButton = document.createElement('button');
+  eventButton.type = 'button';
+  eventButton.textContent = 'Event log';
+  eventButton.addEventListener('click', () => {
+    const params = new URLSearchParams();
+    if (agent.id) {
+      params.set('agent', agent.id);
+    }
+    if (agent.name) {
+      params.set('name', agent.name);
+    }
+    window.open(`agent-health.html?${params.toString()}`, '_blank', 'noopener');
+  });
+  actions.appendChild(eventButton);
+  const firewallPill = document.createElement('button');
+  firewallPill.type = 'button';
+  firewallPill.className = 'firewall-pill';
+  firewallPill.textContent = 'Firewall';
+  firewallPill.addEventListener('click', () => {
+    const params = new URLSearchParams();
+    if (agent.id) {
+      params.set('agent', agent.id);
+    }
+    if (agent.name) {
+      params.set('name', agent.name);
+    }
+    window.open(`firewall.html?${params.toString()}`, '_blank', 'noopener');
+  });
+  actions.appendChild(firewallPill);
   card.appendChild(actions);
 
   return card;

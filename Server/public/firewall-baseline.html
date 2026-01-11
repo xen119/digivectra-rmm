@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Firewall Baseline Management</title>
+    <link rel="stylesheet" href="compact.css" />
+    <style>
+      :root {
+        --panel-bg: #0d1117;
+        --panel-border: #161b22;
+        --panel-radius: 0.75rem;
+        --text-subtle: #94a3b8;
+      }
+
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #05070f;
+        color: #cdd9e5;
+      }
+
+      .page {
+        width: 100%;
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 1.25rem 1.25rem 2rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .panel {
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: var(--panel-radius);
+        padding: 1rem 1.25rem;
+        box-shadow: 0 12px 45px rgba(2, 6, 23, 0.45);
+      }
+
+      h1, h2 {
+        margin: 0;
+      }
+
+      .status {
+        color: var(--text-subtle);
+        font-size: 0.9rem;
+        margin-top: 0.25rem;
+      }
+
+      .baseline-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
+        margin-top: 1rem;
+      }
+
+      .baseline-card {
+        padding: 0.9rem;
+        border-radius: 0.6rem;
+        border: 1px solid #1e293b;
+        background: #0b1120;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .baseline-card h3 {
+        margin: 0;
+        font-size: 1.1rem;
+      }
+
+      .baseline-meta {
+        color: #94a3b8;
+        font-size: 0.8rem;
+      }
+
+      .baseline-rules {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        font-size: 0.75rem;
+      }
+
+      .rule-chip {
+        border-radius: 0.35rem;
+        border: 1px solid #1e293b;
+        padding: 0.2rem 0.4rem;
+        background: #05070f;
+      }
+
+      .assignment-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.6rem;
+      }
+
+      .text-field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.75rem;
+      }
+
+      input, textarea {
+        border-radius: 0.35rem;
+        border: 1px solid #1e293b;
+        background: #05070f;
+        color: #e2e8f0;
+        padding: 0.45rem 0.55rem;
+        font-size: 0.85rem;
+      }
+
+      textarea {
+        resize: vertical;
+        min-height: 60px;
+      }
+
+      .rule-library {
+        border: 1px dashed #1e293b;
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        margin-top: 0.75rem;
+        min-height: 90px;
+        background: #060a17;
+      }
+
+      .rule-entry {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 0.5rem;
+        align-items: center;
+        font-size: 0.78rem;
+        padding: 0.15rem 0.25rem;
+        border-bottom: 1px solid #0f172a;
+      }
+
+      .rule-entry:last-child {
+        border-bottom: none;
+      }
+
+      .rule-entry button {
+        border-radius: 0.35rem;
+        border: 1px solid #1e293b;
+        background: transparent;
+        color: #cdd9e5;
+        padding: 0.15rem 0.4rem;
+        font-size: 0.75rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.2rem;
+      }
+
+      .rule-entry .toggle {
+        justify-content: center;
+        width: 68px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      .actions button {
+        border-radius: 0.35rem;
+        border: none;
+        padding: 0.35rem 0.8rem;
+        font-weight: 600;
+        font-size: 0.8rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
+      .actions .primary {
+        background: #0f766e;
+        color: #d1fae5;
+      }
+
+      .actions .secondary {
+        background: #1e293b;
+        color: #cdd9e5;
+      }
+
+      .placeholder {
+        color: var(--text-subtle);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="panel">
+        <h1>Firewall Baseline</h1>
+        <p class="status">Create and push baseline profiles to agents and groups.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Create new profile</h2>
+        <div class="status">Pick from the rule library (per agent) or define new rules manually (<code>Rule name|enabled</code>).</div>
+        <form id="createForm">
+          <div class="assignment-row">
+            <div class="text-field">
+              <label for="profileName">Name</label>
+              <input id="profileName" type="text" required placeholder="Baseline name" />
+            </div>
+            <div class="text-field">
+              <label for="profileDescription">Description</label>
+              <input id="profileDescription" type="text" placeholder="Optional summary" />
+            </div>
+            <div class="text-field">
+              <label for="ruleAgent">Sample agent</label>
+              <select id="ruleAgent">
+                <option value="">Select an online agent to load rules</option>
+              </select>
+            </div>
+          </div>
+          <div class="text-field">
+            <label for="profileRules">Rules (Rule name|enabled)</label>
+            <textarea id="profileRules" placeholder="Microsoft Teams|true"></textarea>
+          </div>
+          <div id="ruleLibrary" class="rule-library">
+            <div class="placeholder">Select an agent to load available rules.</div>
+          </div>
+          <div class="actions">
+            <button id="createButton" type="submit" class="primary"><span>➕</span>Create profile</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Existing baselines</h2>
+        <div id="baselineList" class="baseline-list">
+          <div class="placeholder">Loading profiles…</div>
+        </div>
+      </section>
+    </div>
+
+    <script src="firewall-baseline.js"></script>
+  </body>
+</html>

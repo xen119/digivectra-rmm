@@ -1,3 +1,5 @@
+using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -8,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Reflection;
 using System.Security.Principal;
 using System.Diagnostics.Eventing.Reader;
 using System.Net.WebSockets;
@@ -38,6 +41,16 @@ internal static class Program
     private static PeerConnection? screenPeerConnection;
     private static DataChannel? screenDataChannel;
     private static CancellationTokenSource? screenCaptureCts;
+    private const int NET_FW_PROFILE2_DOMAIN = 1;
+    private const int NET_FW_PROFILE2_PRIVATE = 2;
+    private const int NET_FW_PROFILE2_PUBLIC = 4;
+    private const int NET_FW_RULE_DIR_IN = 1;
+    private const int NET_FW_RULE_DIR_OUT = 2;
+    private const int NET_FW_ACTION_ALLOW = 1;
+    private const int NET_FW_ACTION_BLOCK = 0;
+    private const int NET_FW_IP_PROTOCOL_ANY = 256;
+    private const int NET_FW_IP_PROTOCOL_TCP = 6;
+    private const int NET_FW_IP_PROTOCOL_UDP = 17;
     private static Task? screenCaptureTask;
     private static string? screenSessionId;
     private static string? currentChatSessionId;
@@ -248,7 +261,8 @@ internal static class Program
             platform = GetPlatformName(),
             agentId = GetAgentId(),
             specs = GetDeviceSpecs(),
-            loggedInUser = GetAgentLocalUser()
+            loggedInUser = GetAgentLocalUser(),
+            features = new[] { "firewall" }
         });
         await SendTextAsync(socket, identity, cancellationToken);
         await SendAgentUpdateSummaryAsync(socket, cancellationToken);
@@ -796,6 +810,117 @@ internal static class Program
         await SendJsonAsync(socket, payload, cancellationToken);
     }
 
+    private static async Task SendEventStatsAsync(ClientWebSocket socket, string requestId, CancellationToken cancellationToken)
+    {
+        var window = TimeSpan.FromDays(7);
+        var levels = new[]
+        {
+            new { Name = "Critical", Value = 1 },
+            new { Name = "Error", Value = 2 },
+            new { Name = "Warning", Value = 3 },
+            new { Name = "Information", Value = 4 }
+        };
+
+        var stats = new Dictionary<string, int>();
+        foreach (var level in levels)
+        {
+            var count = CountEvents("System", level.Value, window) + CountEvents("Application", level.Value, window);
+            stats[level.Name] = count;
+        }
+
+        await SendJsonAsync(socket, new
+        {
+            type = "event-stats",
+            requestId,
+            stats,
+            since = DateTime.UtcNow.Subtract(window).ToString("o")
+        }, cancellationToken);
+    }
+
+    private static async Task SendEventEntriesAsync(ClientWebSocket socket, string requestId, string levelName, CancellationToken cancellationToken)
+    {
+        var levelValue = levelName.ToLowerInvariant() switch
+        {
+            "critical" => 1,
+            "error" => 2,
+            "warning" => 3,
+            _ => 4
+        };
+
+        var entries = ReadRecentEvents(new[] { "System", "Application" }, levelValue, 50);
+        await SendJsonAsync(socket, new
+        {
+            type = "event-entries",
+            requestId,
+            level = levelName,
+            entries
+        }, cancellationToken);
+    }
+
+    private static int CountEvents(string logName, int level, TimeSpan window)
+    {
+        var since = DateTime.UtcNow.Subtract(window);
+        var query = new EventLogQuery(logName, PathType.LogName, $"*[System[Level={level} and TimeCreated[timediff(@SystemTime) <= {window.TotalMilliseconds}]]]");
+        try
+        {
+            using var reader = new EventLogReader(query);
+            int count = 0;
+            while (reader.ReadEvent() is EventRecord record)
+            {
+                if (record.TimeCreated >= since)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static IEnumerable<object> ReadRecentEvents(string[] logs, int level, int max)
+    {
+        var window = TimeSpan.FromDays(7);
+        var since = DateTime.UtcNow.Subtract(window);
+        var events = new List<(DateTime Time, object Entry)>();
+        foreach (var log in logs)
+        {
+            try
+            {
+                var q = new EventLogQuery(log, PathType.LogName, $"*[System[Level={level} and TimeCreated[timediff(@SystemTime) <= {window.TotalMilliseconds}]]]");
+                using var reader = new EventLogReader(q);
+                while (reader.ReadEvent() is EventRecord record)
+                {
+                    if (record.TimeCreated >= since)
+                    {
+                        events.Add((record.TimeCreated ?? DateTime.MinValue, new
+                        {
+                            log,
+                            level,
+                            record.ProviderName,
+                            record.Id,
+                            message = record.FormatDescription(),
+                            time = record.TimeCreated?.ToString("o")
+                        }));
+                    }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        return events
+            .OrderByDescending(e => e.Time)
+            .Take(max)
+            .Select(e => e.Entry)
+            .ToList();
+    }
+
     private static async Task SendServiceListAsync(ClientWebSocket socket, string requestId, CancellationToken cancellationToken)
     {
         var services = new List<object>();
@@ -896,17 +1021,499 @@ internal static class Program
             }
         }
 
-        var result = new
+    var result = new
+    {
+        type = "service-action-result",
+        requestId,
+        serviceName,
+        action,
+        success,
+        message
+    };
+
+    await SendJsonAsync(socket, result, cancellationToken);
+}
+
+    private static async Task SendFirewallRulesAsync(ClientWebSocket socket, string requestId, CancellationToken cancellationToken)
+    {
+        var rulesList = new List<object>();
+        bool? domainEnabled = null;
+        bool? privateEnabled = null;
+        bool? publicEnabled = null;
+        int? inboundAction = null;
+        int? outboundAction = null;
+
+        var policy = TryCreateFirewallPolicy();
+        try
         {
-            type = "service-action-result",
+            if (policy == null)
+            {
+                Console.WriteLine("Firewall policy creation returned null.");
+            }
+            else
+            {
+                domainEnabled = GetFirewallProfileEnabled(policy, NET_FW_PROFILE2_DOMAIN);
+                privateEnabled = GetFirewallProfileEnabled(policy, NET_FW_PROFILE2_PRIVATE);
+                publicEnabled = GetFirewallProfileEnabled(policy, NET_FW_PROFILE2_PUBLIC);
+                inboundAction = TryGetFirewallPropertyInt(policy, "DefaultInboundAction");
+                outboundAction = TryGetFirewallPropertyInt(policy, "DefaultOutboundAction");
+
+                var ruleCollection = policy.Rules;
+                if (ruleCollection is IEnumerable enumerable)
+                {
+                    foreach (var entry in enumerable)
+                    {
+                        if (entry == null)
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            dynamic rule = entry;
+                            rulesList.Add(new
+                            {
+                                name = rule.Name as string ?? string.Empty,
+                                description = rule.Description as string ?? string.Empty,
+                                enabled = rule.Enabled is bool e && e,
+                                direction = TryGetInt(rule.Direction),
+                                action = TryGetInt(rule.Action),
+                                protocol = TryGetInt(rule.Protocol),
+                                localPorts = rule.LocalPorts as string ?? string.Empty,
+                                remotePorts = rule.RemotePorts as string ?? string.Empty,
+                                interfaceTypes = rule.InterfaceTypes as string ?? string.Empty,
+                                applicationName = rule.ApplicationName as string ?? string.Empty,
+                                serviceName = rule.ServiceName as string ?? string.Empty,
+                                grouping = rule.Grouping as string ?? string.Empty,
+                                edgeTraversal = rule.EdgeTraversal is bool ev && ev
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Firewall rule enumeration error: {ex.Message}");
+                        }
+                        finally
+                        {
+                            ReleaseCom(entry);
+                        }
+                    }
+                }
+
+                ReleaseCom(ruleCollection);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Firewall rules refresh failed: {ex.Message}");
+        }
+        finally
+        {
+            ReleaseCom(policy);
+        }
+
+        await SendJsonAsync(socket, new
+        {
+            type = "firewall-rules",
             requestId,
-            serviceName,
-            action,
+            firewallEnabled = new
+            {
+                domain = domainEnabled,
+                @private = privateEnabled,
+                @public = publicEnabled
+            },
+            profiles = new[]
+            {
+                new { name = "Domain", key = "domain", enabled = domainEnabled },
+                new { name = "Private", key = "private", enabled = privateEnabled },
+                new { name = "Public", key = "public", enabled = publicEnabled }
+            },
+            defaultInboundAction = inboundAction,
+            defaultOutboundAction = outboundAction,
+            rules = rulesList
+        }, cancellationToken);
+    }
+
+    private static async Task HandleFirewallActionAsync(ClientWebSocket socket, JsonElement element, CancellationToken cancellationToken)
+    {
+        var requestId = element.TryGetProperty("requestId", out var requestIdElement) && requestIdElement.ValueKind == JsonValueKind.String
+            ? requestIdElement.GetString()?.Trim() ?? string.Empty
+            : string.Empty;
+
+        var type = element.TryGetProperty("type", out var typeElement) && typeElement.ValueKind == JsonValueKind.String
+            ? typeElement.GetString()?.Trim().ToLowerInvariant() ?? string.Empty
+            : string.Empty;
+
+        var ruleName = element.TryGetProperty("ruleName", out var ruleElement) && ruleElement.ValueKind == JsonValueKind.String
+            ? ruleElement.GetString()?.Trim() ?? string.Empty
+            : string.Empty;
+
+        var profile = element.TryGetProperty("profile", out var profileElement) && profileElement.ValueKind == JsonValueKind.String
+            ? profileElement.GetString()?.Trim() ?? string.Empty
+            : string.Empty;
+
+        var enabled = element.TryGetProperty("enabled", out var enabledElement) &&
+            (enabledElement.ValueKind == JsonValueKind.True || enabledElement.ValueKind == JsonValueKind.False)
+            ? enabledElement.GetBoolean()
+            : false;
+
+        var success = false;
+        var message = "Firewall policy unavailable";
+        var directionValue = string.Empty;
+        var actionValue = string.Empty;
+        var protocolValue = string.Empty;
+        var localPortsValue = string.Empty;
+        var remotePortsValue = string.Empty;
+        var applicationNameValue = string.Empty;
+
+        if (element.TryGetProperty("direction", out var directionElement) && directionElement.ValueKind == JsonValueKind.String)
+        {
+            directionValue = directionElement.GetString()?.Trim().ToLowerInvariant() ?? string.Empty;
+        }
+
+        if (element.TryGetProperty("action", out var actionElement) && actionElement.ValueKind == JsonValueKind.String)
+        {
+            actionValue = actionElement.GetString()?.Trim().ToLowerInvariant() ?? string.Empty;
+        }
+
+        if (element.TryGetProperty("protocol", out var protocolElement) && protocolElement.ValueKind == JsonValueKind.String)
+        {
+            protocolValue = protocolElement.GetString()?.Trim().ToLowerInvariant() ?? string.Empty;
+        }
+
+        if (element.TryGetProperty("localPorts", out var localPortsElement) && localPortsElement.ValueKind == JsonValueKind.String)
+        {
+            localPortsValue = localPortsElement.GetString()?.Trim() ?? string.Empty;
+        }
+
+        if (element.TryGetProperty("remotePorts", out var remotePortsElement) && remotePortsElement.ValueKind == JsonValueKind.String)
+        {
+            remotePortsValue = remotePortsElement.GetString()?.Trim() ?? string.Empty;
+        }
+
+        if (element.TryGetProperty("applicationName", out var appElement) && appElement.ValueKind == JsonValueKind.String)
+        {
+            applicationNameValue = appElement.GetString()?.Trim() ?? string.Empty;
+        }
+
+        var policy = TryCreateFirewallPolicy();
+        if (policy != null)
+        {
+            try
+            {
+                switch (type)
+                {
+                    case "rule":
+                    {
+                        var ruleResult = SetFirewallRuleEnabled(policy, ruleName, enabled);
+                        success = ruleResult.success;
+                        message = ruleResult.found ? "Rule updated" : "Rule not found";
+                        break;
+                    }
+                    case "state":
+                        success = SetFirewallProfileState(policy, string.IsNullOrWhiteSpace(profile) ? "all" : profile, enabled);
+                        message = success ? "Firewall state updated" : "Firewall profile not recognized";
+                        break;
+                    case "add-rule":
+                    {
+                        var addResult = AddFirewallRule(policy, ruleName, directionValue, actionValue, protocolValue, localPortsValue, remotePortsValue, applicationNameValue);
+                        success = addResult.success;
+                        message = addResult.message;
+                        break;
+                    }
+                    case "delete-rule":
+                    {
+                        var removed = RemoveFirewallRule(policy, ruleName);
+                        success = removed;
+                        message = removed ? "Rule removed" : "Rule not found";
+                        break;
+                    }
+                    default:
+                        message = "Unknown firewall action";
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                message = $"Firewall action failed: {ex.Message}";
+            }
+        }
+
+        ReleaseCom(policy);
+
+        await SendJsonAsync(socket, new
+        {
+            type = "firewall-action-result",
+            requestId,
             success,
-            message
+            message,
+            ruleName,
+            profile
+        }, cancellationToken);
+    }
+
+    private static dynamic? TryCreateFirewallPolicy()
+    {
+        try
+        {
+            var type = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+            return type == null ? null : Activator.CreateInstance(type);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Firewall policy creation failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static bool? GetFirewallProfileEnabled(dynamic policy, int profile)
+    {
+        try
+        {
+            var value = policy.FirewallEnabled[profile];
+            return value is bool b ? b : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int? TryGetInt(dynamic value)
+    {
+        try
+        {
+            return value switch
+            {
+                int i => i,
+                short s => s,
+                long l => (int)l,
+                _ => int.TryParse(value?.ToString(), out int parsed) ? parsed : null
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int? TryGetFirewallPropertyInt(dynamic policy, string propertyName)
+    {
+        if (policy == null || string.IsNullOrWhiteSpace(propertyName))
+        {
+            return null;
+        }
+
+        try
+        {
+            var value = policy.GetType().InvokeMember(
+                propertyName,
+                BindingFlags.GetProperty,
+                null,
+                policy,
+                null);
+            return TryGetInt(value);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static (bool success, bool found) SetFirewallRuleEnabled(dynamic policy, string ruleName, bool enabled)
+    {
+        if (string.IsNullOrWhiteSpace(ruleName))
+        {
+            return (false, false);
+        }
+
+        dynamic? rules = null;
+        var found = false;
+        try
+        {
+            rules = policy.Rules;
+            if (rules is IEnumerable enumerable)
+            {
+                foreach (var entry in enumerable)
+                {
+                    if (entry == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        dynamic rule = entry;
+                        var name = rule.Name as string;
+                        if (!string.IsNullOrWhiteSpace(name) &&
+                            string.Equals(name, ruleName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            rule.Enabled = enabled;
+                            found = true;
+                            break;
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                    finally
+                    {
+                        ReleaseCom(entry);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            ReleaseCom(rules);
+        }
+
+        return (found, found);
+    }
+
+    private static bool SetFirewallProfileState(dynamic policy, string profile, bool enabled)
+    {
+        var masks = profile switch
+        {
+            "domain" => new[] { NET_FW_PROFILE2_DOMAIN },
+            "private" => new[] { NET_FW_PROFILE2_PRIVATE },
+            "public" => new[] { NET_FW_PROFILE2_PUBLIC },
+            _ => new[] { NET_FW_PROFILE2_DOMAIN, NET_FW_PROFILE2_PRIVATE, NET_FW_PROFILE2_PUBLIC }
         };
 
-        await SendJsonAsync(socket, result, cancellationToken);
+        var success = false;
+        foreach (var mask in masks)
+        {
+            try
+            {
+                policy.FirewallEnabled[mask] = enabled;
+                success = true;
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        return success;
+    }
+
+    private static (bool success, string message) AddFirewallRule(dynamic policy, string name, string direction, string action, string protocol, string localPorts, string remotePorts, string applicationName)
+    {
+        if (policy == null || string.IsNullOrWhiteSpace(name))
+        {
+            return (false, "Invalid rule data");
+        }
+
+        try
+        {
+            var ruleType = Type.GetTypeFromProgID("HNetCfg.FwRule");
+            if (ruleType == null)
+            {
+                return (false, "Unable to create firewall rule object");
+            }
+
+            dynamic rule = Activator.CreateInstance(ruleType);
+            if (rule == null)
+            {
+                return (false, "Unable to instantiate firewall rule");
+            }
+
+            try
+            {
+                rule.Name = name;
+                rule.Direction = MapDirection(direction);
+                rule.Action = MapAction(action);
+                rule.Protocol = MapProtocol(protocol);
+                rule.Enabled = true;
+                if (!string.IsNullOrWhiteSpace(localPorts)) rule.LocalPorts = localPorts;
+                if (!string.IsNullOrWhiteSpace(remotePorts)) rule.RemotePorts = remotePorts;
+                if (!string.IsNullOrWhiteSpace(applicationName)) rule.ApplicationName = applicationName;
+
+                policy.Rules.Add(rule);
+                return (true, "Rule added");
+            }
+            finally
+            {
+                ReleaseCom(rule);
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Failed to add rule: {ex.Message}");
+        }
+    }
+
+    private static bool RemoveFirewallRule(dynamic policy, string name)
+    {
+        if (policy == null || string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        try
+        {
+            policy.Rules.Remove(name);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static int MapDirection(string direction)
+    {
+        return direction switch
+        {
+            "outbound" => NET_FW_RULE_DIR_OUT,
+            _ => NET_FW_RULE_DIR_IN,
+        };
+    }
+
+    private static int MapAction(string action)
+    {
+        return action switch
+        {
+            "block" => NET_FW_ACTION_BLOCK,
+            _ => NET_FW_ACTION_ALLOW,
+        };
+    }
+
+    private static int MapProtocol(string value)
+    {
+        return value?.ToLowerInvariant() switch
+        {
+            "tcp" => NET_FW_IP_PROTOCOL_TCP,
+            "udp" => NET_FW_IP_PROTOCOL_UDP,
+            "any" => NET_FW_IP_PROTOCOL_ANY,
+            _ => NET_FW_IP_PROTOCOL_ANY,
+        };
+    }
+
+    private static void ReleaseCom(object? obj)
+    {
+        if (obj is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!Marshal.IsComObject(obj))
+            {
+                return;
+            }
+
+            while (Marshal.ReleaseComObject(obj) > 0)
+            {
+                // keep releasing
+            }
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private static string? GetServiceStartMode(string serviceName)
@@ -2159,6 +2766,14 @@ internal static class Program
                      await SendSoftwareListAsync(socket, requestIdElement.GetString()!, cancellationToken);
                  }
                  break;
+            case "list-firewall":
+                if (document.RootElement.TryGetProperty("requestId", out var firewallRequestIdElement) &&
+                    firewallRequestIdElement.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(firewallRequestIdElement.GetString()))
+                {
+                    await SendFirewallRulesAsync(socket, firewallRequestIdElement.GetString()!, cancellationToken);
+                }
+                break;
             case "list-services":
                 if (document.RootElement.TryGetProperty("requestId", out var serviceRequestId) &&
                     serviceRequestId.ValueKind == JsonValueKind.String &&
@@ -2166,6 +2781,9 @@ internal static class Program
                 {
                     await SendServiceListAsync(socket, serviceRequestId.GetString()!, cancellationToken);
                 }
+                break;
+            case "firewall-action":
+                await HandleFirewallActionAsync(socket, document.RootElement, cancellationToken);
                 break;
             case "uninstall-software":
                 await HandleUninstallRequestAsync(socket, document.RootElement, cancellationToken);
@@ -2175,6 +2793,23 @@ internal static class Program
                 break;
             case "request-bsod":
                 await SendBsodSummaryAsync(socket, cancellationToken, true);
+                break;
+            case "request-event-stats":
+                if (document.RootElement.TryGetProperty("requestId", out var statsRequestId) &&
+                    statsRequestId.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(statsRequestId.GetString()))
+                {
+                    await SendEventStatsAsync(socket, statsRequestId.GetString()!, cancellationToken);
+                }
+                break;
+            case "request-event-entries":
+                if (document.RootElement.TryGetProperty("requestId", out var entriesRequestId) &&
+                    entriesRequestId.ValueKind == JsonValueKind.String &&
+                    document.RootElement.TryGetProperty("level", out var levelElement) &&
+                    levelElement.ValueKind == JsonValueKind.String)
+                {
+                    await SendEventEntriesAsync(socket, entriesRequestId.GetString()!, levelElement.GetString()!, cancellationToken);
+                }
                 break;
             case "request-updates":
                 await SendAgentUpdateSummaryAsync(socket, cancellationToken, true);

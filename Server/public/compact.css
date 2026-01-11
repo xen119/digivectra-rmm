@@ -41,6 +41,21 @@ button {
   font-size: 0.8rem;
 }
 
+.firewall-pill {
+  border-radius: 999px;
+  border: 1px solid #0f766e;
+  background: transparent;
+  color: #38bdf8;
+  padding: 0.2rem 0.9rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.firewall-pill:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+
 .summary-grid {
   gap: 0.8rem;
 }

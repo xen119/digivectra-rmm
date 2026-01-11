@@ -41,6 +41,32 @@ button {
   font-size: 0.8rem;
 }
 
+.chat-pill {
+  border-radius: 999px;
+  border: 1px solid #15803d;
+  background: #15803d;
+  color: #ecfdf5;
+  padding: 0.25rem 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.chat-pill__label {
+  font-weight: inherit;
+}
+
+.chat-pill--active {
+  border-color: #b91c1c;
+  color: #fff7ed;
+}
+
+.chat-pill.chat-pill--active {
+  background: #b91c1c !important;
+}
+
 .firewall-pill {
   border-radius: 999px;
   border: 1px solid #0f766e;

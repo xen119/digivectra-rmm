@@ -127,6 +127,21 @@ internal static class TrayIconManager
         };
     }
 
+    public static void ShowChatWindow()
+    {
+        if (uiContext is null)
+        {
+            return;
+        }
+
+        uiContext.Post(_ =>
+        {
+            EnsureChatWindow();
+            chatWindow?.Show();
+            chatWindow?.EnsureVisible();
+        }, null);
+    }
+
     public static Task<bool?> ShowConsentDialogAsync(string title, string message, CancellationToken cancellationToken)
     {
         if (uiContext is null)
@@ -236,12 +251,15 @@ internal static class TrayIconManager
         private ContextMenuStrip BuildContextMenu()
         {
             var menu = new ContextMenuStrip();
-            var showItem = new ToolStripMenuItem("Show console");
-            showItem.Click += (_, _) => ShowConsoleWindow();
-            var exitItem = new ToolStripMenuItem("Exit agent");
-            exitItem.Click += (_, _) => RequestExit();
-            menu.Items.Add(showItem);
-            menu.Items.Add(exitItem);
+        var showItem = new ToolStripMenuItem("Show console");
+        showItem.Click += (_, _) => ShowConsoleWindow();
+        var chatItem = new ToolStripMenuItem("Chat with server");
+        chatItem.Click += (_, _) => ShowChatWindow();
+        var exitItem = new ToolStripMenuItem("Exit agent");
+        exitItem.Click += (_, _) => RequestExit();
+        menu.Items.Add(showItem);
+        menu.Items.Add(chatItem);
+        menu.Items.Add(exitItem);
             return menu;
         }
 

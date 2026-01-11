@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Vulnerability Intelligence</title>
+    <link rel="stylesheet" href="compact.css" />
+    <style>
+      :root {
+        --panel-bg: #0d1117;
+        --panel-border: #161b22;
+        --panel-radius: 0.8rem;
+        --text-muted: #94a3b8;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #05070f;
+        color: #f8fafc;
+      }
+      .page {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 1.5rem 1.5rem 2rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .panel {
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: var(--panel-radius);
+        padding: 1.2rem 1.25rem;
+        box-shadow: 0 18px 45px rgba(2, 6, 23, 0.35);
+        display: flex;
+        flex-direction: column;
+        gap: 0.8rem;
+      }
+      h1, h2, h3 {
+        margin: 0;
+      }
+      .status {
+        color: var(--text-muted);
+        font-size: 0.85rem;
+      }
+      .agent-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+        align-items: center;
+      }
+      select {
+        border-radius: 0.35rem;
+        border: 1px solid #1e293b;
+        background: #05070f;
+        color: #e2e8f0;
+        padding: 0.45rem 0.75rem;
+        font-size: 0.95rem;
+      }
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 0.75rem;
+      }
+      .summary-card {
+        border: 1px solid #1e293b;
+        border-radius: 0.5rem;
+        padding: 0.6rem 0.8rem;
+        background: #070a17;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+      .summary-card strong {
+        font-size: 1.3rem;
+      }
+      .vuln-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+      }
+      .vuln-card {
+        border: 1px solid #1e293b;
+        border-radius: 0.6rem;
+        padding: 0.8rem;
+        background: #050a16;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.6rem;
+      }
+      .vuln-card h3 {
+        margin: 0;
+        font-size: 1rem;
+        letter-spacing: 0.02em;
+      }
+      .vuln-card .meta {
+        color: var(--text-muted);
+        font-size: 0.8rem;
+      }
+      .vuln-card .priority {
+        font-size: 0.8rem;
+        font-weight: 600;
+        padding: 0.2rem 0.6rem;
+        border-radius: 0.4rem;
+        background: #0f172a;
+        text-transform: uppercase;
+      }
+      .vuln-card .priority.urgent {
+        background: #711a1a;
+      }
+      .vuln-card .priority.high {
+        background: #7c2b91;
+      }
+      .vuln-card .priority.medium {
+        background: #c05621;
+      }
+      .vuln-card .priority.low {
+        background: #1f2933;
+      }
+      .vuln-card .priority.patched {
+        background: #0f5132;
+      }
+      .detail-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        font-size: 0.85rem;
+        color: #cbd5f5;
+      }
+      .placeholder {
+        color: var(--text-muted);
+      }
+      @media (max-width: 768px) {
+        .vuln-card {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="panel">
+        <h1>Vulnerability Intelligence</h1>
+        <p class="status">Agent-specific risk summaries drawn from normalized NVD/KEV/EPSS data.</p>
+        <div class="agent-row">
+          <span>Select agent to view its correlated CVEs:</span>
+          <select id="agentSelector"><option>Loading agents…</option></select>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Risk summary</h2>
+        <div class="summary-grid" id="summaryGrid">
+          <div class="summary-card"><span class="placeholder">Select an agent</span></div>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Vulnerability details</h2>
+        <div id="vulnList" class="vuln-list">
+          <div class="placeholder">Select an agent to populate this view.</div>
+        </div>
+      </section>
+    </div>
+    <script>
+      const agentSelector = document.getElementById('agentSelector');
+      const summaryGrid = document.getElementById('summaryGrid');
+      const vulnList = document.getElementById('vulnList');
+
+      async function loadAgents() {
+        const response = await fetch('/clients');
+        if (!response.ok) {
+          agentSelector.innerHTML = '<option>Error loading agents</option>';
+          return;
+        }
+        const agents = await response.json();
+        agentSelector.innerHTML = '';
+        agents.forEach((agent) => {
+          const option = document.createElement('option');
+          option.value = agent.id;
+          option.textContent = `${agent.name} · ${agent.status}`;
+          agentSelector.appendChild(option);
+        });
+        if (agents.length) {
+          loadAgentVulnerabilities(agents[0].id);
+        }
+      }
+
+      agentSelector?.addEventListener('change', () => {
+        const id = agentSelector.value;
+        loadAgentVulnerabilities(id);
+      });
+
+      async function loadAgentVulnerabilities(agentId) {
+        if (!agentId) {
+          return;
+        }
+        summaryGrid.innerHTML = '<div class="placeholder">Fetching vulnerability totals…</div>';
+        vulnList.innerHTML = '<div class="placeholder">Loading details…</div>';
+        const resp = await fetch(`/vulnerabilities/asset/${encodeURIComponent(agentId)}`);
+        if (!resp.ok) {
+          summaryGrid.innerHTML = '<div class="placeholder">Unable to fetch vulnerabilities.</div>';
+          vulnList.innerHTML = '';
+          return;
+        }
+        const payload = await resp.json();
+        renderSummary(payload);
+        renderVulnerabilities(payload.vulnerabilities);
+      }
+
+      function renderSummary(payload) {
+        const totals = {
+          urgent: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          patched: 0,
+        };
+        payload.vulnerabilities?.forEach((vuln) => {
+          totals[vuln.priority] = (totals[vuln.priority] ?? 0) + 1;
+        });
+        summaryGrid.innerHTML = '';
+        Object.entries(totals).forEach(([key, value]) => {
+          const card = document.createElement('div');
+          card.className = 'summary-card';
+          card.innerHTML = `<strong>${value}</strong><span>${key.toUpperCase()}</span>`;
+          summaryGrid.appendChild(card);
+        });
+      }
+
+      function renderVulnerabilities(items = []) {
+        vulnList.innerHTML = '';
+        if (!items.length) {
+          vulnList.innerHTML = '<div class="placeholder">No correlated CVEs for this agent.</div>';
+          return;
+        }
+        items.forEach((vuln) => {
+          const card = document.createElement('div');
+          card.className = 'vuln-card';
+          card.innerHTML = `
+            <div>
+              <h3>${vuln.cveId}</h3>
+              <div class="detail-row">
+                <span>Severity: ${vuln.severity}</span>
+                <span>CVSS: ${vuln.cvss ?? 'n/a'}</span>
+                <span>EPSS: ${vuln.epss ?? 'n/a'}</span>
+              </div>
+              <p class="status">${vuln.description}</p>
+              <div class="detail-row">
+                <span>${vuln.component}</span>
+                <span>${vuln.explanation}</span>
+                <span>Fixed by: ${(vuln.fixedBy ?? []).join(', ') || 'not provided'}</span>
+              </div>
+            </div>
+            <div>
+              <div class="priority ${vuln.priority}">${vuln.priority}</div>
+              <div class="detail-row">
+                <span>${vuln.state}</span>
+                <span>${vuln.componentType}</span>
+                <span>KEV: ${vuln.kev ? 'yes' : 'no'}</span>
+              </div>
+            </div>
+          `;
+          vulnList.appendChild(card);
+        });
+      }
+
+      loadAgents();
+    </script>
+  </body>
+</html>

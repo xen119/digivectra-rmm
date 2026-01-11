@@ -3762,8 +3762,8 @@ internal static class Program
     {
         if (string.IsNullOrWhiteSpace(currentChatSessionId))
         {
-            Console.WriteLine("No active chat session available.");
-            return;
+            currentChatSessionId = Guid.NewGuid().ToString("D");
+            Console.WriteLine("Starting a new chat session with the server.");
         }
 
         await SendJsonAsync(socket, new

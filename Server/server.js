@@ -69,12 +69,16 @@ const MAX_SCREEN_SCALE = 1.0;
 const DEFAULT_SCREEN_SCALE = 0.75;
 const chatListeners = new Map(); // agentId -> Set<ServerResponse>
 const chatHistories = new Map(); // agentId -> [{ sessionId, text, direction, agentName, timestamp }]
+const chatNotificationCounts = new Map();
 const CHAT_HISTORY_LIMIT = 200;
+const agentChatLastTimestamp = new Map();
 const SCREEN_LIST_TTL_MS = 60_000;
 const SCREEN_LIST_TIMEOUT_MS = 5_000;
 const DATA_DIR = path.join(__dirname, 'data');
 const MONITORING_CONFIG_PATH = path.join(DATA_DIR, 'monitoring.json');
 const FIREWALL_BASELINE_PATH = path.join(DATA_DIR, 'firewall-baseline.json');
+const VULNERABILITY_CONFIG_PATH = path.join(__dirname, 'config', 'vulnerability.json');
+const VULNERABILITY_STORE_PATH = path.join(DATA_DIR, 'vulnerabilities.json');
 const SESSION_TTL_MS = 30 * 60_1000;
 const SSO_SECRET = process.env.SSO_SECRET ?? 'CHANGE_ME-SSO-KEY';
 const SSO_WINDOW_MS = 5 * 60_1000;
@@ -98,6 +102,8 @@ let USERS_CONFIG = loadUsersConfig();
 const monitoringEvents = new Set();
 const monitoringConfig = loadMonitoringConfig();
 const firewallBaselines = loadFirewallBaselines();
+const vulnerabilityConfig = loadVulnerabilityConfig();
+const vulnerabilityStore = loadVulnerabilityStore();
 const monitoringHistory = [];
 const MONITORING_HISTORY_LIMIT = 100;
 const agentMetrics = new Map(); // agentId -> [{ timestamp, cpuPercent?, ramPercent? }]
@@ -106,6 +112,8 @@ const agentAlertStatus = new Map(); // agentId -> boolean
 const agentProfileStatus = new Map(); // agentId -> Map<profileId, boolean>
 const sessions = new Map();
 const roleWeight = { viewer: 0, operator: 1, admin: 2 };
+const assetVulnerabilityCache = new Map();
+const vulnerabilityIngestionTimers = [];
 
 server.on('request', async (req, res) => {
   const requestedUrl = new URL(req.url ?? '/', `https://${req.headers.host ?? 'localhost'}`);
@@ -113,6 +121,19 @@ server.on('request', async (req, res) => {
 
   if (pathname.startsWith('/auth/')) {
     handleAuthRoute(req, res, pathname, requestedUrl);
+    return;
+  }
+
+  const chatReadMatch = pathname.match(/^\/chat\/([^/]+)\/read$/);
+  if (chatReadMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const agentId = chatReadMatch[1];
+    clearChatNotification(agentId);
+    res.writeHead(204);
+    res.end();
     return;
   }
 
@@ -131,7 +152,7 @@ server.on('request', async (req, res) => {
 
   if (pathname === '/clients' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-  const payload = Array.from(agents.values()).map((info) => ({
+    const payload = Array.from(agents.values()).map((info) => ({
       id: info.id,
       name: info.name,
       os: info.os,
@@ -152,6 +173,7 @@ server.on('request', async (req, res) => {
       monitoringProfiles: getAgentMonitoringProfiles(info),
       softwareSummary: info.softwareSummary ?? null,
       features: Array.isArray(info.features) ? info.features : [],
+      chatNotifications: chatNotificationCounts.get(info.id) ?? 0,
     }));
     return res.end(JSON.stringify(payload));
   }
@@ -2082,6 +2104,51 @@ server.on('request', async (req, res) => {
     return;
   }
 
+  const vulnerabilityStatusMatch = pathname === '/vulnerabilities/status' && req.method === 'GET';
+  if (vulnerabilityStatusMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(getVulnerabilityStatus()));
+    return;
+  }
+
+  const vulnerabilityQueryMatch = pathname === '/vulnerabilities' && req.method === 'GET';
+  if (vulnerabilityQueryMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const query = requestedUrl.searchParams.get('q')?.trim().toLowerCase() ?? '';
+    const limit = Number(requestedUrl.searchParams.get('limit')) || 50;
+    const results = searchVulnerabilities(query, limit);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ total: results.total, items: results.items }));
+    return;
+  }
+
+  const vulnerabilityAssetMatch = pathname.match(/^\/vulnerabilities\/asset\/([^/]+)$/);
+  if (vulnerabilityAssetMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const agentId = vulnerabilityAssetMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      res.end('Agent not found');
+      return;
+    }
+
+    const results = evaluateAssetVulnerabilities(entry.info);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ agentId, total: results.length, vulnerabilities: results }));
+    return;
+  }
+
   const systemHealthMatch = pathname === '/system-health/agents' && req.method === 'GET';
   if (systemHealthMatch) {
     if (!ensureRole(req, res, 'viewer')) {
@@ -2439,6 +2506,7 @@ wss.on('connection', (socket, request) => {
       info.name = parsed.name.trim();
       if (typeof parsed.os === 'string' && parsed.os.trim()) {
         info.os = parsed.os.trim();
+        evaluateAssetVulnerabilities(info);
       }
       if (typeof parsed.platform === 'string' && parsed.platform.trim()) {
         info.platform = parsed.platform.trim();
@@ -2734,6 +2802,7 @@ server.listen(PORT, () => {
   console.log(`HTTPS server listening on https://localhost:${PORT}`);
   console.log(`WebSocket endpoint available at wss://localhost:${PORT}`);
   console.log('Agent dashboard available via the root path');
+  startVulnerabilityIngestion();
 });
 
 function sendControl(socket, type, additional = {}) {
@@ -3070,6 +3139,7 @@ async function refreshSoftwareEntriesFromAgents() {
         : [];
       entry.info.softwareEntries = normalized;
       entry.info.softwareRetrievedAt = result.retrievedAt;
+      evaluateAssetVulnerabilities(entry.info);
     } catch (error) {
       console.warn('Software refresh failed for', entry.info.id, error);
     }
@@ -3411,6 +3481,16 @@ function recordChatHistory(agentId, payload) {
     history.shift();
   }
   chatHistories.set(agentId, history);
+  if (payload.direction === 'agent') {
+    const messageTimestamp = Number.isFinite(Date.parse(payload.timestamp ?? '')) && payload.timestamp
+      ? Date.parse(payload.timestamp ?? '')
+      : Date.now();
+    const previousTimestamp = agentChatLastTimestamp.get(agentId) ?? 0;
+    if (messageTimestamp > previousTimestamp) {
+      agentChatLastTimestamp.set(agentId, messageTimestamp);
+      incrementChatNotification(agentId, messageTimestamp);
+    }
+  }
 }
 
 function writeChatEvent(res, payload) {
@@ -4140,6 +4220,519 @@ function loadMonitoringConfig() {
   return defaultConfig;
 }
 
+function ensureConfigDirectory() {
+  const configDir = path.join(__dirname, 'config');
+  if (!fs.existsSync(configDir)) {
+    fs.mkdirSync(configDir, { recursive: true });
+  }
+}
+
+const DEFAULT_VULNERABILITY_CONFIG = {
+  nvdApiKey: '',
+  ingestionMinutes: {
+    nvd: 1440,
+    kev: 1440,
+    epss: 60,
+  },
+  epssThreshold: 0.4,
+  ignoredCves: [],
+};
+
+function loadVulnerabilityConfig() {
+  ensureConfigDirectory();
+  try {
+    if (fs.existsSync(VULNERABILITY_CONFIG_PATH)) {
+      let raw = fs.readFileSync(VULNERABILITY_CONFIG_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      return JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load vulnerability config', error);
+  }
+
+  fs.writeFileSync(VULNERABILITY_CONFIG_PATH, JSON.stringify(DEFAULT_VULNERABILITY_CONFIG, null, 2));
+  return { ...DEFAULT_VULNERABILITY_CONFIG };
+}
+
+function persistVulnerabilityConfig() {
+  try {
+    ensureConfigDirectory();
+    fs.writeFileSync(VULNERABILITY_CONFIG_PATH, JSON.stringify(vulnerabilityConfig, null, 2));
+    return true;
+  } catch (error) {
+    console.error('Failed to persist vulnerability config', error);
+    return false;
+  }
+}
+
+function loadVulnerabilityStore() {
+  ensureDataDirectory();
+  try {
+    if (fs.existsSync(VULNERABILITY_STORE_PATH)) {
+      let raw = fs.readFileSync(VULNERABILITY_STORE_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      return new Map(JSON.parse(raw));
+    }
+  } catch (error) {
+    console.error('Failed to load vulnerability store', error);
+  }
+
+  const store = new Map();
+  persistVulnerabilityStore(store);
+  return store;
+}
+
+function persistVulnerabilityStore(store = vulnerabilityStore) {
+  try {
+    ensureDataDirectory();
+    fs.writeFileSync(VULNERABILITY_STORE_PATH, JSON.stringify(Array.from(store.entries())), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to persist vulnerability store', error);
+    return false;
+  }
+}
+
+const NVD_ENDPOINT = 'https://services.nvd.nist.gov/rest/json/cves/2.0';
+const KEV_ENDPOINT = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
+const EPSS_ENDPOINT = 'https://api.first.org/data/v1/epss';
+
+function startVulnerabilityIngestion() {
+  scheduleIngestion('nvd', vulnerabilityConfig.ingestionMinutes.nvd ?? 1440, ingestNvdFeed);
+  scheduleIngestion('kev', vulnerabilityConfig.ingestionMinutes.kev ?? 1440, ingestKevCatalog);
+  scheduleIngestion('epss', vulnerabilityConfig.ingestionMinutes.epss ?? 60, ingestEpssScores);
+}
+
+function scheduleIngestion(name, minutes, fn) {
+  if (!minutes || minutes <= 0) {
+    return;
+  }
+  async function runner() {
+    try {
+      await fn();
+    } catch (error) {
+      console.error(`Vulnerability ingestion (${name}) failed`, error);
+    }
+    vulnerabilityIngestionTimers.push(setTimeout(runner, minutes * 60 * 1000));
+  }
+  runner();
+}
+
+async function ingestNvdFeed() {
+  const url = `${NVD_ENDPOINT}?resultsPerPage=2000`;
+  const headers = {};
+  if (vulnerabilityConfig.nvdApiKey) {
+    headers['API-Key'] = vulnerabilityConfig.nvdApiKey;
+  }
+  const data = await fetchJson(url, { headers });
+  const items = data?.vulnerabilities ?? data?.result?.vulnerabilities ?? [];
+  for (const item of items) {
+    const entry = normalizeNvdItem(item);
+    if (entry) {
+      applyNormalizedVulnerability(entry, 'nvd');
+    }
+  }
+  persistVulnerabilityStore();
+
+  vulnerabilityConfig.lastNvdIngest = new Date().toISOString();
+  persistVulnerabilityConfig();
+}
+
+async function ingestKevCatalog() {
+  const data = await fetchJson(KEV_ENDPOINT, { cache: 'no-store' });
+  const entries = Array.isArray(data?.vulnerabilities) ? data.vulnerabilities : [];
+  for (const vuln of entries) {
+    if (!vuln?.cveID) {
+      continue;
+    }
+    applyNormalizedVulnerability({
+      cveId: vuln.cveID.trim(),
+      description: vuln?.vulnerabilityName ?? '',
+      kev: true,
+      sources: { kev: true },
+      lastUpdated: vuln?.dateAdded ?? new Date().toISOString(),
+    }, 'kev');
+  }
+  persistVulnerabilityStore();
+
+  vulnerabilityConfig.lastKevIngest = new Date().toISOString();
+  persistVulnerabilityConfig();
+}
+
+async function ingestEpssScores() {
+  const data = await fetchJson(EPSS_ENDPOINT, { cache: 'no-store' });
+  const entries = Array.isArray(data?.data) ? data.data : [];
+  for (const item of entries) {
+    const cveId = item?.cve;
+    const probability = Number(item?.probability);
+    if (!cveId) {
+      continue;
+    }
+    applyNormalizedVulnerability({
+      cveId: cveId.trim(),
+      epss: Number.isFinite(probability) ? probability : 0,
+      sources: { epss: true },
+      lastUpdated: item?.timestamp ?? new Date().toISOString(),
+    }, 'epss');
+  }
+  persistVulnerabilityStore();
+
+  vulnerabilityConfig.lastEpssIngest = new Date().toISOString();
+  persistVulnerabilityConfig();
+}
+
+function applyNormalizedVulnerability(entry, source) {
+  const existing = vulnerabilityStore.get(entry.cveId) ?? {
+    cveId: entry.cveId,
+    described: '',
+    cvss: entry.cvss ?? 0,
+    cpes: [],
+    kev: false,
+    epss: null,
+    sources: {},
+    lastUpdated: entry.lastUpdated ?? new Date().toISOString(),
+  };
+  const merged = {
+    ...existing,
+    ...entry,
+    cvss: entry.cvss ?? existing.cvss,
+    cpes: Array.from(new Set([...(entry.cpes ?? existing.cpes ?? [])])),
+    kbArticleIDs: Array.from(
+      new Set([
+        ...((entry.kbArticleIDs ?? existing.kbArticleIDs ?? []) ?? []),
+      ]),
+    ),
+    kev: existing.kev || Boolean(entry.kev),
+    epss: entry.epss ?? existing.epss,
+    lastUpdated: entry.lastUpdated ?? existing.lastUpdated,
+    sources: { ...existing.sources, ...(entry.sources ?? {}), [source]: true },
+  };
+  vulnerabilityStore.set(entry.cveId, merged);
+}
+
+function normalizeNvdItem(item) {
+  const cveId = item?.cve?.cveDataMeta?.id || item?.cve?.CVE_data_meta?.ID;
+  if (!cveId) {
+    return null;
+  }
+  const description = item?.cve?.description?.description_data?.[0]?.value ?? item?.cve?.CVE_data_meta?.description ?? '';
+  const impact = item?.impact?.baseMetricV3?.cvssV3 ?? item?.impact?.baseMetricV2;
+  const cvss = impact?.baseScore ?? null;
+  const cpes = extractCpesFromItem(item);
+  const kbArticleIDs = extractKbArticles(item);
+  return {
+    cveId: cveId.trim(),
+    description,
+    cvss: Number.isFinite(cvss) ? cvss : null,
+    vectors: impact?.vectorString ?? null,
+    cpes,
+    kbArticleIDs,
+    lastUpdated: item?.lastModifiedDate ?? new Date().toISOString(),
+    sources: { nvd: true },
+  };
+}
+
+function extractCpesFromItem(item) {
+  const nodes = item?.configurations?.nodes ?? [];
+  const collected = new Set();
+  for (const node of nodes) {
+    const cpeMatches = node?.cpeMatch ?? [];
+    for (const match of cpeMatches) {
+      if (match?.cpe23Uri) {
+        collected.add(match.cpe23Uri);
+      }
+    }
+  }
+  return Array.from(collected);
+}
+
+function extractKbArticles(item) {
+  const references = item?.cve?.references?.reference_data ?? [];
+  const collected = new Set();
+  for (const entry of references) {
+    const url = entry?.url ?? '';
+    const match = url.match(/KB\d+/i);
+    if (match) {
+      collected.add(match[0].toUpperCase());
+    }
+  }
+  return Array.from(collected);
+}
+
+function gatherAppliedPatches(info) {
+  const applied = new Set();
+  const summary = info.updatesSummary;
+  if (!summary?.categories) {
+    return applied;
+  }
+
+  for (const category of summary.categories) {
+    const updates = Array.isArray(category.updates) ? category.updates : [];
+    for (const update of updates) {
+      const kbs = Array.isArray(update?.kbArticleIDs) ? update.kbArticleIDs : [];
+      for (const kb of kbs) {
+        if (typeof kb === 'string' && kb.trim()) {
+          applied.add(kb.trim().toUpperCase());
+        }
+      }
+    }
+  }
+
+  return applied;
+}
+
+async function fetchJson(url, options = {}) {
+  const res = await globalThis.fetch(url, options);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+function computeAssetFingerprint(info) {
+  const hash = crypto.createHash('sha256');
+  hash.update(info.id ?? '');
+  hash.update(info.os ?? '');
+  hash.update(JSON.stringify(info.specs ?? {}));
+  const software = Array.isArray(info.softwareEntries) ? info.softwareEntries : [];
+  const sortedSoftware = software
+    .map((item) => `${normalizeToken(item.publisher ?? '')}:${normalizeToken(item.name ?? '')}:${item.version ?? ''}`)
+    .sort()
+    .join('|');
+  hash.update(sortedSoftware);
+  const updates = info.updatesSummary ?? {};
+  hash.update(JSON.stringify(updates));
+  return hash.digest('hex');
+}
+
+function normalizeToken(value) {
+  return (value ?? '').toString().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function gatherSoftwareIdentifiers(info) {
+  const entries = Array.isArray(info.softwareEntries) ? info.softwareEntries : [];
+  return entries.map((item) => ({
+    name: normalizeToken(item.name ?? ''),
+    vendor: normalizeToken(item.publisher ?? ''),
+    version: (item.version ?? '').toString(),
+    original: item,
+  }));
+}
+
+function evaluateAssetVulnerabilities(info) {
+  if (!info?.id) {
+    return [];
+  }
+
+  const fingerprint = computeAssetFingerprint(info);
+  const cached = assetVulnerabilityCache.get(info.id);
+  if (cached && cached.fingerprint === fingerprint) {
+    return cached.results;
+  }
+
+  const softwareIdentifiers = gatherSoftwareIdentifiers(info);
+  const osDescriptor = {
+    raw: info.os ?? info.platform ?? '',
+    normalized: normalizeToken(info.os ?? info.platform ?? ''),
+  };
+  const appliedPatches = gatherAppliedPatches(info);
+
+  const matches = [];
+  for (const entry of vulnerabilityStore.values()) {
+    if (vulnerabilityConfig.ignoredCves?.includes(entry.cveId)) {
+      continue;
+    }
+
+    const match = matchVulnerabilityToAsset(entry, osDescriptor, softwareIdentifiers, appliedPatches);
+    if (!match) {
+      continue;
+    }
+
+    const patchState = match.patchInfo?.patched ? 'vulnerable_but_patched' : 'vulnerable_unpatched';
+    const priorityScore = computePriority(entry, patchState);
+    matches.push({
+      cveId: entry.cveId,
+      description: entry.description,
+      cvss: entry.cvss,
+      severity: categorizeSeverity(entry.cvss),
+      kev: Boolean(entry.kev),
+      epss: entry.epss,
+      component: match.component,
+      componentType: match.type,
+      matchedCpe: match.cpe,
+      state: patchState,
+      fixedBy: match.patchInfo?.fixedBy ?? [],
+      explanation: match.explanation,
+      updatedAt: new Date().toISOString(),
+      priorityScore,
+      priority:
+        priorityScore >= 10
+          ? 'urgent'
+          : priorityScore >= 7
+            ? 'high'
+            : priorityScore >= 4
+              ? 'medium'
+              : match.patchInfo?.patched
+                ? 'patched'
+                : 'low',
+    });
+  }
+
+  assetVulnerabilityCache.set(info.id, { fingerprint, results: matches });
+  return matches;
+}
+
+function categorizeSeverity(cvss) {
+  if (cvss >= 9) return 'Critical';
+  if (cvss >= 7) return 'High';
+  if (cvss >= 4) return 'Medium';
+  if (cvss > 0) return 'Low';
+  return 'Info';
+}
+
+function matchVulnerabilityToAsset(entry, osDescriptor, softwareIdentifiers, appliedPatches) {
+  const cpes = Array.isArray(entry.cpes) ? entry.cpes : [];
+  for (const raw of cpes) {
+    const parsed = parseCpe(raw);
+    if (!parsed) {
+      continue;
+    }
+
+    const stateInfo = {
+      fixedBy: Array.isArray(entry.kbArticleIDs) ? entry.kbArticleIDs : [],
+      patched: false,
+    };
+    if (stateInfo.fixedBy.some((kb) => appliedPatches.has(kb))) {
+      stateInfo.patched = true;
+    }
+
+    if (parsed.part === 'o' && matchesOsCpe(parsed, osDescriptor)) {
+      return {
+        component: osDescriptor.raw || 'Windows',
+        type: 'os',
+        cpe: raw,
+        explanation: `OS matches ${parsed.vendor}:${parsed.product}`,
+        patchInfo: stateInfo,
+      };
+    }
+
+    if (parsed.part === 'a') {
+      const matchedSoftware = matchesSoftwareCpe(parsed, softwareIdentifiers);
+      if (matchedSoftware) {
+        return {
+          component: matchedSoftware.original.name || matchedSoftware.original.softwareId || 'Unknown software',
+          type: 'software',
+          cpe: raw,
+          explanation: `Software ${matchedSoftware.original.name} matches ${parsed.vendor}:${parsed.product}`,
+          patchInfo: stateInfo,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function matchesOsCpe(parsed, osDescriptor) {
+  const vendorMatch = normalizeToken(parsed.vendor).includes('microsoft');
+  const productMatch = normalizeToken(parsed.product).includes('windows');
+  return vendorMatch && productMatch && osDescriptor.normalized.includes('windows');
+}
+
+function matchesSoftwareCpe(parsed, softwareIdentifiers) {
+  const vendor = normalizeToken(parsed.vendor);
+  const product = normalizeToken(parsed.product);
+  const version = (parsed.version ?? '').toString();
+
+  for (const identifier of softwareIdentifiers) {
+    if (vendor && identifier.vendor && !identifier.vendor.includes(vendor)) {
+      continue;
+    }
+    if (product && identifier.name && !identifier.name.includes(product)) {
+      continue;
+    }
+
+    if (version && identifier.version && identifier.version !== version) {
+      continue;
+    }
+
+    return identifier;
+  }
+
+  return null;
+}
+
+function computePriority(entry, patchState) {
+  let score = entry?.cvss ?? 0;
+  if (entry?.kev) {
+    score += 2;
+  }
+  if (entry?.epss >= (vulnerabilityConfig.epssThreshold ?? 0.4)) {
+    score += 1;
+  }
+  if (patchState === 'vulnerable_but_patched') {
+    score -= 4;
+  }
+  return Math.max(0, score);
+}
+
+function parseCpe(cpe) {
+  if (typeof cpe !== 'string') {
+    return null;
+  }
+  const parts = cpe.split(':');
+  if (parts.length < 6) {
+    return null;
+  }
+  return {
+    part: parts[2],
+    vendor: parts[3],
+    product: parts[4],
+    version: parts[5],
+  };
+}
+
+function getVulnerabilityStatus() {
+  const total = vulnerabilityStore.size;
+  return {
+    total,
+    lastNvdIngest: vulnerabilityConfig.lastNvdIngest ?? null,
+    lastKevIngest: vulnerabilityConfig.lastKevIngest ?? null,
+    lastEpssIngest: vulnerabilityConfig.lastEpssIngest ?? null,
+    storedAt: new Date().toISOString(),
+  };
+}
+
+function searchVulnerabilities(query, limit = 50) {
+  const normalized = String(query ?? '').trim().toLowerCase();
+  const matches = [];
+  for (const entry of vulnerabilityStore.values()) {
+    if (
+      !normalized
+      || entry.cveId.toLowerCase().includes(normalized)
+      || entry.description?.toLowerCase().includes(normalized)
+    ) {
+      matches.push({
+        cveId: entry.cveId,
+        description: entry.description,
+        cvss: entry.cvss,
+        cpes: entry.cpes,
+        kev: entry.kev,
+        epss: entry.epss,
+        sources: entry.sources,
+      });
+      if (matches.length >= limit) {
+        break;
+      }
+    }
+  }
+  return { total: matches.length, items: matches };
+}
+
 function loadFirewallBaselines() {
   ensureDataDirectory();
   try {
@@ -4422,6 +5015,30 @@ function sendMonitoringEvent(eventName, payload) {
     res.write(`event: ${eventName}\n`);
     res.write(`data: ${data}\n\n`);
   }
+}
+
+function incrementChatNotification(agentId, messageTimestamp) {
+  if (!agentId) {
+    return;
+  }
+
+  const count = (chatNotificationCounts.get(agentId) ?? 0) + 1;
+  chatNotificationCounts.set(agentId, count);
+  sendMonitoringEvent('chat-notification', {
+    agentId,
+    count,
+    timestamp: Date.now(),
+    messageTimestamp: Number.isFinite(messageTimestamp) ? messageTimestamp : Date.now(),
+  });
+}
+
+function clearChatNotification(agentId) {
+  if (!agentId) {
+    return;
+  }
+
+  chatNotificationCounts.delete(agentId);
+  sendMonitoringEvent('chat-notification', { agentId, count: 0, timestamp: Date.now() });
 }
 
 function hasActiveAlertForAgent(agentId) {

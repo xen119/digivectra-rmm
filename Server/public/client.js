@@ -5,6 +5,8 @@ const newGroupForm = document.getElementById('newGroupForm');
 const newGroupInput = document.getElementById('newGroupName');
 const logoutButton = document.getElementById('logoutButton');
 const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
+const chatIndicators = new Map();
+const chatState = new Map();
 let monitoringStateSource;
 
 const OS_ICONS = {
@@ -83,6 +85,7 @@ async function fetchGroups() {
 }
 
 function renderAgentGroups(agents, groups) {
+  chatIndicators.clear();
   listEl.innerHTML = '';
   const grouped = agents.reduce((acc, agent) => {
     const groupName = agent.group ?? 'Ungrouped';
@@ -298,12 +301,26 @@ function createAgentCard(agent, groups) {
     window.open(`services.html?${params.toString()}`, '_blank', 'noopener');
   });
   actions.appendChild(servicesButton);
-  const chatButton = document.createElement('button');
+const chatButton = document.createElement('button');
   chatButton.type = 'button';
-  chatButton.textContent = 'Chat';
-  chatButton.addEventListener('click', () => {
+  chatButton.className = 'chat-pill';
+  const chatLabel = document.createElement('span');
+  chatLabel.className = 'chat-pill__label';
+  chatLabel.textContent = 'Chat';
+  chatButton.appendChild(chatLabel);
+  chatButton.addEventListener('click', async () => {
+    markChatRead(agent.id);
+    updateChatIndicator(agent.id, 0);
+    try {
+      await authFetch(`/chat/${encodeURIComponent(agent.id)}/read`, { method: 'POST' });
+      updateChatIndicator(agent.id, 0);
+    } catch {
+      // ignore
+    }
     window.open(`chat.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
   });
+  chatIndicators.set(agent.id, { button: chatButton, label: chatLabel });
+  updateChatIndicator(agent.id, agent.chatNotifications ?? 0);
   actions.appendChild(chatButton);
   const bsodCount = typeof agent.bsodSummary?.totalCount === 'number'
     ? agent.bsodSummary.totalCount
@@ -395,6 +412,14 @@ function startMonitoringStateStream() {
     monitoringStateSource?.close();
     setTimeout(startMonitoringStateStream, 5000);
   };
+  monitoringStateSource.addEventListener('chat-notification', (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      updateChatIndicator(payload.agentId, payload.count, payload.timestamp ?? Date.now());
+    } catch (error) {
+      console.error('Chat notification parsing failed', error);
+    }
+  });
 }
 
 function updateAgentMonitoringIndicator(payload) {
@@ -437,6 +462,72 @@ function applyMonitoringPillState(pill, { label, status, enabled }) {
   pill.dataset.label = label;
   pill.dataset.status = status;
   pill.dataset.monitoringEnabled = enabled ? 'true' : 'false';
+}
+
+function removeChatSuppression(agentId) {
+  suppressedChatNotifications.delete(agentId);
+}
+
+function markChatRead(agentId) {
+  if (!agentId) {
+    return;
+  }
+
+  const state = chatState.get(agentId) ?? {};
+  state.lastReadTimestamp = Date.now();
+  state.awaitingZero = true;
+  chatState.set(agentId, state);
+}
+
+function updateChatIndicator(agentId, count, timestamp = Date.now(), messageTimestamp = timestamp) {
+  const entry = chatIndicators.get(agentId);
+  if (!entry) {
+    return;
+  }
+
+  if (count > 0) {
+    const state = chatState.get(agentId) ?? {};
+    if (state.awaitingZero) {
+      return;
+    }
+    if (state.lastReadTimestamp && messageTimestamp <= state.lastReadTimestamp) {
+      return;
+    }
+    if (state.lastMessageTimestamp && messageTimestamp <= state.lastMessageTimestamp) {
+      return;
+    }
+    entry.button.classList.add('chat-pill--active');
+    entry.button.style.setProperty('background-color', '#b91c1c');
+    entry.button.style.setProperty('border-color', '#b91c1c');
+    entry.button.style.setProperty('color', '#fff7ed');
+    entry.label.textContent = `Chat: ${count}`;
+    if (state) {
+      state.awaitingZero = false;
+      state.lastCount = count;
+      state.lastMessageTimestamp = messageTimestamp;
+      state.lastReadTimestamp = state.lastReadTimestamp ?? 0;
+    } else {
+      chatState.set(agentId, {
+        lastCount: count,
+        awaitingZero: false,
+        lastMessageTimestamp: messageTimestamp,
+        lastReadTimestamp: 0,
+      });
+    }
+  } else {
+    entry.button.classList.remove('chat-pill--active');
+    entry.button.style.removeProperty('background-color');
+    entry.button.style.removeProperty('border-color');
+    entry.button.style.removeProperty('color');
+    entry.label.textContent = 'Chat';
+    const state = chatState.get(agentId);
+    if (state) {
+      state.awaitingZero = false;
+      state.lastCount = 0;
+      state.lastMessageTimestamp = 0;
+      state.lastReadTimestamp = Date.now();
+    }
+  }
 }
 
 function getOsIcon(platform) {

@@ -1,0 +1,19 @@
+{
+  "name": "rmm-mcp-server",
+  "version": "0.1.0",
+  "description": "AI-facing MCP proxy for the RMM WebSocket Demo",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.5.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.6",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0"
+  }
+}

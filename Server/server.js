@@ -173,6 +173,8 @@ server.on('request', async (req, res) => {
       monitoringProfiles: getAgentMonitoringProfiles(info),
       softwareSummary: info.softwareSummary ?? null,
       features: Array.isArray(info.features) ? info.features : [],
+      bitlockerStatus: info.bitlockerStatus ?? null,
+      avStatus: info.avStatus ?? null,
       chatNotifications: chatNotificationCounts.get(info.id) ?? 0,
     }));
     return res.end(JSON.stringify(payload));
@@ -2471,7 +2473,9 @@ wss.on('connection', (socket, request) => {
     loggedInUser: 'Unknown',
     pendingReboot: false,
     softwareSummary: null,
-    features: [],
+      features: [],
+      bitlockerStatus: null,
+      avStatus: null,
   };
 
   clients.set(socket, info);
@@ -2520,6 +2524,9 @@ wss.on('connection', (socket, request) => {
       if (Array.isArray(parsed.features)) {
         info.features = parsed.features.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim());
       }
+
+      info.bitlockerStatus = normalizeBitlockerStatus(parsed.bitlockerStatus);
+      info.avStatus = normalizeAvStatus(parsed.avStatus);
         info.status = 'online';
         info.lastSeen = null;
         console.log(`Identified client as ${info.name}`);
@@ -4151,6 +4158,88 @@ function getAgentMonitoringProfiles(info) {
 
 function shouldMonitorAgent(info) {
   return getAssignedProfiles(info).length > 0;
+}
+
+function normalizeBitlockerStatus(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const protectionStatus = typeof payload.protectionStatus === 'string' && payload.protectionStatus.trim()
+    ? payload.protectionStatus.trim()
+    : null;
+  const lockStatus = typeof payload.lockStatus === 'string' && payload.lockStatus.trim()
+    ? payload.lockStatus.trim()
+    : null;
+
+  if (!protectionStatus && !lockStatus) {
+    return null;
+  }
+
+  const volume = typeof payload.volume === 'string' && payload.volume.trim()
+    ? payload.volume.trim()
+    : 'Unknown';
+
+  let percentage = null;
+  if (typeof payload.percentageEncrypted === 'number' && Number.isFinite(payload.percentageEncrypted)) {
+    percentage = clampPercentage(payload.percentageEncrypted);
+  } else if (typeof payload.percentageEncrypted === 'string') {
+    const parsed = Number(payload.percentageEncrypted);
+    if (Number.isFinite(parsed)) {
+      percentage = clampPercentage(parsed);
+    }
+  }
+
+  const keyProtectors = Array.isArray(payload.keyProtectors)
+    ? payload.keyProtectors
+      .filter((entry) => typeof entry === 'string' && entry.trim())
+      .map((entry) => entry.trim())
+    : [];
+
+  return {
+    volume,
+    protectionStatus: protectionStatus ?? 'Unknown',
+    lockStatus: lockStatus ?? 'Unknown',
+    percentageEncrypted: Number.isFinite(percentage) ? percentage : null,
+    keyProtectors,
+  };
+}
+
+function normalizeAvStatus(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const name = typeof payload.name === 'string' && payload.name.trim()
+    ? payload.name.trim()
+    : 'Unknown AV';
+  const status = typeof payload.status === 'string' && payload.status.trim()
+    ? payload.status.trim()
+    : 'Unknown';
+  const definition = typeof payload.definition === 'string' && payload.definition.trim()
+    ? payload.definition.trim()
+    : 'Definition status unknown';
+  const productState = Number.isFinite(payload.ProductState)
+    ? Number(payload.ProductState)
+    : 0;
+
+  return { name, status, definition, productState };
+}
+
+function clampPercentage(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return null;
+  }
+
+  if (value < 0) {
+    return 0;
+  }
+
+  if (value > 100) {
+    return 100;
+  }
+
+  return value;
 }
 
 function notifyMonitoringState(entry) {

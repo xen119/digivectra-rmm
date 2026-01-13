@@ -82,6 +82,81 @@ button {
   background: rgba(59, 130, 246, 0.08);
 }
 
+.security-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.bitlocker-pill {
+  border-radius: 999px;
+  padding: 0.2rem 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+}
+
+.bitlocker-pill--on {
+  background: #0f766e;
+  color: #ecfeff;
+  border-color: #0f766e;
+}
+
+.bitlocker-pill--partial {
+  background: #f59e0b;
+  color: #0f0f0f;
+  border-color: #f59e0b;
+}
+
+.bitlocker-pill--off {
+  background: #b91c1c;
+  color: #fff1f2;
+  border-color: #b91c1c;
+}
+
+.bitlocker-pill--unknown {
+  background: #1e293b;
+  color: #f8fafc;
+  border-color: #1e293b;
+}
+
+.av-pill {
+  border-radius: 999px;
+  padding: 0.2rem 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+}
+
+.av-pill--healthy {
+  background: #0f766e;
+  color: #ecfeff;
+  border-color: #0f766e;
+}
+
+.av-pill--stale {
+  background: #f97316;
+  color: #0f0f0f;
+  border-color: #f97316;
+}
+
+.av-pill--missing {
+  background: #b91c1c;
+  color: #fff1f2;
+  border-color: #b91c1c;
+}
+
+.av-pill--unknown {
+  background: #1e293b;
+  color: #f8fafc;
+  border-color: #1e293b;
+}
+
 .summary-grid {
   gap: 0.8rem;
 }

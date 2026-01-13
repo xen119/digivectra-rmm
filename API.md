@@ -31,6 +31,10 @@ Roles (viewer < operator < admin) gate the endpoints listed below. `ensureRole` 
 | `POST /users` | POST | admin | Body `{ username, password, role, totp? }`. Creates user, persists to `Server/config/users.json`. |
 | `GET /agent/download` | GET | viewer | Packages `AgentPublished/` or fallback build into ZIP with `run-agent.bat` & `server.json`. |
 
+Each agent object now includes an optional `bitlockerStatus` payload (`volume`, `protectionStatus`, `lockStatus`, `percentageEncrypted`, `keyProtectors`) and an `avStatus` object (`name`, `status`, `definition`, `productState`) so the dashboard can show BitLocker and antivirus health information.
+
+The `percentageEncrypted` value is normalized to the `0-100` range, so any unexpected readings (1000% etc.) are clamped before they reach downstream clients.
+
 ## Chat endpoints
 
 | Endpoint | Method | Role | Description |

@@ -262,7 +262,9 @@ internal static class Program
             agentId = GetAgentId(),
             specs = GetDeviceSpecs(),
             loggedInUser = GetAgentLocalUser(),
-            features = new[] { "firewall" }
+            features = new[] { "firewall" },
+            bitlockerStatus = GetBitlockerStatus(),
+            avStatus = GetAvStatus()
         });
         await SendTextAsync(socket, identity, cancellationToken);
         await SendAgentUpdateSummaryAsync(socket, cancellationToken);
@@ -721,6 +723,166 @@ internal static class Program
         specs.Storages = drives.ToArray();
         deviceSpecs = specs;
         return specs;
+    }
+
+    private static BitlockerStatus? GetBitlockerStatus()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "manage-bde.exe",
+                    Arguments = "-status",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                },
+            };
+
+            process.Start();
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(5000);
+
+            if (process.ExitCode != 0 || string.IsNullOrWhiteSpace(output))
+            {
+                return null;
+            }
+
+            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            string? volume = null;
+            string? protectionStatus = null;
+            string? lockStatus = null;
+            double? percentageEncrypted = null;
+            var keyProtectors = new List<string>();
+            var seenVolume = false;
+            var captureProtectors = false;
+
+            foreach (var rawLine in lines)
+            {
+                var line = rawLine.Trim();
+                if (line.StartsWith("Volume", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (seenVolume)
+                    {
+                        break;
+                    }
+
+                    seenVolume = true;
+                    var descriptor = line["Volume".Length..].Trim();
+                    volume = descriptor.EndsWith(":") ? descriptor : $"{descriptor}:";
+                    captureProtectors = false;
+                    continue;
+                }
+
+                if (captureProtectors && !line.Contains(':') && line.Length > 0)
+                {
+                    keyProtectors.Add(line);
+                    continue;
+                }
+
+                var colonIndex = line.IndexOf(':');
+                if (colonIndex < 0)
+                {
+                    captureProtectors = false;
+                    continue;
+                }
+
+                var key = line[..colonIndex].Trim();
+                var value = line[(colonIndex + 1)..].Trim();
+                captureProtectors = false;
+
+                switch (key)
+                {
+                    case "Protection Status":
+                        protectionStatus = value;
+                        break;
+                    case "Lock Status":
+                        lockStatus = value;
+                        break;
+                    case "Percentage Encrypted":
+                        var percentValue = value.TrimEnd('%');
+                        if (double.TryParse(percentValue, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
+                        {
+                            percentageEncrypted = parsed;
+                        }
+                        break;
+                    case "Key Protectors":
+                        captureProtectors = true;
+                        break;
+                }
+            }
+
+            if (string.IsNullOrEmpty(protectionStatus) && string.IsNullOrEmpty(lockStatus))
+            {
+                return null;
+            }
+
+            return new BitlockerStatus(
+                volume ?? "Unknown",
+                protectionStatus ?? "Unknown",
+                lockStatus ?? "Unknown",
+                percentageEncrypted,
+                keyProtectors.ToArray());
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static AvStatus? GetAvStatus()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var defenderSearcher = new ManagementObjectSearcher(@"root\Microsoft\Windows\Defender", "SELECT AntivirusEnabled, AMServiceEnabled, RealTimeProtectionEnabled, SignatureVersion FROM MSFT_MpComputerStatus");
+            foreach (ManagementBaseObject result in defenderSearcher.Get())
+            {
+                var name = "Windows Defender";
+                var enabled = result["AntivirusEnabled"] is bool antivirusEnabled && antivirusEnabled;
+                var definitions = result["SignatureVersion"] as string;
+                var signatureText = !string.IsNullOrWhiteSpace(definitions) ? $"Definition: {definitions}" : null;
+                var status = enabled ? "Enabled" : "Disabled";
+                return new AvStatus(name, status, signatureText ?? "Definitions unknown", 0u);
+            }
+        }
+        catch
+        {
+            // ignore - fallback to SecurityCenter
+        }
+
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(@"root\SecurityCenter2", "SELECT displayName, productState FROM AntiVirusProduct");
+            foreach (ManagementBaseObject item in searcher.Get())
+            {
+                string name = (item["displayName"] as string)?.Trim() ?? "Unknown AV";
+                var productState = item["productState"] is uint state ? state : 0u;
+                var enabled = (productState & 0x10) == 0x10 || (productState & 0x100) == 0x100;
+                var upToDate = (productState & 0x20) == 0x20;
+                var status = enabled ? "Enabled" : "Disabled";
+                var defText = upToDate ? "Definitions up to date" : "Definitions out of date";
+                return new AvStatus(name, status, defText, productState);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return null;
     }
 
     private static double GetMemoryUsagePercent()
@@ -4328,6 +4490,56 @@ internal static class Program
         public string? Name { get; set; }
         public long TotalBytes { get; set; }
         public long FreeBytes { get; set; }
+    }
+
+    private sealed class BitlockerStatus
+    {
+        [JsonPropertyName("volume")]
+        public string Volume { get; }
+
+        [JsonPropertyName("protectionStatus")]
+        public string ProtectionStatus { get; }
+
+        [JsonPropertyName("lockStatus")]
+        public string LockStatus { get; }
+
+        [JsonPropertyName("percentageEncrypted")]
+        public double? PercentageEncrypted { get; }
+
+        [JsonPropertyName("keyProtectors")]
+        public string[] KeyProtectors { get; }
+
+        public BitlockerStatus(string volume, string protectionStatus, string lockStatus, double? percentageEncrypted, string[] keyProtectors)
+        {
+            Volume = volume;
+            ProtectionStatus = protectionStatus;
+            LockStatus = lockStatus;
+            PercentageEncrypted = percentageEncrypted;
+            KeyProtectors = keyProtectors;
+        }
+    }
+
+    private sealed class AvStatus
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; }
+
+        [JsonPropertyName("status")]
+        public string Status { get; }
+
+        [JsonPropertyName("definition")]
+        public string Definition { get; }
+
+        [JsonPropertyName("ProductState")]
+        public uint ProductState { get; }
+
+        public AvStatus(string name, string status, string definition, uint productState)
+        {
+            Name = name;
+            Status = status;
+            Definition = definition;
+            ProductState = productState;
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]

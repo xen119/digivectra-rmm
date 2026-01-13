@@ -207,6 +207,68 @@ function createAgentCard(agent, groups) {
   meta.textContent = `${formatPlatform(agent.platform)} · ${agent.os ?? 'Unknown OS'} · ${agent.remoteAddress} · connected at ${connectedAt}`;
   card.appendChild(meta);
 
+  const securityRow = document.createElement('div');
+  securityRow.className = 'security-pill-row';
+  let securityCount = 0;
+  const bitlocker = agent.bitlockerStatus;
+  if (bitlocker?.protectionStatus) {
+    const pill = document.createElement('span');
+    const labelParts = [`BitLocker ${bitlocker.protectionStatus}`];
+    const lockStatus = bitlocker.lockStatus?.trim();
+    if (lockStatus && lockStatus.toLowerCase() !== bitlocker.protectionStatus.trim().toLowerCase()) {
+      labelParts.push(lockStatus);
+    }
+
+    const percentage = typeof bitlocker.percentageEncrypted === 'number'
+      ? formatPercentage(bitlocker.percentageEncrypted)
+      : null;
+    if (percentage) {
+      labelParts.push(`${percentage}% encrypted`);
+    }
+
+    const className = getBitlockerStatusClass(bitlocker.protectionStatus, bitlocker.percentageEncrypted);
+    pill.className = `bitlocker-pill bitlocker-pill--${className}`;
+    applyBitlockerPillStyle(pill, className);
+    pill.textContent = labelParts.join(' · ');
+
+    const titleParts = [];
+    if (bitlocker.volume) {
+      titleParts.push(`Volume: ${bitlocker.volume}`);
+    }
+    if (Array.isArray(bitlocker.keyProtectors) && bitlocker.keyProtectors.length > 0) {
+      titleParts.push(`Protectors: ${bitlocker.keyProtectors.join(', ')}`);
+    }
+    if (titleParts.length) {
+      pill.title = titleParts.join(' · ');
+    }
+
+    securityRow.appendChild(pill);
+    securityCount += 1;
+  }
+
+  const avStatus = agent.avStatus;
+  if (avStatus?.status) {
+    const avPill = document.createElement('span');
+    const label = `${avStatus.name}: ${avStatus.status}`;
+    const avClass = getAvStatusClass(avStatus.status, avStatus.definition);
+    avPill.className = `av-pill av-pill--${avClass}`;
+    avPill.textContent = label;
+    const title = [avStatus.definition, avStatus.productState ? `state ${avStatus.productState}` : null]
+      .filter(Boolean)
+      .join(' · ');
+    if (title) {
+      avPill.title = title;
+    }
+    applyAvPillStyle(avPill, avClass);
+    avPill.style.marginLeft = '0.5rem';
+    securityRow.appendChild(avPill);
+    securityCount += 1;
+  }
+
+  if (securityCount > 0) {
+    card.appendChild(securityRow);
+  }
+
   if (agent.pendingReboot) {
     const rebootPill = document.createElement('span');
     rebootPill.className = 'reboot-pill';
@@ -557,6 +619,78 @@ function formatPlatform(platform) {
   }
 
   return platform;
+}
+
+function formatPercentage(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return null;
+  }
+
+  return Number.isInteger(value) ? value.toString() : value.toFixed(1);
+}
+
+function getBitlockerStatusClass(status, percentage) {
+  if (!status) {
+    return 'unknown';
+  }
+
+  const normalized = status.toLowerCase();
+  if (normalized.includes('on') || normalized.includes('enabled')) {
+    if (typeof percentage === 'number' && percentage < 100) {
+      return 'partial';
+    }
+
+    return 'on';
+  }
+
+  if (normalized.includes('off') || normalized.includes('disabled')) {
+    return 'off';
+  }
+
+  return 'unknown';
+}
+
+function getAvStatusClass(status, definition) {
+  const normalized = status?.toLowerCase() ?? '';
+  if (normalized.includes('enabled') || normalized.includes('on') || normalized.includes('up to date')) {
+    return 'healthy';
+  }
+
+  if (normalized.includes('out of date') || normalized.includes('deprecated') || (definition?.toLowerCase().includes('out of date'))) {
+    return 'stale';
+  }
+
+  if (normalized.includes('disabled') || normalized.includes('off')) {
+    return 'missing';
+  }
+
+  return 'unknown';
+}
+
+function applyAvPillStyle(pill, className) {
+  const config = {
+    healthy: { background: '#0f766e', color: '#ecfeff', border: '#0f766e' },
+    stale: { background: '#f59e0b', color: '#0f0303', border: '#f59e0b' },
+    missing: { background: '#b91c1c', color: '#fff1f2', border: '#b91c1c' },
+    unknown: { background: '#0f172a', color: '#f8fafc', border: '#0f172a' },
+  }[className] ?? { background: '#0f172a', color: '#f8fafc', border: '#0f172a' };
+
+  pill.style.backgroundColor = config.background;
+  pill.style.color = config.color;
+  pill.style.borderColor = config.border;
+}
+
+function applyBitlockerPillStyle(pill, className) {
+  const config = {
+    on: { background: '#0f766e', color: '#ecfeff', border: '#0f766e' },
+    partial: { background: '#f59e0b', color: '#0f0303', border: '#f59e0b' },
+    off: { background: '#b91c1c', color: '#fff1f2', border: '#b91c1c' },
+    unknown: { background: '#1e293b', color: '#f8fafc', border: '#1e293b' },
+  }[className] ?? { background: '#0f172a', color: '#f8fafc', border: '#0f172a' };
+
+  pill.style.backgroundColor = config.background;
+  pill.style.color = config.color;
+  pill.style.borderColor = config.border;
 }
 
 function formatDeviceSpecs(specs) {

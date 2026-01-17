@@ -465,7 +465,43 @@ function createRebootPill(agent) {
   if (hasPendingUpdates) {
     pill.title = 'Install pending updates and restart required';
   }
+  pill.tabIndex = 0;
+  pill.setAttribute('role', 'button');
+  pill.addEventListener('click', () => handleRebootPillClick(agent.id));
+  pill.addEventListener('keypress', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleRebootPillClick(agent.id);
+    }
+  });
   return pill;
+}
+
+async function handleRebootPillClick(agentId) {
+  if (!agentId) {
+    return;
+  }
+
+  const confirmed = window.confirm('This will force an immediate restart and install updates. Are you sure?');
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await authFetch(`/clients/${encodeURIComponent(agentId)}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update-restart' }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    console.log('Restart action dispatched');
+  } catch (error) {
+    console.error('Unable to trigger update+restart', error);
+  }
 }
 
 async function assignAgentGroup(agentId, groupName) {

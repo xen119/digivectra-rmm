@@ -2616,29 +2616,30 @@ wss.on('connection', (socket, request) => {
           agents.set(requestedId, info);
         }
 
-      info.name = parsed.name.trim();
-      if (typeof parsed.os === 'string' && parsed.os.trim()) {
-        info.os = parsed.os.trim();
-        evaluateAssetVulnerabilities(info);
-      }
-      if (typeof parsed.platform === 'string' && parsed.platform.trim()) {
-        info.platform = parsed.platform.trim();
-      }
-      if (typeof parsed.loggedInUser === 'string' && parsed.loggedInUser.trim()) {
-        info.loggedInUser = parsed.loggedInUser.trim();
-      }
-      if (parsed.specs != null) {
-        info.specs = parsed.specs;
-      }
-      if (Array.isArray(parsed.features)) {
-        info.features = parsed.features.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim());
-      }
+        info.name = parsed.name.trim();
+        if (typeof parsed.os === 'string' && parsed.os.trim()) {
+          info.os = parsed.os.trim();
+          evaluateAssetVulnerabilities(info);
+        }
+        if (typeof parsed.platform === 'string' && parsed.platform.trim()) {
+          info.platform = parsed.platform.trim();
+        }
+        if (typeof parsed.loggedInUser === 'string' && parsed.loggedInUser.trim()) {
+          info.loggedInUser = parsed.loggedInUser.trim();
+        }
+        if (parsed.specs != null) {
+          info.specs = parsed.specs;
+        }
+        if (Array.isArray(parsed.features)) {
+          info.features = parsed.features.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim());
+        }
 
-      info.bitlockerStatus = normalizeBitlockerStatus(parsed.bitlockerStatus);
-      info.avStatus = normalizeAvStatus(parsed.avStatus);
-      if (typeof parsed.pendingReboot === 'boolean') {
-        info.pendingReboot = parsed.pendingReboot;
-      }
+        info.bitlockerStatus = normalizeBitlockerStatus(parsed.bitlockerStatus);
+        info.avStatus = normalizeAvStatus(parsed.avStatus);
+        if (typeof parsed.pendingReboot === 'boolean') {
+          info.pendingReboot = parsed.pendingReboot;
+        }
+
         info.status = 'online';
         info.lastSeen = null;
         console.log(`Identified client as ${info.name}`);

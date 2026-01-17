@@ -168,18 +168,23 @@ function createAgentCard(agent, groups) {
       icon.className = 'os-icon';
       icon.textContent = getOsIcon(agent.platform);
       icon.title = agent.platform ?? 'Unknown';
-      header.appendChild(icon);
+  header.appendChild(icon);
 
       const name = document.createElement('strong');
       name.textContent = agent.name;
       header.appendChild(name);
 
-      const statusPill = document.createElement('span');
-      statusPill.className = `status-pill ${agent.status === 'online' ? 'online' : 'offline'}`;
-      statusPill.textContent = agent.status === 'online'
-        ? 'Online'
-        : `Offline${agent.lastSeen ? ` since ${new Date(agent.lastSeen).toLocaleTimeString()}` : ''}`;
-      header.appendChild(statusPill);
+  const statusPill = document.createElement('span');
+  statusPill.className = `status-pill ${agent.status === 'online' ? 'online' : 'offline'}`;
+  statusPill.textContent = agent.status === 'online'
+    ? 'Online'
+    : `Offline${agent.lastSeen ? ` since ${new Date(agent.lastSeen).toLocaleTimeString()}` : ''}`;
+  header.appendChild(statusPill);
+
+  const rebootPill = createRebootPill(agent);
+  if (rebootPill) {
+    header.appendChild(rebootPill);
+  }
 
   const groupSelect = document.createElement('select');
   groupSelect.className = 'group-select';
@@ -290,13 +295,6 @@ function createAgentCard(agent, groups) {
 
   if (securityCount > 0) {
     card.appendChild(securityRow);
-  }
-
-  if (agent.pendingReboot) {
-    const rebootPill = document.createElement('span');
-    rebootPill.className = 'reboot-pill';
-    rebootPill.textContent = 'Pending reboot';
-    card.appendChild(rebootPill);
   }
 
   const specLine = document.createElement('div');
@@ -451,6 +449,23 @@ const chatButton = document.createElement('button');
   card.appendChild(actions);
 
   return card;
+}
+
+function createRebootPill(agent) {
+  if (!agent.pendingReboot) {
+    return null;
+  }
+
+  const hasPendingUpdates = typeof agent.updatesSummary?.totalCount === 'number'
+    ? agent.updatesSummary.totalCount > 0
+    : false;
+  const pill = document.createElement('span');
+  pill.className = `reboot-status-pill ${hasPendingUpdates ? 'update-restart-pill' : 'reboot-pill'}`;
+  pill.textContent = hasPendingUpdates ? 'Pending update + restart' : 'Pending reboot';
+  if (hasPendingUpdates) {
+    pill.title = 'Install pending updates and restart required';
+  }
+  return pill;
 }
 
 async function assignAgentGroup(agentId, groupName) {

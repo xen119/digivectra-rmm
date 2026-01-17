@@ -300,7 +300,8 @@ internal static class Program
             loggedInUser = GetAgentLocalUser(),
             features = new[] { "firewall" },
             bitlockerStatus = GetBitlockerStatus(),
-            avStatus = GetAvStatus()
+            avStatus = GetAvStatus(),
+            pendingReboot = IsRebootPending()
         });
         await SendTextAsync(socket, identity, cancellationToken);
         await SendAgentUpdateSummaryAsync(socket, cancellationToken);
@@ -958,7 +959,66 @@ internal static class Program
         }
 
         lastUpdateSummary = summary;
-        await SendJsonAsync(socket, new { type = "updates-summary", summary }, cancellationToken);
+        await SendJsonAsync(socket, new
+        {
+            type = "updates-summary",
+            summary,
+            pendingReboot = IsRebootPending()
+        }, cancellationToken);
+    }
+
+    private static bool IsRebootPending()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return false;
+        }
+
+        var checks = new[]
+        {
+            (path: @"SYSTEM\CurrentControlSet\Control\Session Manager", value: "PendingFileRenameOperations"),
+            (path: @"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update", value: "RebootRequired"),
+            (path: @"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing", value: "RebootPending"),
+            (path: @"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing", value: "RebootRequired"),
+            (path: @"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing", value: "RebootInProgress"),
+        };
+
+        foreach (var check in checks)
+        {
+            if (RegistryHasValue(check.path, check.value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool RegistryHasValue(string subKeyPath, string valueName)
+    {
+        if (string.IsNullOrEmpty(subKeyPath) || string.IsNullOrEmpty(valueName))
+        {
+            return false;
+        }
+
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+        {
+            try
+            {
+                using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+                using var key = baseKey.OpenSubKey(subKeyPath, false);
+                if (key is not null && key.GetValue(valueName) is not null)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // ignore permission/availability issues
+            }
+        }
+
+        return false;
     }
 
     private static async Task SendBsodSummaryAsync(ClientWebSocket socket, CancellationToken cancellationToken, bool force = false)

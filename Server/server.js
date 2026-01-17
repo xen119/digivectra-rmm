@@ -2636,6 +2636,9 @@ wss.on('connection', (socket, request) => {
 
       info.bitlockerStatus = normalizeBitlockerStatus(parsed.bitlockerStatus);
       info.avStatus = normalizeAvStatus(parsed.avStatus);
+      if (typeof parsed.pendingReboot === 'boolean') {
+        info.pendingReboot = parsed.pendingReboot;
+      }
         info.status = 'online';
         info.lastSeen = null;
         console.log(`Identified client as ${info.name}`);
@@ -2698,7 +2701,10 @@ wss.on('connection', (socket, request) => {
           });
         }
       } else if (parsed?.type === 'updates-summary') {
-        info.updatesSummary = parsed.summary ?? null;
+      info.updatesSummary = parsed.summary ?? null;
+      if (typeof parsed.pendingReboot === 'boolean') {
+        info.pendingReboot = parsed.pendingReboot;
+      }
       } else if (parsed?.type === 'bsod-summary') {
         info.bsodSummary = parsed.summary ?? null;
       } else if (parsed?.type === 'update-install-result') {

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "monitoring",
+    "visible": false
+  },
+  {
+    "id": "system-health",
+    "visible": false
+  },
+  {
+    "id": "firewall-baseline",
+    "visible": false
+  },
+  {
+    "id": "vulnerabilities",
+    "visible": false
+  },
+  {
+    "id": "patches",
+    "visible": false
+  },
+  {
+    "id": "software-management",
+    "visible": false
+  },
+  {
+    "id": "scripts",
+    "visible": false
+  },
+  {
+    "id": "scheduler",
+    "visible": false
+  },
+  {
+    "id": "users",
+    "visible": false
+  }
+]

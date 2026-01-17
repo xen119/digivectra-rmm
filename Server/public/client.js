@@ -5,6 +5,29 @@ const newGroupForm = document.getElementById('newGroupForm');
 const newGroupInput = document.getElementById('newGroupName');
 const logoutButton = document.getElementById('logoutButton');
 const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
+
+async function applySidebarSettings() {
+  try {
+    const response = await authFetch('/settings/navigation', { cache: 'no-store' });
+    if (!response.ok) {
+      return;
+    }
+
+    const data = await response.json();
+    const hidden = Array.isArray(data.items)
+      ? data.items.filter((item) => item.visible === false).map((item) => item.id)
+      : [];
+
+    for (const id of hidden) {
+      const link = document.querySelector(`.sidebar-link[data-nav-id="${id}"]`);
+      link?.classList.add('hidden');
+    }
+  } catch (error) {
+    console.warn('Unable to load navigation settings', error);
+  }
+}
+
+applySidebarSettings();
 const chatIndicators = new Map();
 const chatState = new Map();
 let monitoringStateSource;

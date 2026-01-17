@@ -31,13 +31,22 @@ const server = https.createServer({
   key: fs.readFileSync(keyPath),
 });
 
-  const DEFAULT_GROUP = 'Ungrouped';
+const DEFAULT_GROUP = 'Ungrouped';
+const DATA_DIR = path.join(__dirname, 'data');
+const MONITORING_CONFIG_PATH = path.join(DATA_DIR, 'monitoring.json');
+const FIREWALL_BASELINE_PATH = path.join(DATA_DIR, 'firewall-baseline.json');
+const NAVIGATION_CONFIG_PATH = path.join(DATA_DIR, 'navigation.json');
+const GROUPS_CONFIG_PATH = path.join(DATA_DIR, 'groups.json');
+const AGENT_GROUP_ASSIGNMENTS_PATH = path.join(DATA_DIR, 'agent-groups.json');
+const VULNERABILITY_CONFIG_PATH = path.join(__dirname, 'config', 'vulnerability.json');
+const VULNERABILITY_STORE_PATH = path.join(DATA_DIR, 'vulnerabilities.json');
 const clients = new Map(); // socket -> info
 const agents = new Map(); // id -> info (persist offline)
 const clientsById = new Map(); // id -> { socket, info }
 const shellStreams = new Map(); // id -> response
 const screenSessions = new Map(); // sessionId -> session data
-const groups = new Set([DEFAULT_GROUP]);
+const groups = loadGroups();
+const agentGroupAssignments = loadAgentGroupAssignments(groups);
 const screenLists = new Map(); // agentId -> { screens, updatedAt }
 const screenListRequests = new Map(); // agentId -> { resolvers: [], timer }
 const FILE_REQUEST_TIMEOUT_MS = 120_000;
@@ -74,11 +83,62 @@ const CHAT_HISTORY_LIMIT = 200;
 const agentChatLastTimestamp = new Map();
 const SCREEN_LIST_TTL_MS = 60_000;
 const SCREEN_LIST_TIMEOUT_MS = 5_000;
-const DATA_DIR = path.join(__dirname, 'data');
-const MONITORING_CONFIG_PATH = path.join(DATA_DIR, 'monitoring.json');
-const FIREWALL_BASELINE_PATH = path.join(DATA_DIR, 'firewall-baseline.json');
-const VULNERABILITY_CONFIG_PATH = path.join(__dirname, 'config', 'vulnerability.json');
-const VULNERABILITY_STORE_PATH = path.join(DATA_DIR, 'vulnerabilities.json');
+const NAVIGATION_ITEMS = [
+  {
+    id: 'monitoring',
+    label: 'Monitoring',
+    href: 'monitoring.html',
+    description: 'View active monitoring profiles, metrics, and alerts.',
+  },
+  {
+    id: 'system-health',
+    label: 'System Health',
+    href: 'system-health.html',
+    description: 'Review overall system health and diagnostics.',
+  },
+  {
+    id: 'firewall-baseline',
+    label: 'Firewall Baseline',
+    href: 'firewall-baseline.html',
+    description: 'Track baseline firewall policies and deviations.',
+  },
+  {
+    id: 'vulnerabilities',
+    label: 'Vulnerabilities',
+    href: 'vulnerabilities.html',
+    description: 'Browse the vulnerability catalog and CVE details.',
+  },
+  {
+    id: 'patches',
+    label: 'Patch Management',
+    href: 'patches.html',
+    description: 'Approve, schedule, and monitor Windows updates.',
+  },
+  {
+    id: 'software-management',
+    label: 'Software Inventory',
+    href: 'software-management.html',
+    description: 'Inspect software inventory, approvals, and actions.',
+  },
+  {
+    id: 'scripts',
+    label: 'Scripts',
+    href: 'scripts.html',
+    description: 'Upload and execute remediation scripts.',
+  },
+  {
+    id: 'scheduler',
+    label: 'Scheduler',
+    href: 'scheduler.html',
+    description: 'Create recurring automation or patch campaigns.',
+  },
+  {
+    id: 'users',
+    label: 'Users',
+    href: 'users.html',
+    description: 'Manage dashboard users, roles, and access.',
+  },
+];
 const SESSION_TTL_MS = 30 * 60_1000;
 const SSO_SECRET = process.env.SSO_SECRET ?? 'CHANGE_ME-SSO-KEY';
 const SSO_WINDOW_MS = 5 * 60_1000;
@@ -114,6 +174,7 @@ const sessions = new Map();
 const roleWeight = { viewer: 0, operator: 1, admin: 2 };
 const assetVulnerabilityCache = new Map();
 const vulnerabilityIngestionTimers = [];
+const navigationVisibility = loadNavigationVisibility();
 
 server.on('request', async (req, res) => {
   const requestedUrl = new URL(req.url ?? '/', `https://${req.headers.host ?? 'localhost'}`);
@@ -197,6 +258,7 @@ server.on('request', async (req, res) => {
         }
 
         groups.add(normalized);
+        persistGroups();
         res.writeHead(201, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ name: normalized }));
       } catch (error) {
@@ -294,6 +356,38 @@ server.on('request', async (req, res) => {
         }));
       } catch (error) {
         console.error('Unable to create user', error);
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const navigationSettingsMatch = pathname === '/settings/navigation';
+  if (navigationSettingsMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ items: getNavigationPayload() }));
+    return;
+  }
+
+  if (navigationSettingsMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const updates = Array.isArray(payload.items) ? payload.items : [];
+        updateNavigationVisibility(updates);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ items: getNavigationPayload() }));
+      } catch (error) {
         res.writeHead(400);
         res.end('Invalid request');
       }
@@ -2478,6 +2572,14 @@ wss.on('connection', (socket, request) => {
       avStatus: null,
   };
 
+  {
+    const storedGroup = agentGroupAssignments.get(info.id);
+    if (storedGroup) {
+      info.group = storedGroup;
+      groups.add(storedGroup);
+    }
+  }
+
   clients.set(socket, info);
   agents.set(id, info);
   clientsById.set(id, { socket, info });
@@ -2503,6 +2605,13 @@ wss.on('connection', (socket, request) => {
             info = existing;
           } else {
             info = { ...info, id: requestedId };
+          }
+          const assignedGroup = agentGroupAssignments.get(requestedId);
+          if (assignedGroup) {
+            info.group = assignedGroup;
+            groups.add(assignedGroup);
+          } else if (!info.group) {
+            info.group = DEFAULT_GROUP;
           }
           agents.set(requestedId, info);
         }
@@ -3522,7 +3631,13 @@ function assignAgentToGroup(agentId, groupName) {
 
   const normalized = normalizeGroupName(groupName);
   entry.info.group = normalized;
+  const alreadyKnown = groups.has(normalized);
   groups.add(normalized);
+  if (!alreadyKnown) {
+    persistGroups();
+  }
+  agentGroupAssignments.set(agentId, normalized);
+  persistAgentGroupAssignments();
   return normalized;
 }
 
@@ -4280,10 +4395,193 @@ function ensureDataDirectory() {
   }
 }
 
+function loadGroups() {
+  ensureDataDirectory();
+  let stored = [];
+  try {
+    if (fs.existsSync(GROUPS_CONFIG_PATH)) {
+      let raw = fs.readFileSync(GROUPS_CONFIG_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      stored = JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load group config', error);
+  }
+
+  const set = new Set([DEFAULT_GROUP]);
+  if (Array.isArray(stored)) {
+    for (const candidate of stored) {
+      const normalized = normalizeGroupName(candidate);
+      if (normalized) {
+        set.add(normalized);
+      }
+    }
+  }
+
+  persistGroups(set);
+  return set;
+}
+
+function persistGroups(set = groups) {
+  try {
+    ensureDataDirectory();
+    const payload = Array.from(set).sort();
+    fs.writeFileSync(GROUPS_CONFIG_PATH, JSON.stringify(payload, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to persist group config', error);
+    return false;
+  }
+}
+
+function loadAgentGroupAssignments(groupsSet) {
+  ensureDataDirectory();
+  let stored = {};
+  try {
+    if (fs.existsSync(AGENT_GROUP_ASSIGNMENTS_PATH)) {
+      let raw = fs.readFileSync(AGENT_GROUP_ASSIGNMENTS_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      stored = JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load agent group assignments', error);
+  }
+
+  const map = new Map();
+  if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+    for (const [agentId, value] of Object.entries(stored)) {
+      if (!agentId) {
+        continue;
+      }
+      const normalized = normalizeGroupName(value);
+      map.set(agentId, normalized);
+      if (groupsSet && normalized) {
+        groupsSet.add(normalized);
+      }
+    }
+  }
+
+  persistAgentGroupAssignments(map);
+  return map;
+}
+
+function persistAgentGroupAssignments(map = agentGroupAssignments) {
+  try {
+    ensureDataDirectory();
+    const payload = {};
+    for (const [agentId, groupName] of map) {
+      if (!agentId || !groupName) {
+        continue;
+      }
+      payload[agentId] = groupName;
+    }
+    fs.writeFileSync(AGENT_GROUP_ASSIGNMENTS_PATH, JSON.stringify(payload, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to persist agent group assignments', error);
+    return false;
+  }
+}
+
 function ensureRemediationDirectory() {
   if (!fs.existsSync(REMEDIATION_DIR)) {
     fs.mkdirSync(REMEDIATION_DIR, { recursive: true });
   }
+}
+
+function loadNavigationVisibility() {
+  ensureDataDirectory();
+  let stored = [];
+  try {
+    if (fs.existsSync(NAVIGATION_CONFIG_PATH)) {
+      let raw = fs.readFileSync(NAVIGATION_CONFIG_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      stored = JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load navigation config', error);
+  }
+
+  const map = new Map();
+  for (const item of NAVIGATION_ITEMS) {
+    const entry = Array.isArray(stored)
+      ? stored.find((candidate) => candidate.id === item.id)
+      : null;
+    const visible = entry && typeof entry.visible === 'boolean' ? entry.visible : true;
+    map.set(item.id, visible);
+  }
+
+  persistNavigationVisibility(map);
+  return map;
+}
+
+function persistNavigationVisibility(map) {
+  try {
+    ensureDataDirectory();
+    const payload = NAVIGATION_ITEMS.map((item) => ({
+      id: item.id,
+      visible: map.get(item.id) ?? true,
+    }));
+    fs.writeFileSync(NAVIGATION_CONFIG_PATH, JSON.stringify(payload, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to persist navigation config', error);
+    return false;
+  }
+}
+
+function getNavigationPayload() {
+  return NAVIGATION_ITEMS.map((item) => ({
+    id: item.id,
+    label: item.label,
+    href: item.href,
+    description: item.description,
+    visible: navigationVisibility.get(item.id) ?? true,
+  }));
+}
+
+function updateNavigationVisibility(entries) {
+  if (!Array.isArray(entries)) {
+    return false;
+  }
+
+  let mutated = false;
+  for (const entry of entries) {
+    const id = (entry?.id ?? '').toString();
+    if (!id) {
+      continue;
+    }
+
+    const known = NAVIGATION_ITEMS.find((item) => item.id === id);
+    if (!known) {
+      continue;
+    }
+
+    const visible = typeof entry.visible === 'boolean' ? entry.visible : null;
+    if (visible === null) {
+      continue;
+    }
+
+    const current = navigationVisibility.get(id) ?? true;
+    if (current === visible) {
+      continue;
+    }
+
+    navigationVisibility.set(id, visible);
+    mutated = true;
+  }
+
+  if (mutated) {
+    persistNavigationVisibility(navigationVisibility);
+  }
+
+  return mutated;
 }
 
 function loadMonitoringConfig() {

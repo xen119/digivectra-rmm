@@ -59,6 +59,10 @@
         background: #161b22;
       }
 
+      .sidebar-link.hidden {
+        display: none;
+      }
+
       .content {
         flex: 1;
         padding: 2rem;
@@ -323,15 +327,16 @@
           <button id="logoutButton" type="button">Logout</button>
         </div>
         <nav class="sidebar-nav">
-            <a href="monitoring.html" target="_blank" rel="noopener" class="sidebar-link">Monitoring</a>
-            <a href="system-health.html" target="_blank" rel="noopener" class="sidebar-link">System Health</a>
-            <a href="firewall-baseline.html" target="_blank" rel="noopener" class="sidebar-link">Firewall Baseline</a>
-            <a href="vulnerabilities.html" target="_blank" rel="noopener" class="sidebar-link">Vulnerabilities</a>
-            <a href="patches.html" target="_blank" rel="noopener" class="sidebar-link">Patch Management</a>
-            <a href="software-management.html" target="_blank" rel="noopener" class="sidebar-link">Software Inventory</a>
-            <a href="scripts.html" target="_blank" rel="noopener" class="sidebar-link">Scripts</a>
-          <a href="scheduler.html" target="_blank" rel="noopener" class="sidebar-link">Scheduler</a>
-          <a href="users.html" target="_blank" rel="noopener" class="sidebar-link">Users</a>
+            <a data-nav-id="monitoring" href="monitoring.html" target="_blank" rel="noopener" class="sidebar-link">Monitoring</a>
+            <a data-nav-id="system-health" href="system-health.html" target="_blank" rel="noopener" class="sidebar-link">System Health</a>
+            <a data-nav-id="firewall-baseline" href="firewall-baseline.html" target="_blank" rel="noopener" class="sidebar-link">Firewall Baseline</a>
+            <a data-nav-id="vulnerabilities" href="vulnerabilities.html" target="_blank" rel="noopener" class="sidebar-link">Vulnerabilities</a>
+            <a data-nav-id="patches" href="patches.html" target="_blank" rel="noopener" class="sidebar-link">Patch Management</a>
+            <a data-nav-id="software-management" href="software-management.html" target="_blank" rel="noopener" class="sidebar-link">Software Inventory</a>
+            <a data-nav-id="scripts" href="scripts.html" target="_blank" rel="noopener" class="sidebar-link">Scripts</a>
+          <a data-nav-id="scheduler" href="scheduler.html" target="_blank" rel="noopener" class="sidebar-link">Scheduler</a>
+          <a data-nav-id="users" href="users.html" target="_blank" rel="noopener" class="sidebar-link">Users</a>
+          <a href="settings.html" target="_blank" rel="noopener" class="sidebar-link">Settings</a>
         </nav>
       </aside>
       <main class="content">

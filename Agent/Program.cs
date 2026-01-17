@@ -120,13 +120,12 @@ internal static class Program
                 cts.Cancel();
             };
 
-            using var socket = new ClientWebSocket();
-
-            // Development convenience: allow self-signed certs. Remove this for production.
-            socket.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
-
-            Console.WriteLine($"Connecting to {target} ...");
-            await socket.ConnectAsync(new Uri(target), cts.Token);
+            using var socket = await ConnectWithRetryAsync(target, cts.Token);
+            if (socket is null)
+            {
+                Console.WriteLine("Connection cancelled.");
+                return;
+            }
             Console.WriteLine("Connected. Sending identity...");
 
             await SendAgentIdentityAsync(socket, cts.Token);
@@ -150,6 +149,43 @@ internal static class Program
             totalCpuCounter = null;
             TrayIconManager.Stop();
         }
+    }
+
+    private static async Task<ClientWebSocket?> ConnectWithRetryAsync(string target, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var socket = new ClientWebSocket();
+            socket.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+
+            try
+            {
+                Console.WriteLine($"Connecting to {target} ...");
+                await socket.ConnectAsync(new Uri(target), cancellationToken);
+                return socket;
+            }
+            catch (OperationCanceledException)
+            {
+                socket.Dispose();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                socket.Dispose();
+                Console.WriteLine($"Unable to connect: {ex.Message}");
+                Console.WriteLine("Retrying in 5 seconds...");
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static async Task ReceiveAsync(ClientWebSocket socket, CancellationToken cancellationToken)

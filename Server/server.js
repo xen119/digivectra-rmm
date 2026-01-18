@@ -274,6 +274,8 @@ server.on('request', async (req, res) => {
       platform: info.platform,
       connectedAt: info.connectedAt,
       remoteAddress: info.remoteAddress,
+      internalIp: info.internalIp ?? info.remoteAddress,
+      externalIp: info.externalIp ?? info.remoteAddress,
       group: info.group ?? DEFAULT_GROUP,
       specs: info.specs ?? null,
       updatesSummary: info.updatesSummary ?? null,
@@ -3012,11 +3014,17 @@ const wss = new WebSocket.Server({ server });
 
 wss.on('connection', (socket, request) => {
   const remote = request.socket.remoteAddress ?? 'unknown';
+  const forwarded = request.headers['x-forwarded-for'];
+  const externalIp = typeof forwarded === 'string'
+    ? forwarded.split(',')[0].trim()
+    : remote;
   const id = uuidv4();
   let info = {
     id,
     name: `unnamed (${remote})`,
     remoteAddress: remote,
+    internalIp: null,
+    externalIp,
     connectedAt: new Date().toISOString(),
     os: 'unknown',
     platform: 'unknown',
@@ -3089,6 +3097,22 @@ wss.on('connection', (socket, request) => {
         }
         if (typeof parsed.loggedInUser === 'string' && parsed.loggedInUser.trim()) {
           info.loggedInUser = parsed.loggedInUser.trim();
+        }
+        if (typeof parsed.internalIp === 'string') {
+          const trimmed = parsed.internalIp.trim();
+          if (trimmed) {
+            info.internalIp = trimmed;
+          }
+        } else if (parsed.internalIp === null) {
+          info.internalIp = null;
+        }
+        if (typeof parsed.externalIp === 'string') {
+          const trimmed = parsed.externalIp.trim();
+          if (trimmed) {
+            info.externalIp = trimmed;
+          }
+        } else if (parsed.externalIp === null) {
+          info.externalIp = null;
         }
         if (parsed.specs != null) {
           info.specs = parsed.specs;

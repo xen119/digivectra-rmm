@@ -21,7 +21,9 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Microsoft.MixedReality.WebRTC;
+using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using Microsoft.Win32;
 using System.ServiceProcess;
 
@@ -293,6 +295,8 @@ internal static class Program
 
     private static async Task SendAgentIdentityAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
+        var internalIp = GetPreferredInternalIpAddress();
+        var externalIp = await GetExternalIpAddressAsync(cancellationToken).ConfigureAwait(false);
         var identity = JsonSerializer.Serialize(new
         {
             type = "hello",
@@ -305,11 +309,180 @@ internal static class Program
             features = new[] { "firewall" },
             bitlockerStatus = GetBitlockerStatus(),
             avStatus = GetAvStatus(),
+            internalIp,
+            externalIp,
             pendingReboot = IsRebootPending()
         });
         await SendTextAsync(socket, identity, cancellationToken);
         await SendAgentUpdateSummaryAsync(socket, cancellationToken);
         await SendBsodSummaryAsync(socket, cancellationToken);
+    }
+
+    private static string? GetPreferredInternalIpAddress()
+    {
+        string? fallback = null;
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up)
+            {
+                continue;
+            }
+
+            var properties = nic.GetIPProperties();
+            if (properties is null)
+            {
+                continue;
+            }
+
+            foreach (var unicast in properties.UnicastAddresses)
+            {
+                var address = unicast.Address;
+                if (address.AddressFamily != AddressFamily.InterNetwork)
+                {
+                    continue;
+                }
+
+                if (IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any) || address.Equals(IPAddress.None))
+                {
+                    continue;
+                }
+
+                if (!IsRestrictedIpv4(address))
+                {
+                    return address.ToString();
+                }
+
+                if (fallback is null && !IsLinkLocalIpv4(address))
+                {
+                    fallback = address.ToString();
+                }
+            }
+        }
+
+        return fallback ?? GetFirstGlobalIpv6Address();
+    }
+
+    private static bool IsRestrictedIpv4(IPAddress address)
+    {
+        var bytes = address.GetAddressBytes();
+        if (bytes.Length != 4)
+        {
+            return false;
+        }
+
+        var first = bytes[0];
+        var second = bytes[1];
+        if (first == 10 || first == 127)
+        {
+            return true;
+        }
+
+        if (first == 172 && second >= 16 && second <= 31)
+        {
+            return true;
+        }
+
+        if (first == 192 && second == 168)
+        {
+            return true;
+        }
+
+        if (first == 169 && second == 254)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsLinkLocalIpv4(IPAddress address)
+    {
+        var bytes = address.GetAddressBytes();
+        return bytes.Length == 4 && bytes[0] == 169 && bytes[1] == 254;
+    }
+
+    private static string? GetFirstGlobalIpv6Address()
+    {
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up)
+            {
+                continue;
+            }
+
+            var properties = nic.GetIPProperties();
+            if (properties is null)
+            {
+                continue;
+            }
+
+            foreach (var unicast in properties.UnicastAddresses)
+            {
+                var address = unicast.Address;
+                if (address.AddressFamily != AddressFamily.InterNetworkV6)
+                {
+                    continue;
+                }
+
+                if (IPAddress.IsLoopback(address) || address.IsIPv6LinkLocal || address.IsIPv6SiteLocal || address.IsIPv6Multicast)
+                {
+                    continue;
+                }
+
+                return address.ToString();
+            }
+        }
+
+        return null;
+    }
+
+    private static async Task<string?> GetExternalIpAddressAsync(CancellationToken cancellationToken)
+    {
+        foreach (var url in new[] { "https://ifconfig.me", "https://api.ipify.org" })
+        {
+            var candidate = await RunCurlForIpAsync(url, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate.Trim();
+            }
+        }
+
+        return null;
+    }
+
+    private static async Task<string?> RunCurlForIpAsync(string url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "curl",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                }
+            };
+            process.StartInfo.ArgumentList.Add("-s");
+            process.StartInfo.ArgumentList.Add("-m");
+            process.StartInfo.ArgumentList.Add("5");
+            process.StartInfo.ArgumentList.Add(url);
+            process.Start();
+            using var outputReader = process.StandardOutput;
+            var outputTask = outputReader.ReadToEndAsync();
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            if (process.ExitCode != 0)
+            {
+                return null;
+            }
+            return (await outputTask.ConfigureAwait(false)).Trim();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static Task StartMonitoringLoopAsync(ClientWebSocket socket, CancellationToken cancellationToken)
@@ -1776,6 +1949,25 @@ internal static class Program
         {
             // ignore
         }
+    }
+
+    private static string NormalizeStartMode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return (value ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "auto" => "automatic",
+            "automatic" => "automatic",
+            "manual" => "manual",
+            "disabled" => "disabled",
+            "boot" => "boot",
+            "system" => "system",
+            _ => value.Trim(),
+        };
     }
 
     private static string? GetServiceStartMode(string serviceName)
@@ -3551,7 +3743,7 @@ internal static class Program
         }
 
         var normalizedPath = NormalizeRegistryPath(rawPath);
-        object? actual;
+        object? actual = null;
         try
         {
             actual = Registry.GetValue(normalizedPath, valueName, null);
@@ -3561,13 +3753,20 @@ internal static class Program
             return new ComplianceRuleResult(rule.Id, "fail", $"Unable to read registry value ({ex.Message}).");
         }
 
+        Type? inferredType = InferRegistryType(expectedValue);
+        string actualText;
+        Type? actualType;
         if (actual is null)
         {
-            return new ComplianceRuleResult(rule.Id, "fail", "Registry value missing.");
+            actualType = inferredType;
+            actualText = DefaultRegistryValueForType(inferredType);
         }
-
-        var actualText = actual.ToString() ?? string.Empty;
-        var success = CompareStringValue(actualText, expectedValue ?? string.Empty, rule.Operation);
+        else
+        {
+            (actualText, actualType) = NormalizeRegistryValue(actual, expectedValue);
+        }
+        var expectedNormalized = NormalizeRegistryExpected(expectedValue, actualType);
+        var success = CompareStringValue(actualText, expectedNormalized, rule.Operation);
         var status = success ? "pass" : "fail";
         var details = $"actual={actualText}";
         if (!string.IsNullOrWhiteSpace(expectedValue))
@@ -3612,9 +3811,10 @@ internal static class Program
             var actualState = controller.Status.ToString();
             var stateExpected = GetSubjectValue(rule, "state");
             var startModeExpected = GetSubjectValue(rule, "startMode");
-            var startModeActual = GetServiceStartMode(serviceName);
+            var startModeActual = NormalizeStartMode(GetServiceStartMode(serviceName));
+            var normalizedStartExpected = NormalizeStartMode(startModeExpected);
             var stateMatches = string.IsNullOrWhiteSpace(stateExpected) || CompareStringValue(actualState, stateExpected, "equals");
-            var startMatches = string.IsNullOrWhiteSpace(startModeExpected) || CompareStringValue(startModeActual, startModeExpected, "equals");
+            var startMatches = string.IsNullOrWhiteSpace(startModeExpected) || CompareStringValue(startModeActual, normalizedStartExpected, "equals");
             var success = stateMatches && startMatches;
             var details = $"state={actualState}; startMode={startModeActual}";
             return new ComplianceRuleResult(rule.Id, success ? "pass" : "fail", details);
@@ -3703,6 +3903,135 @@ internal static class Program
         }
 
         return trimmed;
+    }
+
+    private static (string Text, Type? Type) NormalizeRegistryValue(object? value, string? expectedValue)
+    {
+        if (value is null)
+        {
+            var inferred = InferRegistryType(expectedValue);
+            return (DefaultRegistryValueForType(inferred), inferred);
+        }
+
+        switch (value)
+        {
+            case int i:
+                return (i.ToString(CultureInfo.InvariantCulture), typeof(int));
+            case long l:
+                return (l.ToString(CultureInfo.InvariantCulture), typeof(long));
+            case short s:
+                return (s.ToString(CultureInfo.InvariantCulture), typeof(short));
+            case byte b:
+                return (b.ToString(CultureInfo.InvariantCulture), typeof(byte));
+            case bool boolean:
+                return (boolean ? "1" : "0", typeof(bool));
+            case string str:
+                return (str.Trim(), typeof(string));
+            default:
+        return (value.ToString()?.Trim() ?? string.Empty, value.GetType());
+    }
+    }
+
+    private static string NormalizeRegistryExpected(string? value, Type? actualType)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim();
+        if (actualType == typeof(int) || actualType == typeof(long) || actualType == typeof(short) || actualType == typeof(byte))
+        {
+            if (TryParseNumeric(trimmed, out var normalized))
+            {
+                return normalized;
+            }
+        }
+
+        if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            if (long.TryParse(trimmed[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexValue))
+            {
+                return hexValue.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        if (actualType == typeof(bool))
+        {
+            if (bool.TryParse(trimmed, out var boolean))
+            {
+                return boolean ? "1" : "0";
+            }
+        }
+
+        return trimmed;
+    }
+
+    private static bool TryParseNumeric(string text, out string normalized)
+    {
+        normalized = string.Empty;
+        if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intValue))
+        {
+            normalized = intValue.ToString(CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var longValue))
+        {
+            normalized = longValue.ToString(CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleValue))
+        {
+            normalized = doubleValue.ToString(CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            if (long.TryParse(text[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexValue))
+            {
+                normalized = hexValue.ToString(CultureInfo.InvariantCulture);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static Type? InferRegistryType(string? expectedValue)
+    {
+        if (string.IsNullOrWhiteSpace(expectedValue))
+        {
+            return typeof(int);
+        }
+
+        var trimmed = expectedValue.Trim();
+        if (bool.TryParse(trimmed, out _))
+        {
+            return typeof(bool);
+        }
+
+        if (TryParseNumeric(trimmed, out _))
+        {
+            return typeof(long);
+        }
+
+        return typeof(string);
+    }
+
+    private static string DefaultRegistryValueForType(Type? type)
+    {
+        return type?.Name switch
+        {
+            nameof(Boolean) => "0",
+            nameof(Int32) => "0",
+            nameof(Int64) => "0",
+            nameof(Int16) => "0",
+            nameof(Byte) => "0",
+            _ => "Disabled",
+        };
     }
 
     private static async Task SendComplianceReportAsync(ClientWebSocket socket, string profileId, IReadOnlyCollection<ComplianceRuleResult> results, CancellationToken cancellationToken)

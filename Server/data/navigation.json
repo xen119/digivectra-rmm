@@ -1,46 +1,46 @@
 [
   {
     "id": "monitoring",
-    "visible": true
+    "visible": false
   },
   {
     "id": "system-health",
-    "visible": true
+    "visible": false
   },
   {
     "id": "firewall-baseline",
-    "visible": true
+    "visible": false
   },
   {
     "id": "vulnerabilities",
-    "visible": true
+    "visible": false
   },
   {
     "id": "patches",
-    "visible": true
+    "visible": false
   },
   {
     "id": "software-management",
-    "visible": true
+    "visible": false
   },
   {
     "id": "scripts",
-    "visible": true
+    "visible": false
   },
   {
     "id": "scheduler",
-    "visible": true
+    "visible": false
   },
   {
     "id": "users",
-    "visible": true
+    "visible": false
   },
   {
     "id": "compliance",
-    "visible": true
+    "visible": false
   },
   {
     "id": "compliance-admin",
-    "visible": true
+    "visible": false
   }
 ]

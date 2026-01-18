@@ -232,7 +232,10 @@ function createAgentCard(agent, groups) {
   const meta = document.createElement('span');
   meta.className = 'agent-meta';
   const connectedAt = new Date(agent.connectedAt).toLocaleTimeString();
-  meta.textContent = `${formatPlatform(agent.platform)} · ${agent.os ?? 'Unknown OS'} · ${agent.remoteAddress} · connected at ${connectedAt}`;
+  const remoteDisplay = agent.remoteAddress ?? 'unknown';
+  const internalDisplay = agent.internalIp ?? remoteDisplay;
+  const externalDisplay = agent.externalIp ?? remoteDisplay;
+  meta.textContent = `${formatPlatform(agent.platform)} · ${agent.os ?? 'Unknown OS'} · remote: ${remoteDisplay} · internal IP: ${internalDisplay} · external IP: ${externalDisplay} · connected at ${connectedAt}`;
   card.appendChild(meta);
 
   const securityRow = document.createElement('div');

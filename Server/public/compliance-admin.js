@@ -186,7 +186,26 @@ function renderProfileTabs(data) {
         row.appendChild(idCell);
 
         const descCell = document.createElement('td');
-        descCell.textContent = rule.description ?? '-';
+        const descText = (rule.description ?? '-').trim();
+        const descWrapper = document.createElement('div');
+        descWrapper.className = 'description-body';
+        const sentenceParts = descText
+          .split('. ')
+          .map((part, index, arr) => (index < arr.length - 1 ? `${part}.` : part))
+          .filter(Boolean);
+        if (!sentenceParts.length) {
+          const emptyPara = document.createElement('p');
+          emptyPara.textContent = '-';
+          descWrapper.appendChild(emptyPara);
+        } else {
+          sentenceParts.forEach((sentence, idx) => {
+            const para = document.createElement('p');
+            para.textContent = sentence;
+            para.className = idx === 0 ? 'description-primary' : 'description-secondary';
+            descWrapper.appendChild(para);
+          });
+        }
+        descCell.appendChild(descWrapper);
         row.appendChild(descCell);
 
         const typeCell = document.createElement('td');

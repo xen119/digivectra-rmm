@@ -175,6 +175,12 @@ const NAVIGATION_ITEMS = [
     href: 'compliance.html',
     description: 'Track Windows security baselines and view compliance scores.',
   },
+  {
+    id: 'compliance-admin',
+    label: 'Compliance Admin',
+    href: 'compliance-admin.html',
+    description: 'Edit compliance profiles and rule definitions.',
+  },
 ];
 const DEFAULT_COMPLIANCE_CONFIG = {
   defaultProfileId: null,
@@ -444,8 +450,8 @@ server.on('request', async (req, res) => {
     return;
   }
 
-  const complianceProfilesMatch = pathname === '/compliance/profiles' && req.method === 'GET';
-  if (complianceProfilesMatch) {
+  const complianceProfilesMatch = pathname === '/compliance/profiles';
+  if (complianceProfilesMatch && req.method === 'GET') {
     if (!ensureRole(req, res, 'viewer')) {
       return;
     }
@@ -456,6 +462,44 @@ server.on('request', async (req, res) => {
       profiles: Array.isArray(complianceConfig.profiles) ? complianceConfig.profiles : [],
       assignments: complianceConfig.assignments ?? {},
     }));
+    return;
+  }
+
+  if (complianceProfilesMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const sanitizedProfiles = sanitizeProfilesPayload(payload);
+        if (!sanitizedProfiles.length) {
+          res.writeHead(400);
+          return res.end('At least one profile is required');
+        }
+        const defaultProfileId = typeof payload?.defaultProfileId === 'string' && payload.defaultProfileId.trim()
+          ? payload.defaultProfileId.trim()
+          : sanitizedProfiles[0].id;
+
+        complianceConfig.profiles = sanitizedProfiles;
+        complianceConfig.defaultProfileId = defaultProfileId;
+        persistComplianceConfig();
+        refreshComplianceCache();
+        broadcastComplianceDefinitions({ runNow: true });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          defaultProfileId,
+          profiles: sanitizedProfiles,
+        }));
+      } catch (error) {
+        console.error('Unable to save compliance definitions', error);
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
     return;
   }
 
@@ -5062,6 +5106,89 @@ function loadComplianceConfig() {
   }
 
   return config;
+}
+
+function sanitizeProfilesPayload(payload) {
+  const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+  const normalized = [];
+  for (const entry of profiles) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const id = typeof entry.id === 'string' && entry.id.trim()
+      ? entry.id.trim()
+      : null;
+    if (!id) {
+      continue;
+    }
+    const label = typeof entry.label === 'string' && entry.label.trim()
+      ? entry.label.trim()
+      : id;
+    const description = typeof entry.description === 'string'
+      ? entry.description.trim()
+      : '';
+    const weight = Number(entry.weight);
+    const profileWeight = Number.isFinite(weight) && weight > 0 ? weight : 1;
+    const rules = Array.isArray(entry.rules) ? entry.rules : [];
+    const sanitizedRules = [];
+    for (const rule of rules) {
+      if (!rule || typeof rule !== 'object') {
+        continue;
+      }
+      const ruleId = typeof rule.id === 'string' && rule.id.trim()
+        ? rule.id.trim()
+        : null;
+      if (!ruleId) {
+        continue;
+      }
+      const ruleType = typeof rule.type === 'string'
+        ? rule.type.trim().toLowerCase()
+        : 'registry';
+      const ruleWeight = Number(rule.weight);
+      const normalizedWeight = Number.isFinite(ruleWeight) && ruleWeight > 0 ? ruleWeight : 1;
+      const operation = typeof rule.operation === 'string' && rule.operation.trim()
+        ? rule.operation.trim().toLowerCase()
+        : 'equals';
+      const subject = (rule.subject && typeof rule.subject === 'object') ? rule.subject : {};
+        const mappings = Array.isArray(rule.mappings) ? rule.mappings : [];
+        const normalizedMappings = [];
+        for (const mapping of mappings) {
+          if (!mapping || typeof mapping !== 'object') {
+            continue;
+          }
+          const standard = typeof mapping.standard === 'string' ? mapping.standard.trim() : null;
+          const identifier = typeof mapping.id === 'string' ? mapping.id.trim() : null;
+          if (!standard || !identifier) {
+            continue;
+          }
+          normalizedMappings.push({ standard, id: identifier });
+        }
+        const remediationScript = typeof rule.remediationScript === 'string' && rule.remediationScript.trim()
+          ? rule.remediationScript.trim()
+          : null;
+
+        sanitizedRules.push({
+          id: ruleId,
+          description: typeof rule.description === 'string' ? rule.description.trim() : '',
+          type: ruleType,
+          weight: normalizedWeight,
+          operation,
+          subject,
+          mappings: normalizedMappings,
+          remediationScript,
+        });
+      }
+
+    normalized.push({
+      id,
+      label,
+      description,
+      weight: profileWeight,
+      rules: sanitizedRules,
+    });
+  }
+
+  return normalized;
 }
 
 function persistComplianceConfig() {

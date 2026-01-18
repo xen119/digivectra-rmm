@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Compliance Admin</title>
+    <link rel="stylesheet" href="compact.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #05070f;
+        color: #f8fafc;
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 2rem 1.5rem;
+      }
+
+      .panel {
+        background: #0d1117;
+        border: 1px solid #1e293b;
+        border-radius: 0.9rem;
+        padding: 1.5rem;
+        box-shadow: 0 18px 40px rgba(2, 6, 23, 0.4);
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .table-wrapper {
+        border: 1px solid #1e293b;
+        border-radius: 0.7rem;
+        background: #020617;
+        overflow: auto;
+      }
+
+      .mapping-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.15rem 0.45rem;
+        border-radius: 0.5rem;
+        border: 1px solid #1e293b;
+        background: #030812;
+        color: #e2e8f0;
+        font-size: 0.75rem;
+        margin: 0.15rem 0.2rem 0.15rem 0;
+      }
+
+      .table-wrapper table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+
+      .table-wrapper th,
+      .table-wrapper td {
+        padding: 0.6rem 0.75rem;
+        border-bottom: 1px solid #111b26;
+        text-align: left;
+      }
+
+      .remediation-select {
+        width: 100%;
+        background: #070e1a;
+        border: 1px solid #1e293b;
+        color: #e2e8f0;
+        border-radius: 0.35rem;
+        padding: 0.2rem 0.4rem;
+        font-size: 0.85rem;
+      }
+
+      .mapping-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.15rem;
+      }
+
+      .table-wrapper th {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        color: #94a3b8;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 1.8rem;
+      }
+
+      .actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: none;
+        border-radius: 0.5rem;
+        padding: 0.45rem 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        background: #2563eb;
+        color: #fff;
+        transition: background 0.2s ease;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      button:hover:not(:disabled) {
+        background: #1d4ed8;
+      }
+
+      .import-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.85rem;
+        color: #e2e8f0;
+        border: 1px solid #1e293b;
+        padding: 0.25rem 0.65rem;
+        border-radius: 0.45rem;
+        background: #020617;
+        cursor: pointer;
+      }
+
+      .import-label input {
+        display: none;
+      }
+
+      .view-description {
+        color: #cbd5f5;
+        font-size: 0.95rem;
+        margin-bottom: 0.35rem;
+      }
+
+      .status {
+        font-size: 0.9rem;
+        color: #94a3b8;
+      }
+
+      .status.success {
+        color: #34d399;
+      }
+
+      .status.error {
+        color: #fb7185;
+      }
+
+      .profiles-tabs {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .tab-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+
+      .tab-button {
+        border: 1px solid #1e293b;
+        background: #020617;
+        color: #e2e8f0;
+        border-radius: 0.6rem;
+        padding: 0.45rem 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: border 0.2s ease, background 0.2s ease;
+      }
+
+      .tab-button.active {
+        border-color: #2563eb;
+        background: #0d1117;
+      }
+
+      .tab-button .tab-default {
+        margin-left: 0.35rem;
+        font-size: 0.65rem;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        color: #94a3b8;
+      }
+
+      .tab-panels {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .tab-panels section {
+        border: 1px solid #1e2937;
+        border-radius: 0.8rem;
+        padding: 1rem;
+        background: #020617;
+      }
+
+      .profile-heading {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        margin-bottom: 0.9rem;
+      }
+
+      .profile-heading h2 {
+        margin: 0;
+        font-size: 1.3rem;
+      }
+
+      .profile-heading p {
+        margin: 0;
+        color: #cbd5f5;
+        font-size: 0.95rem;
+      }
+
+      .profile-meta {
+        color: #94a3b8;
+        font-size: 0.85rem;
+      }
+
+      .tab-placeholder {
+        font-size: 0.85rem;
+        color: #94a3b8;
+        padding: 0.25rem 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="panel">
+        <div>
+          <h1>Compliance Admin</h1>
+          <p class="view-description">Manage and review the JSON-driven compliance profiles that the Windows agent evaluates, including editing rules, importing/exporting definitions, and controlling assignments.</p>
+          <p class="status" id="adminStatus">Load compliance profiles to begin.</p>
+        </div>
+        <div class="actions">
+          <button id="reloadProfiles" type="button">Reload from server</button>
+          <button id="saveProfiles" type="button">Save changes</button>
+          <button id="exportProfiles" type="button">Export JSON</button>
+          <label for="importProfiles" class="import-label">Import JSON<input id="importProfiles" type="file" accept=".json" /></label>
+        </div>
+        <div class="profiles-tabs">
+          <div class="tab-list" role="tablist" id="profilesTabList">
+            <span class="tab-placeholder">Profiles will appear here once loaded.</span>
+          </div>
+          <div class="tab-panels" id="profilesTabPanels">
+            <p class="tab-placeholder">Load profiles to edit rules.</p>
+          </div>
+        </div>
+        <textarea id="profilesEditor" aria-label="Compliance profiles editor" hidden></textarea>
+      </section>
+    </main>
+    <script src="compliance-admin.js"></script>
+  </body>
+</html>

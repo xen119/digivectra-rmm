@@ -62,6 +62,42 @@
       "description": "Dumps the System event log to a temporary file.",
       "language": "powershell",
       "file": "collect_event_logs.ps1"
+    },
+    {
+      "name": "enable_firewall_domain",
+      "description": "Re-enable all Windows firewall profiles.",
+      "language": "powershell",
+      "file": "enable_firewall_domain.ps1"
+    },
+    {
+      "name": "disable_smb1",
+      "description": "Disable the legacy SMBv1 protocol.",
+      "language": "powershell",
+      "file": "disable_smb1.ps1"
+    },
+    {
+      "name": "require_ntlmv2",
+      "description": "Force NTLMv2 authentication across the system.",
+      "language": "powershell",
+      "file": "require_ntlmv2.ps1"
+    },
+    {
+      "name": "ensure_defender_rt",
+      "description": "Enable Defender real-time protection and service.",
+      "language": "powershell",
+      "file": "ensure_defender_rt.ps1"
+    },
+    {
+      "name": "restart_firewall_service",
+      "description": "Restart the Windows Firewall service (MpsSvc).",
+      "language": "powershell",
+      "file": "restart_firewall_service.ps1"
+    },
+    {
+      "name": "apply_audit_policy",
+      "description": "Apply logon, account lockout, and policy change auditing.",
+      "language": "powershell",
+      "file": "apply_audit_policy.ps1"
     }
   ]
 }

@@ -1,0 +1,111 @@
+{
+  "defaultProfileId": "level1",
+  "assignments": {},
+  "profiles": [
+    {
+      "id": "level1",
+      "label": "Security Level 1",
+      "description": "Baseline Windows hardening checks for general desktops and workstations.",
+      "weight": 1,
+      "rules": [
+        {
+          "id": "reg-firewall-standard",
+          "description": "Ensure the standard firewall profile is enabled.",
+          "type": "registry",
+          "weight": 2,
+          "operation": "equals",
+          "subject": {
+            "path": "HKLM:\\\\SYSTEM\\\\CurrentControlSet\\\\Services\\\\SharedAccess\\\\Parameters\\\\FirewallPolicy\\\\StandardProfile",
+            "valueName": "EnableFirewall",
+            "value": 1
+          }
+        },
+        {
+          "id": "lsp-deny-remote-guest",
+          "description": "The Guest account must not be allowed remote interactive logons.",
+          "type": "local-security-policy",
+          "weight": 1.5,
+          "operation": "contains",
+          "subject": {
+            "setting": "SeDenyRemoteInteractiveLogonRight",
+            "value": "Guest"
+          }
+        },
+        {
+          "id": "svc-firewall-running",
+          "description": "The Windows Defender Firewall service should be running and start automatically.",
+          "type": "service",
+          "weight": 1.5,
+          "subject": {
+            "serviceName": "MpsSvc",
+            "state": "Running",
+            "startMode": "Automatic"
+          }
+        },
+        {
+          "id": "audit-logon",
+          "description": "Logon events should be audited for both success and failure.",
+          "type": "audit",
+          "weight": 1,
+          "subject": {
+            "subCategory": "Logon",
+            "setting": "Success and Failure"
+          }
+        }
+      ]
+    },
+    {
+      "id": "level2",
+      "label": "Security Level 2",
+      "description": "More aggressive checks suitable for servers or sensitive endpoints.",
+      "weight": 1.5,
+      "rules": [
+        {
+          "id": "reg-security-signature",
+          "description": "SMB packet signing must be required on the server.",
+          "type": "registry",
+          "weight": 2,
+          "operation": "equals",
+          "subject": {
+            "path": "HKLM:\\\\SYSTEM\\\\CurrentControlSet\\\\Services\\\\LanmanServer\\\\Parameters",
+            "valueName": "RequireSecuritySignature",
+            "value": 1
+          }
+        },
+        {
+          "id": "lsp-deny-network-guest",
+          "description": "The Guest account must not be allowed network logons.",
+          "type": "local-security-policy",
+          "weight": 1.5,
+          "operation": "contains",
+          "subject": {
+            "setting": "SeDenyNetworkLogonRight",
+            "value": "Guest"
+          }
+        },
+        {
+          "id": "svc-defender-network-inspection",
+          "description": "The Defender Network Inspection Service must be running.",
+          "type": "service",
+          "weight": 1.5,
+          "subject": {
+            "serviceName": "WdNisSvc",
+            "state": "Running",
+            "startMode": "Automatic"
+          }
+        },
+        {
+          "id": "audit-account-lockout",
+          "description": "Account lockouts should be audited on failures.",
+          "type": "audit",
+          "weight": 1,
+          "subject": {
+            "category": "Account Lockout",
+            "subCategory": "Account Lockout",
+            "setting": "Failure"
+          }
+        }
+      ]
+    }
+  ]
+}

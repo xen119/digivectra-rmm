@@ -169,7 +169,24 @@ const NAVIGATION_ITEMS = [
     href: 'users.html',
     description: 'Manage dashboard users, roles, and access.',
   },
+  {
+    id: 'compliance',
+    label: 'Compliance',
+    href: 'compliance.html',
+    description: 'Track Windows security baselines and view compliance scores.',
+  },
 ];
+const DEFAULT_COMPLIANCE_CONFIG = {
+  defaultProfileId: null,
+  assignments: {},
+  profiles: [],
+};
+
+const COMPLIANCE_CONFIG_PATH = path.join(DATA_DIR, 'compliance.json');
+const complianceStatusByAgent = new Map();
+let complianceConfig = loadComplianceConfig();
+let complianceProfilesById = new Map();
+refreshComplianceCache();
 const SESSION_TTL_MS = 30 * 60_1000;
 const SSO_SECRET = process.env.SSO_SECRET ?? 'CHANGE_ME-SSO-KEY';
 const SSO_WINDOW_MS = 5 * 60_1000;
@@ -418,6 +435,130 @@ server.on('request', async (req, res) => {
         updateNavigationVisibility(updates);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ items: getNavigationPayload() }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const complianceProfilesMatch = pathname === '/compliance/profiles' && req.method === 'GET';
+  if (complianceProfilesMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      defaultProfileId: complianceConfig.defaultProfileId ?? null,
+      profiles: Array.isArray(complianceConfig.profiles) ? complianceConfig.profiles : [],
+      assignments: complianceConfig.assignments ?? {},
+    }));
+    return;
+  }
+
+  const complianceDevicesMatch = pathname === '/compliance/devices' && req.method === 'GET';
+  if (complianceDevicesMatch) {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const statuses = [];
+    for (const [agentId, summary] of complianceStatusByAgent) {
+      const agentInfo = clientsById.get(agentId)?.info ?? agents.get(agentId) ?? null;
+      statuses.push({
+        agentId,
+        agentName: agentInfo?.name ?? 'Unknown',
+        agentStatus: agentInfo?.status ?? 'offline',
+        assignedProfileId: getAssignedComplianceProfileId(agentId),
+        profileId: summary.profileId,
+        profileLabel: summary.profileLabel,
+        score: summary.score,
+        evaluatedAt: summary.updatedAt,
+        passWeight: summary.passWeight,
+        failWeight: summary.failWeight,
+        notApplicableWeight: summary.notApplicableWeight,
+        totalWeight: summary.totalWeight,
+        results: summary.results,
+      });
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ statuses }));
+    return;
+  }
+
+  const complianceAssignmentsMatch = pathname === '/compliance/assignments';
+  if (complianceAssignmentsMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ assignments: complianceConfig.assignments ?? {} }));
+    return;
+  }
+
+  if (complianceAssignmentsMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const agentId = typeof payload?.agentId === 'string' && payload.agentId.trim()
+          ? payload.agentId.trim()
+          : null;
+        const profileId = typeof payload?.profileId === 'string' && payload.profileId.trim()
+          ? payload.profileId.trim()
+          : null;
+        if (!agentId) {
+          res.writeHead(400);
+          return res.end('agentId is required');
+        }
+        if (profileId && !getComplianceProfile(profileId)) {
+          res.writeHead(400);
+          return res.end('Unknown profile');
+        }
+
+        complianceConfig.assignments = complianceConfig.assignments ?? {};
+        if (profileId) {
+          complianceConfig.assignments[agentId] = profileId;
+        } else {
+          delete complianceConfig.assignments[agentId];
+        }
+        persistComplianceConfig();
+        broadcastComplianceDefinitions({ targetAgentId: agentId, runNow: true });
+
+        res.writeHead(204);
+        return res.end();
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const complianceRunMatch = pathname === '/compliance/run' && req.method === 'POST';
+  if (complianceRunMatch) {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const agentId = typeof payload?.agentId === 'string' && payload.agentId.trim()
+          ? payload.agentId.trim()
+          : null;
+        requestComplianceRun(agentId);
+        res.writeHead(202);
+        res.end('Compliance run triggered');
       } catch (error) {
         res.writeHead(400);
         res.end('Invalid request');
@@ -2924,6 +3065,7 @@ wss.on('connection', (socket, request) => {
         clients.set(socket, info);
         clientsById.set(info.id, { socket, info });
         notifyMonitoringState({ socket, info });
+        sendComplianceDefinitions(socket, info.id, true);
       } else if (parsed?.type === 'shell-output') {
         emitShellOutput(info.id, parsed);
       } else if (parsed?.type === 'screen-offer') {
@@ -3144,6 +3286,8 @@ wss.on('connection', (socket, request) => {
           scriptName: parsed.scriptName ?? '',
           timestamp: new Date().toISOString(),
         });
+      } else if (parsed?.type === 'compliance-report') {
+        handleComplianceReport(info.id, parsed);
       }
     } catch (error) {
       // ignore invalid JSON and continue echoing
@@ -3205,6 +3349,7 @@ if (require.main === module) {
     console.log(`WebSocket endpoint available at wss://localhost:${PORT}`);
     console.log('Agent dashboard available via the root path');
     startVulnerabilityIngestion();
+    broadcastComplianceDefinitions({ runNow: true });
   });
 }
 
@@ -4875,6 +5020,246 @@ function updateNavigationVisibility(entries) {
   }
 
   return mutated;
+}
+
+function loadComplianceConfig() {
+  ensureDataDirectory();
+  let stored = null;
+  try {
+    if (fs.existsSync(COMPLIANCE_CONFIG_PATH)) {
+      let raw = fs.readFileSync(COMPLIANCE_CONFIG_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      stored = JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load compliance config', error);
+  }
+
+  const normalize = (payload) => {
+    const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+    const assignments = payload?.assignments && typeof payload.assignments === 'object' && !Array.isArray(payload.assignments)
+      ? payload.assignments
+      : {};
+    const defaultProfileId = typeof payload?.defaultProfileId === 'string' && payload.defaultProfileId.trim()
+      ? payload.defaultProfileId.trim()
+      : (profiles[0]?.id ?? null);
+    return {
+      defaultProfileId,
+      assignments,
+      profiles,
+    };
+  };
+
+  const config = normalize(stored ?? DEFAULT_COMPLIANCE_CONFIG);
+  if (!stored) {
+    try {
+      fs.writeFileSync(COMPLIANCE_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+    } catch (error) {
+      console.error('Failed to persist default compliance config', error);
+    }
+  }
+
+  return config;
+}
+
+function persistComplianceConfig() {
+  try {
+    ensureDataDirectory();
+    fs.writeFileSync(COMPLIANCE_CONFIG_PATH, JSON.stringify(complianceConfig, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to persist compliance config', error);
+    return false;
+  }
+}
+
+function refreshComplianceCache() {
+  complianceProfilesById = new Map();
+  const profiles = Array.isArray(complianceConfig.profiles) ? complianceConfig.profiles : [];
+  for (const profile of profiles) {
+    if (!profile?.id) {
+      continue;
+    }
+    complianceProfilesById.set(profile.id, {
+      ...profile,
+      rules: Array.isArray(profile.rules) ? profile.rules : [],
+    });
+  }
+}
+
+function getComplianceProfile(profileId) {
+  if (!profileId) {
+    return null;
+  }
+  return complianceProfilesById.get(profileId) ?? null;
+}
+
+function getAssignedComplianceProfileId(agentId) {
+  const assignment = (complianceConfig.assignments ?? {})[agentId];
+  if (assignment && typeof assignment === 'string') {
+    return assignment;
+  }
+  return complianceConfig.defaultProfileId ?? (complianceConfig.profiles?.[0]?.id ?? null);
+}
+
+function getRuleWeight(profile, ruleId) {
+  if (!profile || !Array.isArray(profile.rules)) {
+    return 1;
+  }
+  const rule = profile.rules.find((entry) => entry?.id === ruleId);
+  if (!rule) {
+    return 1;
+  }
+  const weight = Number(rule.weight ?? 1);
+  if (!Number.isFinite(weight) || weight <= 0) {
+    return 1;
+  }
+  return weight;
+}
+
+function handleComplianceReport(agentId, payload) {
+  if (!agentId) {
+    return;
+  }
+
+  const profileId = typeof payload?.profileId === 'string' && payload.profileId.trim()
+    ? payload.profileId.trim()
+    : getAssignedComplianceProfileId(agentId);
+  const profile = getComplianceProfile(profileId);
+  const data = Array.isArray(payload?.results) ? payload.results : [];
+  let passWeight = 0;
+  let failWeight = 0;
+  let notApplicableWeight = 0;
+  const normalized = [];
+
+  for (const entry of data) {
+    const ruleId = typeof entry?.ruleId === 'string' && entry.ruleId.trim()
+      ? entry.ruleId.trim()
+      : null;
+    if (!ruleId) {
+      continue;
+    }
+
+    let status = typeof entry?.status === 'string' ? entry.status.trim().toLowerCase() : '';
+    if (status !== 'pass' && status !== 'fail' && status !== 'not_applicable') {
+      status = 'fail';
+    }
+
+    const weight = getRuleWeight(profile, ruleId);
+    normalized.push({
+      ruleId,
+      status,
+      weight,
+      details: typeof entry?.details === 'string' ? entry.details : '',
+    });
+
+    if (status === 'pass') {
+      passWeight += weight;
+    } else if (status === 'fail') {
+      failWeight += weight;
+    } else {
+      notApplicableWeight += weight;
+    }
+  }
+
+  const applicableWeight = passWeight + failWeight;
+  const score = applicableWeight > 0
+    ? Math.round((passWeight / applicableWeight) * 1000) / 10
+    : null;
+  const updatedAt = typeof payload?.evaluatedAt === 'string' && payload.evaluatedAt
+    ? payload.evaluatedAt
+    : new Date().toISOString();
+
+  const summary = {
+    profileId,
+    profileLabel: profile?.label ?? profileId ?? 'Unknown profile',
+    passWeight,
+    failWeight,
+    notApplicableWeight,
+    totalWeight: passWeight + failWeight + notApplicableWeight,
+    score,
+    results: normalized,
+    updatedAt,
+  };
+
+  complianceStatusByAgent.set(agentId, summary);
+  const entry = clientsById.get(agentId);
+  if (entry) {
+    entry.info.compliance = {
+      profileId,
+      score,
+      updatedAt,
+    };
+  }
+  console.log(`Compliance report received from ${agentId} (score ${score ?? 'n/a'})`);
+}
+
+function broadcastComplianceDefinitions({ runNow = false, targetAgentId } = {}) {
+  if (targetAgentId) {
+    const entry = clientsById.get(targetAgentId);
+    if (entry) {
+      sendComplianceDefinitions(entry.socket, targetAgentId, runNow);
+    }
+    return;
+  }
+
+  for (const [agentId, { socket }] of clientsById) {
+    sendComplianceDefinitions(socket, agentId, runNow);
+  }
+}
+
+function sendComplianceDefinitions(socket, agentId, runNow = false) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  const payload = {
+    type: 'compliance-definitions',
+    profiles: Array.isArray(complianceConfig.profiles) ? complianceConfig.profiles : [],
+    defaultProfileId: complianceConfig.defaultProfileId ?? null,
+    assignments: complianceConfig.assignments ?? {},
+    assignedProfileId: getAssignedComplianceProfileId(agentId),
+    runNow,
+  };
+
+  try {
+    socket.send(JSON.stringify(payload));
+  } catch (error) {
+    console.error('Unable to deliver compliance definitions', error);
+  }
+}
+
+function requestComplianceRun(agentId = null) {
+  if (agentId) {
+    const entry = clientsById.get(agentId);
+    if (entry) {
+      sendComplianceRunRequest(entry.socket, agentId);
+    }
+    return;
+  }
+
+  for (const [id, entry] of clientsById) {
+    sendComplianceRunRequest(entry.socket, id);
+  }
+}
+
+function sendComplianceRunRequest(socket, agentId) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  const payload = {
+    type: 'run-compliance',
+    profileId: getAssignedComplianceProfileId(agentId),
+  };
+
+  try {
+    socket.send(JSON.stringify(payload));
+  } catch (error) {
+    console.error('Unable to request compliance run', error);
+  }
 }
 
 function loadMonitoringConfig() {

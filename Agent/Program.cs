@@ -10,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Reflection;
 using System.Security.Principal;
 using System.Diagnostics.Eventing.Reader;
@@ -58,6 +59,9 @@ internal static class Program
     private static readonly TimeSpan ScreenOfferTimeout = TimeSpan.FromSeconds(10);
     private const int MaxFileEntries = 512;
     private static readonly Dictionary<string, PendingUpload> uploadSessions = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Regex AuditWhitespaceSplitter = new(@"\s{2,}", RegexOptions.Compiled);
+    private static ComplianceDefinitions? complianceDefinitions;
+    private static string? assignedComplianceProfileId;
     private static Action? screenDataChannelStateHandler;
     private static PerformanceCounter? totalCpuCounter;
     private static CancellationTokenSource? monitoringCts;
@@ -3104,6 +3108,16 @@ internal static class Program
 
                 break;
             }
+            case "compliance-definitions":
+            {
+                await HandleComplianceDefinitionsAsync(document.RootElement, socket, cancellationToken);
+                break;
+            }
+            case "run-compliance":
+            {
+                await HandleRunComplianceAsync(document.RootElement, socket, cancellationToken);
+                break;
+            }
             }
         }
         catch (JsonException)
@@ -3167,6 +3181,553 @@ internal static class Program
         var timestamp = GetChatTimestamp(root);
         TrayIconManager.PostChatMessage(serverUser, serverRole, text, true, timestamp);
     }
+
+    private static async Task HandleComplianceDefinitionsAsync(JsonElement root, ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var definitions = BuildComplianceDefinitions(root);
+        complianceDefinitions = definitions;
+        var assignedElement = root.TryGetProperty("assignedProfileId", out var assignedProp) && assignedProp.ValueKind == JsonValueKind.String
+            ? assignedProp.GetString()?.Trim()
+            : null;
+        assignedComplianceProfileId = !string.IsNullOrWhiteSpace(assignedElement)
+            ? assignedElement
+            : assignedComplianceProfileId ?? definitions.DefaultProfileId;
+
+        if (string.IsNullOrWhiteSpace(assignedComplianceProfileId))
+        {
+            assignedComplianceProfileId = definitions.DefaultProfileId;
+        }
+
+        if (root.TryGetProperty("runNow", out var runNowElement) &&
+            runNowElement.ValueKind == JsonValueKind.True &&
+            !string.IsNullOrWhiteSpace(assignedComplianceProfileId))
+        {
+            await EvaluateComplianceAsync(socket, assignedComplianceProfileId!, cancellationToken);
+        }
+    }
+
+    private static async Task HandleRunComplianceAsync(JsonElement root, ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var profileId = root.TryGetProperty("profileId", out var profileProp) && profileProp.ValueKind == JsonValueKind.String
+            ? profileProp.GetString()?.Trim()
+            : null;
+        if (string.IsNullOrWhiteSpace(profileId))
+        {
+            profileId = assignedComplianceProfileId ?? complianceDefinitions?.DefaultProfileId;
+        }
+        if (string.IsNullOrWhiteSpace(profileId))
+        {
+            return;
+        }
+
+        await EvaluateComplianceAsync(socket, profileId, cancellationToken);
+    }
+
+    private static async Task EvaluateComplianceAsync(ClientWebSocket socket, string profileId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var definitions = complianceDefinitions;
+        if (definitions is null)
+        {
+            return;
+        }
+
+        var profile = definitions.Profiles.FirstOrDefault(entry => string.Equals(entry.Id, profileId, StringComparison.OrdinalIgnoreCase));
+        if (profile is null)
+        {
+            return;
+        }
+
+        var results = await BuildComplianceResultsAsync(profile, cancellationToken);
+        await SendComplianceReportAsync(socket, profile.Id, results, cancellationToken);
+    }
+
+    private static async Task<List<ComplianceRuleResult>> BuildComplianceResultsAsync(ComplianceProfileDefinition profile, CancellationToken cancellationToken)
+    {
+        var localPolicy = await ExportLocalSecurityPolicyAsync(cancellationToken);
+        var auditSnapshot = await GetAuditPolicySnapshotAsync(cancellationToken);
+        var results = new List<ComplianceRuleResult>();
+        foreach (var rule in profile.Rules)
+        {
+            var type = rule.Type?.Trim().ToLowerInvariant();
+            results.Add(type switch
+            {
+                "registry" => EvaluateRegistryRule(rule),
+                "local-security-policy" => EvaluateLocalSecurityPolicyRule(rule, localPolicy),
+                "service" => EvaluateServiceRule(rule),
+                "audit" => EvaluateAuditRule(rule, auditSnapshot),
+                _ => new ComplianceRuleResult(rule.Id, "not_applicable", $"Unsupported check type {rule.Type}")
+            });
+        }
+
+        return results;
+    }
+
+    private static ComplianceDefinitions BuildComplianceDefinitions(JsonElement root)
+    {
+        var defaultProfileId = root.TryGetProperty("defaultProfileId", out var defaultProp) && defaultProp.ValueKind == JsonValueKind.String
+            ? defaultProp.GetString()?.Trim()
+            : null;
+
+        var assignments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (root.TryGetProperty("assignments", out var assignmentsElement) && assignmentsElement.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in assignmentsElement.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.String)
+                {
+                    var value = property.Value.GetString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        assignments[property.Name] = value;
+                    }
+                }
+            }
+        }
+
+        var profiles = new List<ComplianceProfileDefinition>();
+        if (root.TryGetProperty("profiles", out var profilesElement) && profilesElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var profileElement in profilesElement.EnumerateArray())
+            {
+                var profileId = profileElement.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.String
+                    ? idElement.GetString()?.Trim()
+                    : null;
+                if (string.IsNullOrWhiteSpace(profileId))
+                {
+                    continue;
+                }
+
+                var label = profileElement.TryGetProperty("label", out var labelElement) && labelElement.ValueKind == JsonValueKind.String
+                    ? (labelElement.GetString()?.Trim() ?? profileId)
+                    : profileId;
+                var description = profileElement.TryGetProperty("description", out var descriptionElement) && descriptionElement.ValueKind == JsonValueKind.String
+                    ? descriptionElement.GetString()
+                    : string.Empty;
+                var weight = profileElement.TryGetProperty("weight", out var weightElement) && weightElement.ValueKind == JsonValueKind.Number
+                    ? weightElement.GetDouble()
+                    : 1.0;
+
+                var rules = new List<ComplianceRuleDefinition>();
+                if (profileElement.TryGetProperty("rules", out var rulesElement) && rulesElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var ruleElement in rulesElement.EnumerateArray())
+                    {
+                        var ruleId = ruleElement.TryGetProperty("id", out var ruleIdElement) && ruleIdElement.ValueKind == JsonValueKind.String
+                            ? ruleIdElement.GetString()?.Trim()
+                            : null;
+                        if (string.IsNullOrWhiteSpace(ruleId))
+                        {
+                            continue;
+                        }
+
+                        var ruleDescription = ruleElement.TryGetProperty("description", out var ruleDescElement) && ruleDescElement.ValueKind == JsonValueKind.String
+                            ? ruleDescElement.GetString()
+                            : string.Empty;
+                        var ruleType = ruleElement.TryGetProperty("type", out var ruleTypeElement) && ruleTypeElement.ValueKind == JsonValueKind.String
+                            ? ruleTypeElement.GetString()?.Trim()
+                            : string.Empty;
+                        var ruleWeight = ruleElement.TryGetProperty("weight", out var ruleWeightElement) && ruleWeightElement.ValueKind == JsonValueKind.Number
+                            ? ruleWeightElement.GetDouble()
+                            : 1.0;
+                        if (double.IsNaN(ruleWeight) || ruleWeight <= 0)
+                        {
+                            ruleWeight = 1;
+                        }
+
+                        var operation = ruleElement.TryGetProperty("operation", out var operationElement) && operationElement.ValueKind == JsonValueKind.String
+                            ? operationElement.GetString()?.Trim().ToLowerInvariant()
+                            : "equals";
+                        if (string.IsNullOrWhiteSpace(operation))
+                        {
+                            operation = "equals";
+                        }
+
+                        var subjectDictionary = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+                        if (ruleElement.TryGetProperty("subject", out var subjectElement) && subjectElement.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var property in subjectElement.EnumerateObject())
+                            {
+                                subjectDictionary[property.Name] = property.Value.ValueKind switch
+                                {
+                                    JsonValueKind.String => property.Value.GetString()?.Trim(),
+                                    JsonValueKind.Number => property.Value.GetRawText(),
+                                    JsonValueKind.True => "true",
+                                    JsonValueKind.False => "false",
+                                    _ => property.Value.ToString()?.Trim()
+                                };
+                            }
+                        }
+
+                        rules.Add(new ComplianceRuleDefinition(ruleId, ruleDescription ?? string.Empty, ruleType ?? string.Empty, ruleWeight, operation, subjectDictionary));
+                    }
+                }
+
+                profiles.Add(new ComplianceProfileDefinition(profileId, label ?? profileId, description ?? string.Empty, weight, rules));
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(defaultProfileId) && profiles.Count > 0)
+        {
+            defaultProfileId = profiles[0].Id;
+        }
+
+        return new ComplianceDefinitions(profiles, assignments, defaultProfileId);
+    }
+
+    private static async Task<Dictionary<string, string>> ExportLocalSecurityPolicyAsync(CancellationToken cancellationToken)
+    {
+        return await Task.Run(() =>
+        {
+            var snapshot = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var tempFile = Path.Combine(Path.GetTempPath(), $"rmm-compliance-{Guid.NewGuid():N}.inf");
+            try
+            {
+                var psi = new ProcessStartInfo("secedit.exe")
+                {
+                    Arguments = $"/export /cfg \"{tempFile}\" /areas SECURITYPOLICY",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = false,
+                    RedirectStandardError = false
+                };
+
+                using var process = Process.Start(psi);
+                if (process == null)
+                {
+                    return snapshot;
+                }
+
+                using var registration = cancellationToken.Register(() =>
+                {
+                    try
+                    {
+                        if (!process.HasExited)
+                        {
+                            process.Kill(entireProcessTree: true);
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                });
+
+                process.WaitForExit(15_000);
+                if (process.ExitCode != 0 || !File.Exists(tempFile))
+                {
+                    return snapshot;
+                }
+
+                foreach (var line in File.ReadAllLines(tempFile))
+                {
+                    if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("#"))
+                    {
+                        continue;
+                    }
+
+                    var parts = line.Split(new[] { '=' }, 2);
+                    if (parts.Length != 2)
+                    {
+                        continue;
+                    }
+
+                    snapshot[parts[0].Trim()] = parts[1].Trim();
+                }
+            }
+            catch
+            {
+                // best effort
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(tempFile))
+                    {
+                        File.Delete(tempFile);
+                    }
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            return snapshot;
+        }, cancellationToken);
+    }
+
+    private static async Task<Dictionary<string, string>> GetAuditPolicySnapshotAsync(CancellationToken cancellationToken)
+    {
+        return await Task.Run(() =>
+        {
+            var snapshot = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var psi = new ProcessStartInfo("auditpol.exe")
+                {
+                    Arguments = "/get /category:* /r",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process == null)
+                {
+                    return snapshot;
+                }
+
+                using var registration = cancellationToken.Register(() =>
+                {
+                    try
+                    {
+                        if (!process.HasExited)
+                        {
+                            process.Kill(entireProcessTree: true);
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                });
+
+                var output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(15_000);
+                if (string.IsNullOrWhiteSpace(output))
+                {
+                    return snapshot;
+                }
+
+                foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var trimmed = line.Trim();
+                    if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("Category/Subcategory", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var parts = AuditWhitespaceSplitter.Split(trimmed);
+                    if (parts.Length < 2)
+                    {
+                        continue;
+                    }
+
+                    var key = parts[0].Trim();
+                    if (string.IsNullOrWhiteSpace(key))
+                    {
+                        continue;
+                    }
+
+                    var value = parts[^1].Trim();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        snapshot[key] = value;
+                    }
+                }
+            }
+            catch
+            {
+                // best effort
+            }
+
+            return snapshot;
+        }, cancellationToken);
+    }
+
+    private static ComplianceRuleResult EvaluateRegistryRule(ComplianceRuleDefinition rule)
+    {
+        var rawPath = GetSubjectValue(rule, "path");
+        var valueName = GetSubjectValue(rule, "valueName");
+        var expectedValue = GetSubjectValue(rule, "value");
+        if (string.IsNullOrWhiteSpace(rawPath) || string.IsNullOrWhiteSpace(valueName))
+        {
+            return new ComplianceRuleResult(rule.Id, "not_applicable", "Registry path or value name missing.");
+        }
+
+        var normalizedPath = NormalizeRegistryPath(rawPath);
+        object? actual;
+        try
+        {
+            actual = Registry.GetValue(normalizedPath, valueName, null);
+        }
+        catch (Exception ex)
+        {
+            return new ComplianceRuleResult(rule.Id, "fail", $"Unable to read registry value ({ex.Message}).");
+        }
+
+        if (actual is null)
+        {
+            return new ComplianceRuleResult(rule.Id, "fail", "Registry value missing.");
+        }
+
+        var actualText = actual.ToString() ?? string.Empty;
+        var success = CompareStringValue(actualText, expectedValue ?? string.Empty, rule.Operation);
+        var status = success ? "pass" : "fail";
+        var details = $"actual={actualText}";
+        if (!string.IsNullOrWhiteSpace(expectedValue))
+        {
+            details += $"; expected {rule.Operation} {expectedValue}";
+        }
+
+        return new ComplianceRuleResult(rule.Id, status, details);
+    }
+
+    private static ComplianceRuleResult EvaluateLocalSecurityPolicyRule(ComplianceRuleDefinition rule, IReadOnlyDictionary<string, string> policy)
+    {
+        var setting = GetSubjectValue(rule, "setting");
+        var expected = GetSubjectValue(rule, "value");
+        if (string.IsNullOrWhiteSpace(setting) || string.IsNullOrWhiteSpace(expected))
+        {
+            return new ComplianceRuleResult(rule.Id, "not_applicable", "Policy setting or expected value missing.");
+        }
+
+        if (!policy.TryGetValue(setting, out var actualRaw))
+        {
+            return new ComplianceRuleResult(rule.Id, "not_applicable", $"Policy {setting} not exported.");
+        }
+
+        var matches = CompareStringValue(actualRaw, expected ?? string.Empty, rule.Operation);
+        var status = matches ? "pass" : "fail";
+        var details = $"actual={actualRaw}; expected {rule.Operation} {expected}";
+        return new ComplianceRuleResult(rule.Id, status, details);
+    }
+
+    private static ComplianceRuleResult EvaluateServiceRule(ComplianceRuleDefinition rule)
+    {
+        var serviceName = GetSubjectValue(rule, "serviceName");
+        if (string.IsNullOrWhiteSpace(serviceName))
+        {
+            return new ComplianceRuleResult(rule.Id, "not_applicable", "Service name missing.");
+        }
+
+        try
+        {
+            using var controller = new ServiceController(serviceName);
+            var actualState = controller.Status.ToString();
+            var stateExpected = GetSubjectValue(rule, "state");
+            var startModeExpected = GetSubjectValue(rule, "startMode");
+            var startModeActual = GetServiceStartMode(serviceName);
+            var stateMatches = string.IsNullOrWhiteSpace(stateExpected) || CompareStringValue(actualState, stateExpected, "equals");
+            var startMatches = string.IsNullOrWhiteSpace(startModeExpected) || CompareStringValue(startModeActual, startModeExpected, "equals");
+            var success = stateMatches && startMatches;
+            var details = $"state={actualState}; startMode={startModeActual}";
+            return new ComplianceRuleResult(rule.Id, success ? "pass" : "fail", details);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new ComplianceRuleResult(rule.Id, "fail", $"Service evaluation failed ({ex.Message}).");
+        }
+    }
+
+    private static ComplianceRuleResult EvaluateAuditRule(ComplianceRuleDefinition rule, IReadOnlyDictionary<string, string> auditSnapshot)
+    {
+        var subCategory = GetSubjectValue(rule, "subCategory");
+        var category = GetSubjectValue(rule, "category");
+        var expected = GetSubjectValue(rule, "setting");
+        if (string.IsNullOrWhiteSpace(expected))
+        {
+            return new ComplianceRuleResult(rule.Id, "not_applicable", "Audit target setting missing.");
+        }
+
+        string? actual = null;
+        if (!string.IsNullOrWhiteSpace(subCategory) && auditSnapshot.TryGetValue(subCategory, out var match))
+        {
+            actual = match;
+        }
+        else if (!string.IsNullOrWhiteSpace(category))
+        {
+            actual = auditSnapshot.FirstOrDefault(entry => entry.Key.StartsWith(category, StringComparison.OrdinalIgnoreCase)).Value;
+        }
+
+        if (string.IsNullOrWhiteSpace(actual))
+        {
+            return new ComplianceRuleResult(rule.Id, "not_applicable", "Audit policy data unavailable.");
+        }
+
+        var matches = CompareStringValue(actual, expected, rule.Operation);
+        var status = matches ? "pass" : "fail";
+        var details = $"actual={actual}; expected {rule.Operation} {expected}";
+        return new ComplianceRuleResult(rule.Id, status, details);
+    }
+
+    private static bool CompareStringValue(string actual, string expected, string operation)
+    {
+        var comparison = StringComparison.OrdinalIgnoreCase;
+        return operation?.ToLowerInvariant() switch
+        {
+            "contains" => actual.IndexOf(expected ?? string.Empty, comparison) >= 0,
+            "startswith" => actual.StartsWith(expected ?? string.Empty, comparison),
+            "endswith" => actual.EndsWith(expected ?? string.Empty, comparison),
+            _ => string.Equals(actual, expected ?? string.Empty, comparison)
+        };
+    }
+
+    private static string? GetSubjectValue(ComplianceRuleDefinition rule, string key)
+    {
+        if (rule.Subject.TryGetValue(key, out var value))
+        {
+            return value;
+        }
+
+        return null;
+    }
+
+    private static string NormalizeRegistryPath(string path)
+    {
+        var trimmed = path.Trim();
+        if (trimmed.StartsWith("HKLM:\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return "HKEY_LOCAL_MACHINE\\" + trimmed[6..];
+        }
+        if (trimmed.StartsWith("HKCU:\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return "HKEY_CURRENT_USER\\" + trimmed[6..];
+        }
+        if (trimmed.StartsWith("HKCR:\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return "HKEY_CLASSES_ROOT\\" + trimmed[6..];
+        }
+        if (trimmed.StartsWith("HKU:\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return "HKEY_USERS\\" + trimmed.Substring(4);
+        }
+        if (trimmed.StartsWith("HKCC:\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return "HKEY_CURRENT_CONFIG\\" + trimmed[6..];
+        }
+
+        return trimmed;
+    }
+
+    private static async Task SendComplianceReportAsync(ClientWebSocket socket, string profileId, IReadOnlyCollection<ComplianceRuleResult> results, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var payload = new
+        {
+            type = "compliance-report",
+            profileId,
+            evaluatedAt = DateTime.UtcNow.ToString("o"),
+            results = results.Select(result => new
+            {
+                ruleId = result.RuleId,
+                status = result.Status,
+                details = result.Details
+            }).ToArray()
+        };
+
+        await SendJsonAsync(socket, payload, cancellationToken);
+    }
+
+    private sealed record ComplianceRuleDefinition(string Id, string Description, string Type, double Weight, string Operation, IReadOnlyDictionary<string, string?> Subject);
+    private sealed record ComplianceProfileDefinition(string Id, string Label, string Description, double Weight, IReadOnlyList<ComplianceRuleDefinition> Rules);
+    private sealed record ComplianceDefinitions(IReadOnlyList<ComplianceProfileDefinition> Profiles, IReadOnlyDictionary<string, string> Assignments, string? DefaultProfileId);
+    private sealed record ComplianceRuleResult(string RuleId, string Status, string Details);
 
     private static string GetChatTimestamp(JsonElement root)
     {

@@ -17,6 +17,168 @@
         background: #05070f;
         color: #f8fafc;
       }
+      .page-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      .page-header h1 {
+        margin: 0;
+        font-size: 1.8rem;
+      }
+      .ghost-button {
+        border: 1px solid #2563eb;
+        background: transparent;
+        color: #cdd9e5;
+        border-radius: 0.45rem;
+        padding: 0.5rem 0.9rem;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: background 0.2s ease, color 0.2s ease;
+      }
+      .ghost-button:hover {
+        background: rgba(37, 99, 235, 0.12);
+        color: #eff6ff;
+      }
+      .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+      .sources-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+      .source-row {
+        border: 1px solid #1e293b;
+        border-radius: 0.6rem;
+        padding: 0.8rem;
+        background: #050a16;
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+      .source-copy {
+        flex: 1 1 320px;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .source-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .source-title strong {
+        font-size: 1rem;
+      }
+      .source-id {
+        color: var(--text-muted);
+        font-size: 0.85rem;
+      }
+      .source-detail {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        font-size: 0.85rem;
+        color: #cbd5f5;
+      }
+      .source-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        align-items: flex-end;
+        min-width: 140px;
+      }
+      .source-pill {
+        padding: 0.15rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .source-pill.enabled {
+        background: #0f5132;
+        color: #bbf7d0;
+      }
+      .source-pill.disabled {
+        background: #4c1d1d;
+        color: #fecaca;
+      }
+      .modal-form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.75rem;
+      }
+      .form-field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        font-size: 0.9rem;
+      }
+      .form-field input,
+      .form-field textarea {
+        border-radius: 0.45rem;
+        border: 1px solid #1e293b;
+        background: #05070f;
+        color: #e2e8f0;
+        padding: 0.5rem;
+        font-size: 0.9rem;
+      }
+      .form-field textarea {
+        min-height: 70px;
+        resize: vertical;
+      }
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+      }
+      .raw-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        margin-bottom: 0.6rem;
+      }
+      .raw-tab {
+        border-radius: 999px;
+        border: 1px solid transparent;
+        padding: 0.35rem 0.75rem;
+        font-size: 0.85rem;
+        cursor: pointer;
+        background: #0f172a;
+        color: #cdd9e5;
+      }
+      .raw-tab.active {
+        background: #2563eb;
+        color: #fff;
+        border-color: #2ea0ff;
+      }
+      .raw-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        margin-top: 0.6rem;
+      }
+      .raw-pagination button {
+        border-radius: 0.45rem;
+        border: 1px solid #1e293b;
+        background: #070a17;
+        color: #cdd9e5;
+        padding: 0.35rem 0.65rem;
+        cursor: pointer;
+      }
+      .raw-pagination button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
       .page {
         max-width: 1100px;
         margin: 0 auto;
@@ -72,6 +234,67 @@
       }
       .summary-card strong {
         font-size: 1.3rem;
+      }
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(5, 7, 15, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1200;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .modal {
+        width: min(90vw, 960px);
+        max-height: 90vh;
+        background: #0d1117;
+        border-radius: 0.9rem;
+        border: 1px solid #1e293b;
+        box-shadow: 0 12px 38px rgba(2, 6, 23, 0.55);
+        padding: 1.1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .modal-header h3 {
+        margin: 0;
+      }
+      .modal-close {
+        border: none;
+        background: transparent;
+        color: #cdd9e5;
+        font-size: 1.3rem;
+        cursor: pointer;
+      }
+      .raw-table-wrapper {
+        overflow: auto;
+        border: 1px solid #1e293b;
+        border-radius: 0.6rem;
+        flex: 1;
+      }
+      .raw-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+      }
+      .raw-table th,
+      .raw-table td {
+        padding: 0.45rem 0.6rem;
+        border-bottom: 1px solid #1a2430;
+      }
+      .raw-table th {
+        text-align: left;
+        font-weight: 600;
+        color: #94a3b8;
       }
       .vuln-list {
         display: flex;
@@ -146,10 +369,29 @@
           <select id="agentSelector"><option>Loading agents…</option></select>
         </div>
       </section>
+      <div class="page-header">
+        <div>
+          <h1>Vulnerability Intelligence</h1>
+          <p class="status">Correlate CVEs with your connected agents and see why each match was flagged.</p>
+        </div>
+        <button id="rawCveButton" class="ghost-button" type="button">View raw CVE feed</button>
+      </div>
       <section class="panel">
         <h2>Risk summary</h2>
         <div class="summary-grid" id="summaryGrid">
           <div class="summary-card"><span class="placeholder">Select an agent</span></div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>CVE sources</h2>
+            <p class="status">Track and control the feeds that populate the vulnerability catalog.</p>
+          </div>
+          <button id="addSourceButton" class="ghost-button" type="button">Add source</button>
+        </div>
+        <div id="sourcesList" class="sources-list">
+          <div class="placeholder">Loading CVE sources…</div>
         </div>
       </section>
       <section class="panel">
@@ -159,10 +401,113 @@
         </div>
       </section>
     </div>
+    <div id="rawModalBackdrop" class="modal-backdrop hidden" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rawModalTitle">
+        <div class="modal-header">
+          <h3 id="rawModalTitle">Raw CVE feed</h3>
+          <button id="rawModalClose" class="modal-close" type="button" aria-label="Close raw feed">&times;</button>
+        </div>
+        <p id="rawModalStatus" class="status">Loading...</p>
+        <div id="rawModalTabs" class="raw-tabs"></div>
+        <div class="raw-table-wrapper">
+          <table class="raw-table">
+            <thead>
+              <tr>
+                <th>CVE</th>
+                <th>CVSS</th>
+                <th>Last updated</th>
+                <th>Sources</th>
+                <th>Target</th>
+                <th>Description</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="rawModalBody"></tbody>
+          </table>
+        </div>
+        <div id="rawModalPagination" class="raw-pagination">
+          <button id="rawModalPrev" type="button">Previous</button>
+          <span id="rawModalPaginationInfo">0 entries</span>
+          <button id="rawModalNext" type="button">Next</button>
+        </div>
+      </div>
+    </div>
+    <div id="sourceModalBackdrop" class="modal-backdrop hidden" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sourceModalTitle">
+        <div class="modal-header">
+          <h3 id="sourceModalTitle">Add a CVE source</h3>
+          <button id="sourceModalClose" class="modal-close" type="button" aria-label="Close source modal">&times;</button>
+        </div>
+        <p id="sourceModalStatus" class="status"></p>
+        <div class="modal-form">
+          <div class="form-field">
+            <label for="sourceIdInput">Source ID</label>
+            <input id="sourceIdInput" type="text" placeholder="nvd" required />
+          </div>
+          <div class="form-field">
+            <label for="sourceLabelInput">Display label</label>
+            <input id="sourceLabelInput" type="text" placeholder="My CVE feed" />
+          </div>
+          <div class="form-field">
+            <label for="sourceTypeInput">Type</label>
+            <input id="sourceTypeInput" type="text" placeholder="custom" />
+          </div>
+          <div class="form-field">
+            <label for="sourceUrlInput">Feed URL</label>
+            <input id="sourceUrlInput" type="url" placeholder="https://example.com/feed.json" />
+          </div>
+          <div class="form-field">
+            <label for="sourceMinutesInput">Ingestion interval (minutes)</label>
+            <input id="sourceMinutesInput" type="number" min="1" step="1" value="60" />
+          </div>
+          <div class="form-field" style="grid-column: 1 / -1;">
+            <label for="sourceDescriptionInput">Description</label>
+            <textarea id="sourceDescriptionInput" placeholder="Optional notes about this feed"></textarea>
+          </div>
+        </div>
+        <label class="form-field" style="flex-direction: row; gap: 0.75rem; align-items: center;">
+          <input id="sourceEnabledInput" type="checkbox" checked />
+          <span>Enabled</span>
+        </label>
+        <div class="modal-actions">
+          <button id="sourceModalSave" type="button" class="ghost-button">Add source</button>
+          <button id="sourceModalCancel" type="button" class="ghost-button">Cancel</button>
+        </div>
+      </div>
+    </div>
     <script>
       const agentSelector = document.getElementById('agentSelector');
       const summaryGrid = document.getElementById('summaryGrid');
       const vulnList = document.getElementById('vulnList');
+      const rawCveButton = document.getElementById('rawCveButton');
+      const rawModalBackdrop = document.getElementById('rawModalBackdrop');
+      const rawModalClose = document.getElementById('rawModalClose');
+      const rawModalBody = document.getElementById('rawModalBody');
+      const rawModalStatus = document.getElementById('rawModalStatus');
+      const rawModalTabs = document.getElementById('rawModalTabs');
+      const rawModalPrev = document.getElementById('rawModalPrev');
+      const rawModalNext = document.getElementById('rawModalNext');
+      const rawModalPaginationInfo = document.getElementById('rawModalPaginationInfo');
+
+      let rawModalSourcesData = [];
+      let rawModalActiveSource = 'all';
+      let rawModalPageIndex = 0;
+      let rawModalTotalEntries = 0;
+      const RAW_MODAL_PAGE_SIZE = 150;
+      const sourcesList = document.getElementById('sourcesList');
+      const addSourceButton = document.getElementById('addSourceButton');
+      const sourceModalBackdrop = document.getElementById('sourceModalBackdrop');
+      const sourceModalClose = document.getElementById('sourceModalClose');
+      const sourceModalCancel = document.getElementById('sourceModalCancel');
+      const sourceModalSave = document.getElementById('sourceModalSave');
+      const sourceIdInput = document.getElementById('sourceIdInput');
+      const sourceLabelInput = document.getElementById('sourceLabelInput');
+      const sourceTypeInput = document.getElementById('sourceTypeInput');
+      const sourceUrlInput = document.getElementById('sourceUrlInput');
+      const sourceMinutesInput = document.getElementById('sourceMinutesInput');
+      const sourceDescriptionInput = document.getElementById('sourceDescriptionInput');
+      const sourceEnabledInput = document.getElementById('sourceEnabledInput');
+      const sourceModalStatus = document.getElementById('sourceModalStatus');
 
       async function loadAgents() {
         const response = await fetch('/clients');
@@ -182,6 +527,35 @@
           loadAgentVulnerabilities(agents[0].id);
         }
       }
+
+      rawCveButton?.addEventListener('click', () => {
+        openRawModal();
+      });
+      rawModalClose?.addEventListener('click', () => {
+        closeRawModal();
+      });
+      rawModalBackdrop?.addEventListener('click', (event) => {
+        if (event.target === rawModalBackdrop) {
+          closeRawModal();
+        }
+      });
+      addSourceButton?.addEventListener('click', () => {
+        openSourceModal();
+      });
+      sourceModalClose?.addEventListener('click', () => {
+        closeSourceModal();
+      });
+      sourceModalCancel?.addEventListener('click', () => {
+        closeSourceModal();
+      });
+      sourceModalBackdrop?.addEventListener('click', (event) => {
+        if (event.target === sourceModalBackdrop) {
+          closeSourceModal();
+        }
+      });
+      sourceModalSave?.addEventListener('click', () => {
+        submitSourceForm();
+      });
 
       agentSelector?.addEventListener('change', () => {
         const id = agentSelector.value;
@@ -263,6 +637,435 @@
       }
 
       loadAgents();
+      loadSources();
+
+      async function loadSources() {
+        if (!sourcesList) {
+          return;
+        }
+        sourcesList.innerHTML = '<div class="placeholder">Loading CVE sources…</div>';
+        try {
+          const response = await fetch('/vulnerabilities/sources', { cache: 'no-store' });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const payload = await response.json();
+          renderSources(Array.isArray(payload.sources) ? payload.sources : []);
+        } catch (error) {
+          sourcesList.innerHTML = `<div class="placeholder">Unable to load sources (${error.message}).</div>`;
+        }
+      }
+
+      function renderSources(sources) {
+        if (!sourcesList) {
+          return;
+        }
+        sourcesList.innerHTML = '';
+        if (!sources.length) {
+          sourcesList.innerHTML = '<div class="placeholder">No CVE sources configured.</div>';
+          return;
+        }
+        sources.forEach((source) => {
+          const row = document.createElement('div');
+          row.className = 'source-row';
+
+          const copy = document.createElement('div');
+          copy.className = 'source-copy';
+
+          const titleRow = document.createElement('div');
+          titleRow.className = 'source-title';
+          const title = document.createElement('strong');
+          title.textContent = source.label;
+          const meta = document.createElement('span');
+          meta.className = 'source-id';
+          meta.textContent = source.id;
+          titleRow.append(title, meta);
+          copy.appendChild(titleRow);
+
+          const description = document.createElement('p');
+          description.className = 'status';
+          description.textContent = source.description || 'No description provided.';
+          copy.appendChild(description);
+
+          const detailRow = document.createElement('div');
+          detailRow.className = 'source-detail';
+          detailRow.append(createDetailSpan(`Type: ${source.type || 'custom'}`));
+          detailRow.append(createDetailSpan(`Frequency: ${source.ingestionMinutes ?? '—'}m`));
+          detailRow.append(createDetailSpan(`Last ingested: ${source.lastIngested ?? 'never'}`));
+          if (source.url) {
+            detailRow.append(createDetailSpan(`URL: ${source.url}`));
+          }
+          const pill = document.createElement('span');
+          pill.className = `source-pill ${source.enabled ? 'enabled' : 'disabled'}`;
+          pill.textContent = source.enabled ? 'Enabled' : 'Disabled';
+          detailRow.appendChild(pill);
+          copy.appendChild(detailRow);
+
+          const actions = document.createElement('div');
+          actions.className = 'source-actions';
+          const toggleButton = document.createElement('button');
+          toggleButton.type = 'button';
+          toggleButton.className = 'ghost-button';
+          toggleButton.textContent = source.enabled ? 'Disable' : 'Enable';
+          toggleButton.addEventListener('click', () => handleToggleSource(source.id, !source.enabled, toggleButton));
+          actions.appendChild(toggleButton);
+          const intervalButton = document.createElement('button');
+          intervalButton.type = 'button';
+          intervalButton.className = 'ghost-button';
+          intervalButton.textContent = 'Change interval';
+          intervalButton.addEventListener('click', () => handleChangeInterval(source.id, source.ingestionMinutes, intervalButton));
+          actions.appendChild(intervalButton);
+
+          if (!source.builtin) {
+            const deleteButton = document.createElement('button');
+            deleteButton.type = 'button';
+            deleteButton.className = 'ghost-button';
+            deleteButton.textContent = 'Remove';
+            deleteButton.addEventListener('click', () => handleDeleteSource(source.id));
+            actions.appendChild(deleteButton);
+          }
+
+          row.append(copy, actions);
+          sourcesList.appendChild(row);
+        });
+      }
+
+      function createDetailSpan(text) {
+        const span = document.createElement('span');
+        span.textContent = text;
+        return span;
+      }
+
+     async function handleToggleSource(sourceId, enabled, button) {
+       if (!button) {
+         return;
+       }
+       button.disabled = true;
+       try {
+         const response = await fetch(`/vulnerabilities/sources/${sourceId}`, {
+           method: 'PATCH',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ enabled }),
+         });
+         if (!response.ok) {
+           throw new Error(`HTTP ${response.status}`);
+         }
+         await loadSources();
+       } catch (error) {
+         console.error('Unable to update source', error);
+       } finally {
+         button.disabled = false;
+       }
+     }
+
+      async function handleChangeInterval(sourceId, currentValue, button) {
+        const defaultValue = currentValue ?? 60;
+        const answer = prompt('Enter ingestion interval in minutes:', String(defaultValue));
+        if (!answer) {
+          return;
+        }
+        const minutes = parseMinutesInput(answer);
+        if (minutes === defaultValue) {
+          return;
+        }
+        if (button) {
+          button.disabled = true;
+        }
+        try {
+          const response = await fetch(`/vulnerabilities/sources/${sourceId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ingestionMinutes: minutes }),
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          await loadSources();
+        } catch (error) {
+          console.error('Unable to update interval', error);
+        } finally {
+          if (button) {
+            button.disabled = false;
+          }
+        }
+      }
+
+      async function handleDeleteSource(sourceId) {
+        if (!confirm('Remove this CVE source?')) {
+          return;
+        }
+        try {
+          const response = await fetch(`/vulnerabilities/sources/${sourceId}`, {
+            method: 'DELETE',
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          await loadSources();
+        } catch (error) {
+          console.error('Unable to remove source', error);
+        }
+      }
+
+      function openSourceModal() {
+        if (!sourceModalBackdrop) {
+          return;
+        }
+        if (sourceModalStatus) {
+          sourceModalStatus.textContent = '';
+        }
+        if (sourceIdInput) sourceIdInput.value = '';
+        if (sourceLabelInput) sourceLabelInput.value = '';
+        if (sourceTypeInput) sourceTypeInput.value = 'custom';
+        if (sourceUrlInput) sourceUrlInput.value = '';
+        if (sourceMinutesInput) sourceMinutesInput.value = '60';
+        if (sourceDescriptionInput) sourceDescriptionInput.value = '';
+        if (sourceEnabledInput) sourceEnabledInput.checked = true;
+        sourceModalBackdrop.classList.remove('hidden');
+        sourceModalBackdrop.setAttribute('aria-hidden', 'false');
+      }
+
+      function closeSourceModal() {
+        if (!sourceModalBackdrop) {
+          return;
+        }
+        sourceModalBackdrop.classList.add('hidden');
+        sourceModalBackdrop.setAttribute('aria-hidden', 'true');
+      }
+
+      async function submitSourceForm() {
+        if (!sourceModalSave) {
+          return;
+        }
+        const idValue = (sourceIdInput?.value ?? '').trim().toLowerCase();
+        if (!idValue) {
+          if (sourceModalStatus) {
+            sourceModalStatus.textContent = 'Source ID is required.';
+          }
+          return;
+        }
+        const labelValue = (sourceLabelInput?.value ?? '').trim() || idValue;
+        if (!labelValue) {
+          if (sourceModalStatus) {
+            sourceModalStatus.textContent = 'Label is required.';
+          }
+          return;
+        }
+        const payload = {
+          id: idValue,
+          label: labelValue,
+          type: (sourceTypeInput?.value ?? 'custom').trim(),
+          url: (sourceUrlInput?.value ?? '').trim(),
+          ingestionMinutes: parseMinutesInput(sourceMinutesInput?.value ?? '60'),
+          description: (sourceDescriptionInput?.value ?? '').trim(),
+          enabled: Boolean(sourceEnabledInput?.checked),
+        };
+        sourceModalSave.disabled = true;
+        if (sourceModalStatus) {
+          sourceModalStatus.textContent = 'Saving source…';
+        }
+        try {
+          const response = await fetch('/vulnerabilities/sources', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || `HTTP ${response.status}`);
+          }
+          closeSourceModal();
+          await loadSources();
+        } catch (error) {
+          console.error('Unable to add source', error);
+          if (sourceModalStatus) {
+            sourceModalStatus.textContent = `Unable to save source: ${error.message}`;
+          }
+        } finally {
+          sourceModalSave.disabled = false;
+        }
+      }
+
+      function parseMinutesInput(value) {
+        const num = Number(value);
+        return Number.isFinite(num) && num > 0 ? Math.floor(num) : 60;
+      }
+
+
+      function openRawModal() {
+        rawModalActiveSource = 'all';
+        rawModalPageIndex = 0;
+        rawModalTotalEntries = 0;
+        rawModalSourcesData = [];
+        rawModalBackdrop?.classList.remove('hidden');
+        if (rawModalBackdrop) {
+          rawModalBackdrop.setAttribute('aria-hidden', 'false');
+        }
+        loadRawEntries({ source: rawModalActiveSource, page: rawModalPageIndex });
+      }
+
+      function closeRawModal() {
+        rawModalBackdrop?.classList.add('hidden');
+        if (rawModalBackdrop) {
+          rawModalBackdrop.setAttribute('aria-hidden', 'true');
+        }
+      }
+
+      rawModalPrev?.addEventListener('click', () => handleRawPagination(-1));
+      rawModalNext?.addEventListener('click', () => handleRawPagination(1));
+
+      async function loadRawEntries({ source = rawModalActiveSource, page = rawModalPageIndex } = {}) {
+        if (!rawModalBody || !rawModalStatus) {
+          return;
+        }
+        rawModalStatus.textContent = `Loading raw CVEs (${source === 'all' ? 'all sources' : source})`;
+        rawModalBody.innerHTML = '<tr><td colspan="7" style="padding: 0.5rem;">Loading CVE data…</td></tr>';
+        if (rawModalPrev) {
+          rawModalPrev.disabled = true;
+        }
+        if (rawModalNext) {
+          rawModalNext.disabled = true;
+        }
+
+        const params = new URLSearchParams();
+        params.set('limit', RAW_MODAL_PAGE_SIZE);
+        params.set('offset', page * RAW_MODAL_PAGE_SIZE);
+        if (source && source !== 'all') {
+          params.set('source', source);
+        }
+
+        try {
+          const response = await fetch(`/vulnerabilities/raw?${params.toString()}`);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const payload = await response.json();
+          rawModalSourcesData = Array.isArray(payload.sources) ? payload.sources : rawModalSourcesData;
+          rawModalActiveSource = payload.requestedSource ?? source ?? 'all';
+          rawModalPageIndex = page;
+          rawModalTotalEntries = Number(payload.total ?? 0);
+
+          renderRawTabs(rawModalSourcesData, payload.sourceTotals ?? {}, rawModalActiveSource, rawModalTotalEntries);
+          renderRawTable(payload.entries ?? []);
+          renderRawPagination(rawModalTotalEntries, rawModalPageIndex, Number(payload.limit ?? RAW_MODAL_PAGE_SIZE));
+
+          const entriesCount = Array.isArray(payload.entries) ? payload.entries.length : 0;
+          const start = rawModalTotalEntries ? rawModalPageIndex * RAW_MODAL_PAGE_SIZE + 1 : 0;
+          const end = rawModalTotalEntries ? rawModalPageIndex * RAW_MODAL_PAGE_SIZE + entriesCount : 0;
+          rawModalStatus.textContent = rawModalTotalEntries
+            ? `${start}-${end} of ${rawModalTotalEntries} CVEs`
+            : 'No entries available.';
+        } catch (error) {
+          rawModalStatus.textContent = 'Failed to load raw CVEs.';
+          rawModalBody.innerHTML = `<tr><td colspan="7">Unable to load data: ${error.message}</td></tr>`;
+          if (rawModalTabs) {
+            rawModalTabs.innerHTML = '';
+          }
+        }
+      }
+
+      function renderRawTable(entries = []) {
+        if (!rawModalBody) {
+          return;
+        }
+        rawModalBody.innerHTML = '';
+        if (!entries.length) {
+          rawModalBody.innerHTML = '<tr><td colspan="7">No entries available.</td></tr>';
+          return;
+        }
+        entries.forEach((entry) => {
+          const row = document.createElement('tr');
+          const cveCell = document.createElement('td');
+          cveCell.textContent = entry.cveId ?? 'Unknown';
+          const cvssCell = document.createElement('td');
+          cvssCell.textContent = typeof entry.cvss === 'number' ? entry.cvss.toFixed(1) : 'n/a';
+          const updatedCell = document.createElement('td');
+          updatedCell.textContent = entry.lastUpdated ?? 'n/a';
+          const sourcesCell = document.createElement('td');
+          const sourceKeys = entry.sources ? Object.keys(entry.sources).filter((key) => entry.sources[key]) : [];
+          sourcesCell.textContent = sourceKeys.length ? sourceKeys.join(', ') : 'none';
+          const targetCell = document.createElement('td');
+          targetCell.textContent = entry.target ?? 'n/a';
+          const descriptionCell = document.createElement('td');
+          descriptionCell.textContent = entry.description || '-';
+          const linkCell = document.createElement('td');
+          if (entry.link) {
+            const anchor = document.createElement('a');
+            anchor.href = entry.link;
+            anchor.textContent = 'View';
+            anchor.target = '_blank';
+            anchor.rel = 'noreferrer noopener';
+            linkCell.appendChild(anchor);
+          } else {
+            linkCell.textContent = '—';
+          }
+          row.append(cveCell, cvssCell, updatedCell, sourcesCell, targetCell, descriptionCell, linkCell);
+          rawModalBody.appendChild(row);
+        });
+      }
+
+      function renderRawTabs(sources, totals, activeSource, total) {
+        if (!rawModalTabs) {
+          return;
+        }
+        rawModalTabs.innerHTML = '';
+        const createTab = (id, label, count) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = `raw-tab${id === activeSource ? ' active' : ''}`;
+          button.dataset.source = id;
+          button.textContent = `${label} (${count ?? 0})`;
+          button.addEventListener('click', () => {
+            if (rawModalActiveSource === id) {
+              return;
+            }
+            rawModalPageIndex = 0;
+            loadRawEntries({ source: id, page: 0 });
+          });
+          return button;
+        };
+        rawModalTabs.appendChild(createTab('all', 'All sources', total));
+        sources.forEach((source) => {
+          if (!source?.id) {
+            return;
+          }
+          const normalizedId = (source.id ?? '').toLowerCase();
+          const count = totals[normalizedId] ?? totals[source.id] ?? 0;
+          rawModalTabs.appendChild(createTab(source.id, source.label ?? source.id, count));
+        });
+      }
+
+      function renderRawPagination(total, page, limit) {
+        const pageSize = limit || RAW_MODAL_PAGE_SIZE;
+        if (rawModalPaginationInfo) {
+          if (!total) {
+            rawModalPaginationInfo.textContent = 'No entries available.';
+          } else {
+            const start = page * pageSize + 1;
+            const end = Math.min(total, (page + 1) * pageSize);
+            rawModalPaginationInfo.textContent = `${start}-${end} of ${total}`;
+          }
+        }
+        const maxPage = Math.max(0, Math.ceil(total / pageSize) - 1);
+        if (rawModalPrev) {
+          rawModalPrev.disabled = page <= 0;
+        }
+        if (rawModalNext) {
+          rawModalNext.disabled = total === 0 || page >= maxPage;
+        }
+      }
+
+      function handleRawPagination(delta) {
+        const nextPage = rawModalPageIndex + delta;
+        if (nextPage < 0) {
+          return;
+        }
+        const maxPage = Math.max(0, Math.ceil(rawModalTotalEntries / RAW_MODAL_PAGE_SIZE) - 1);
+        if (nextPage > maxPage) {
+          return;
+        }
+        loadRawEntries({ page: nextPage });
+      }
     </script>
   </body>
 </html>

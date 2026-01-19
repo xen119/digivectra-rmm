@@ -38,6 +38,7 @@ const FIREWALL_BASELINE_PATH = path.join(DATA_DIR, 'firewall-baseline.json');
 const NAVIGATION_CONFIG_PATH = path.join(DATA_DIR, 'navigation.json');
 const GROUPS_CONFIG_PATH = path.join(DATA_DIR, 'groups.json');
 const AGENT_GROUP_ASSIGNMENTS_PATH = path.join(DATA_DIR, 'agent-groups.json');
+const LICENSES_PATH = path.join(DATA_DIR, 'licenses.json');
 const VULNERABILITY_CONFIG_PATH = path.join(__dirname, 'config', 'vulnerability.json');
 const VULNERABILITY_STORE_PATH = path.join(DATA_DIR, 'vulnerabilities.json');
 const vulnerabilityIngestionJobs = new Map(); // sourceId -> { timer }
@@ -78,6 +79,8 @@ const shellStreams = new Map(); // id -> response
 const screenSessions = new Map(); // sessionId -> session data
 const groups = loadGroups();
 const agentGroupAssignments = loadAgentGroupAssignments(groups);
+const licenseRecords = loadLicenses();
+const licenseIndex = new Map(licenseRecords.map((entry) => [entry.code, entry]));
 const screenLists = new Map(); // agentId -> { screens, updatedAt }
 const screenListRequests = new Map(); // agentId -> { resolvers: [], timer }
 const FILE_REQUEST_TIMEOUT_MS = 120_000;
@@ -186,6 +189,12 @@ const NAVIGATION_ITEMS = [
     label: 'GPO Management',
     href: 'gpo.html',
     description: 'Manage and deploy GPO templates to agents.',
+  },
+  {
+    id: 'licenses',
+    label: 'Licenses',
+    href: 'licenses.html',
+    description: 'Manage and revoke agent license keys.',
   },
 ];
 const DEFAULT_COMPLIANCE_CONFIG = {
@@ -422,6 +431,130 @@ server.on('request', async (req, res) => {
         }));
       } catch (error) {
         console.error('Unable to create user', error);
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const licenseListMatch = pathname === '/licenses' && req.method === 'GET';
+  if (licenseListMatch) {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      licenses: licenseRecords.map((entry) => ({
+        code: entry.code,
+        assignedAgentId: entry.assignedAgentId ?? null,
+        assignedAgentName: entry.assignedAgentId ? agents.get(entry.assignedAgentId)?.name ?? null : null,
+        agentStatus: entry.assignedAgentId ? agents.get(entry.assignedAgentId)?.status ?? null : null,
+        createdAt: entry.createdAt,
+        assignedAt: entry.assignedAt,
+        revokedAt: entry.revokedAt,
+        lastUsedAt: entry.lastUsedAt,
+        active: !entry.revokedAt,
+      })),
+    }));
+    return;
+  }
+
+  const licenseCreateMatch = pathname === '/licenses' && req.method === 'POST';
+  if (licenseCreateMatch) {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    const record = {
+      code: generateLicenseCode(),
+      createdAt: new Date().toISOString(),
+      revokedAt: null,
+      lastUsedAt: null,
+    };
+    licenseRecords.push(record);
+    licenseIndex.set(record.code, record);
+    persistLicenses();
+
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ license: record }));
+    return;
+  }
+
+  const licenseRevokeMatch = pathname === '/licenses/revoke' && req.method === 'POST';
+  if (licenseRevokeMatch) {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const code = typeof payload?.code === 'string' ? payload.code.trim() : '';
+        if (!code) {
+          res.writeHead(400);
+          return res.end('License code is required');
+        }
+
+        const record = getLicenseRecord(code);
+        if (!record) {
+          res.writeHead(404);
+          return res.end('License not found');
+        }
+
+        if (record.revokedAt) {
+          res.writeHead(400);
+          return res.end('License already revoked');
+        }
+
+        record.revokedAt = new Date().toISOString();
+        persistLicenses();
+        disconnectAgentsByLicense(code);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ license: record }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const licenseUnassignMatch = pathname === '/licenses/unassign' && req.method === 'POST';
+  if (licenseUnassignMatch) {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const code = typeof payload?.code === 'string' ? payload.code.trim() : '';
+        if (!code) {
+          res.writeHead(400);
+          return res.end('License code is required');
+        }
+
+        const record = getLicenseRecord(code);
+        if (!record) {
+          res.writeHead(404);
+          return res.end('License not found');
+        }
+
+        if (!record.assignedAgentId) {
+          res.writeHead(400);
+          return res.end('License is not assigned to any agent');
+        }
+
+        notifyAgentLicenseUnassigned(code);
+        unassignLicense(code);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ license: record }));
+      } catch (error) {
         res.writeHead(400);
         res.end('Invalid request');
       }
@@ -3182,6 +3315,7 @@ wss.on('connection', (socket, request) => {
       features: [],
       bitlockerStatus: null,
       avStatus: null,
+    license: null,
   };
 
   {
@@ -3206,9 +3340,24 @@ wss.on('connection', (socket, request) => {
     try {
       const parsed = JSON.parse(payload);
       if (parsed?.type === 'hello' && typeof parsed.name === 'string' && parsed.name.trim()) {
+        const licenseCode = typeof parsed.license === 'string'
+          ? parsed.license.trim()
+          : '';
+        const licenseRecord = licenseCode ? getLicenseRecord(licenseCode) : null;
+        if (!licenseRecord || licenseRecord.revokedAt) {
+          sendControl(socket, 'license-result', { success: false, message: 'License invalid or revoked' });
+          socket.close(1008, 'invalid license');
+          return;
+        }
         const requestedId = typeof parsed.agentId === 'string' && parsed.agentId.trim()
           ? parsed.agentId.trim()
           : info.id;
+        if (licenseRecord.assignedAgentId && licenseRecord.assignedAgentId !== requestedId) {
+          sendControl(socket, 'license-result', { success: false, message: 'License already assigned to another agent' });
+          socket.close(1008, 'license already assigned');
+          return;
+        }
+        assignLicenseToAgent(licenseCode, requestedId);
         if (requestedId !== info.id) {
           clientsById.delete(info.id);
           agents.delete(info.id);
@@ -3255,6 +3404,9 @@ wss.on('connection', (socket, request) => {
         } else if (parsed.externalIp === null) {
           info.externalIp = null;
         }
+        info.license = licenseCode;
+        markLicenseUsed(licenseCode);
+        sendControl(socket, 'license-result', { success: true });
         if (parsed.specs != null) {
           info.specs = parsed.specs;
         }
@@ -5083,6 +5235,134 @@ function persistGroups(set = groups) {
   } catch (error) {
     console.error('Failed to persist group config', error);
     return false;
+  }
+}
+
+function loadLicenses() {
+  ensureDataDirectory();
+  let stored = [];
+  try {
+    if (fs.existsSync(LICENSES_PATH)) {
+      let raw = fs.readFileSync(LICENSES_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      stored = JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load license config', error);
+  }
+
+  if (!Array.isArray(stored)) {
+    return [];
+  }
+
+  return stored
+    .map((entry) => {
+      if (!entry || typeof entry.code !== 'string') {
+        return null;
+      }
+      return {
+        code: entry.code.trim(),
+        createdAt: typeof entry.createdAt === 'string' ? entry.createdAt : new Date().toISOString(),
+        revokedAt: typeof entry.revokedAt === 'string' ? entry.revokedAt : null,
+        lastUsedAt: typeof entry.lastUsedAt === 'string' ? entry.lastUsedAt : null,
+        assignedAgentId: typeof entry.assignedAgentId === 'string' ? entry.assignedAgentId : null,
+        assignedAt: typeof entry.assignedAt === 'string' ? entry.assignedAt : null,
+      };
+    })
+    .filter(Boolean);
+}
+
+function persistLicenses() {
+  try {
+    ensureDataDirectory();
+    fs.writeFileSync(LICENSES_PATH, JSON.stringify(licenseRecords, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to persist licenses', error);
+    return false;
+  }
+}
+
+function generateLicenseCode() {
+  return crypto.randomBytes(12).toString('hex');
+}
+
+function getLicenseRecord(code) {
+  return licenseIndex.get(code);
+}
+
+function markLicenseUsed(code) {
+  const record = getLicenseRecord(code);
+  if (!record) {
+    return;
+  }
+
+  record.lastUsedAt = new Date().toISOString();
+  persistLicenses();
+}
+
+function assignLicenseToAgent(code, agentId) {
+  const record = getLicenseRecord(code);
+  if (!record || record.revokedAt) {
+    return false;
+  }
+
+  if (record.assignedAgentId && record.assignedAgentId !== agentId) {
+    return false;
+  }
+
+  if (!record.assignedAgentId) {
+    record.assignedAgentId = agentId;
+    record.assignedAt = new Date().toISOString();
+    persistLicenses();
+  }
+
+  return true;
+}
+
+function unassignLicense(code) {
+  const record = getLicenseRecord(code);
+  if (!record) {
+    return false;
+  }
+
+  record.assignedAgentId = null;
+  record.assignedAt = null;
+  persistLicenses();
+  return true;
+}
+
+function disconnectAgentsByLicense(code, reason = 'license revoked') {
+  for (const entry of clientsById.values()) {
+    if (entry.info.license !== code) {
+      continue;
+    }
+
+    if (entry.socket.readyState === WebSocket.OPEN) {
+      sendControl(entry.socket, 'license-revoked', { reason });
+      entry.socket.close(4003, reason);
+    }
+  }
+  const record = getLicenseRecord(code);
+  if (record) {
+    record.assignedAgentId = null;
+    record.assignedAt = null;
+    persistLicenses();
+  }
+}
+
+function notifyAgentLicenseUnassigned(code, reason = 'license released') {
+  const record = getLicenseRecord(code);
+  if (!record?.assignedAgentId) {
+    return;
+  }
+
+  const entry = clientsById.get(record.assignedAgentId);
+  if (entry?.socket?.readyState === WebSocket.OPEN) {
+    sendControl(entry.socket, 'license-unassigned', { reason });
+    entry.socket.close(4003, 'license unassigned');
   }
 }
 

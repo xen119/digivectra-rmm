@@ -58,6 +58,15 @@ internal static class Program
     private static string? screenSessionId;
     private static string? currentChatSessionId;
     private static string? selectedScreenId;
+    private enum SessionResult
+    {
+        Completed,
+        Retry,
+        Cancelled
+    }
+    private static TaskCompletionSource<bool>? licenseValidationTcs;
+    private static volatile bool licenseRenewalRequested;
+    private static string? licenseRenewalReason;
     private static readonly TimeSpan ScreenOfferTimeout = TimeSpan.FromSeconds(10);
     private const int MaxFileEntries = 512;
     private static readonly Dictionary<string, PendingUpload> uploadSessions = new(StringComparer.OrdinalIgnoreCase);
@@ -128,26 +137,29 @@ internal static class Program
                 cts.Cancel();
             };
 
-            using var socket = await ConnectWithRetryAsync(target, cts.Token);
-            if (socket is null)
+            while (!cts.IsCancellationRequested)
             {
-                Console.WriteLine("Connection cancelled.");
-                return;
+                licenseRenewalRequested = false;
+                licenseRenewalReason = null;
+                allowOutgoing = true;
+
+                var sessionResult = await RunAgentSessionAsync(target, cts.Token);
+
+                if (sessionResult == SessionResult.Retry)
+                {
+                    var notice = string.IsNullOrWhiteSpace(licenseRenewalReason)
+                        ? "License change required. Please enter a valid license."
+                        : licenseRenewalReason;
+                    Console.WriteLine();
+                    Console.WriteLine("###############################################");
+                    Console.WriteLine(notice);
+                    Console.WriteLine("###############################################");
+                    Console.WriteLine("Please enter a valid license code; the agent will reconnect automatically.");
+                    continue;
+                }
+
+                break;
             }
-            Console.WriteLine("Connected. Sending identity...");
-
-            await SendAgentIdentityAsync(socket, cts.Token);
-            var agentUser = GetAgentLocalUser();
-            TrayIconManager.RegisterChatHandler(
-                async (text) => await SendChatResponseAsync(socket, text, CancellationToken.None),
-                agentUser);
-            Console.WriteLine("Type messages and press Enter. Send an empty line to close.");
-
-            var receiveLoop = ReceiveAsync(socket, cts.Token);
-            await SendAsync(socket, cts.Token);
-
-            cts.Cancel();
-            await receiveLoop;
             Console.WriteLine("Closed.");
         }
         finally
@@ -157,6 +169,93 @@ internal static class Program
             totalCpuCounter = null;
             TrayIconManager.Stop();
         }
+    }
+
+    private static async Task<SessionResult> RunAgentSessionAsync(string target, CancellationToken cancellationToken)
+    {
+        using var socket = await ConnectWithRetryAsync(target, cancellationToken);
+        if (socket is null)
+        {
+            Console.WriteLine("Connection cancelled.");
+            return SessionResult.Cancelled;
+        }
+
+        using var sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        licenseValidationTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var receiveTask = ReceiveAsync(socket, sessionCts.Token);
+
+        try
+        {
+            Console.WriteLine("Connected. Sending identity...");
+            await SendAgentIdentityAsync(socket, sessionCts.Token);
+
+            bool licenseValid;
+            try
+            {
+                licenseValid = await licenseValidationTcs!.Task.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                sessionCts.Cancel();
+                await receiveTask;
+                return SessionResult.Cancelled;
+            }
+
+            if (!licenseValid || licenseRenewalRequested)
+            {
+                sessionCts.Cancel();
+                try
+                {
+                    await receiveTask;
+                }
+                catch (OperationCanceledException)
+                {
+                    // ignore
+                }
+
+                return SessionResult.Retry;
+            }
+
+            var agentUser = GetAgentLocalUser();
+            TrayIconManager.RegisterChatHandler(
+                async (text) => await SendChatResponseAsync(socket, text, CancellationToken.None),
+                agentUser);
+            Console.WriteLine("Type messages and press Enter. Send an empty line to close.");
+
+            var sendTask = SendAsync(socket, sessionCts.Token);
+            await Task.WhenAny(sendTask, receiveTask);
+            sessionCts.Cancel();
+
+            try
+            {
+                await Task.WhenAll(sendTask, receiveTask);
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore
+            }
+            catch (WebSocketException)
+            {
+                // ignore exceptions triggered by cancellation
+            }
+        }
+        finally
+        {
+            licenseValidationTcs = null;
+        }
+
+        if (licenseRenewalRequested)
+        {
+            return SessionResult.Retry;
+        }
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return SessionResult.Cancelled;
+        }
+
+        return SessionResult.Completed;
     }
 
     private static async Task<ClientWebSocket?> ConnectWithRetryAsync(string target, CancellationToken cancellationToken)
@@ -208,7 +307,18 @@ internal static class Program
             WebSocketReceiveResult? result;
             do
             {
-                result = await socket.ReceiveAsync(segment, cancellationToken);
+                try
+                {
+                    result = await socket.ReceiveAsync(segment, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (WebSocketException)
+                {
+                    return;
+                }
 
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
@@ -266,7 +376,9 @@ internal static class Program
 
     private const string AgentIdFile = "agent.id";
     private const string AgentMetadataFile = "agent.meta";
+    private const string LicenseFileName = "license.code";
     private static string? agentId;
+    private static string? agentLicenseCode;
     private static DeviceSpecs? deviceSpecs;
     private static UpdateSummary? lastUpdateSummary;
     private static BsodSummary? lastBsodSummary;
@@ -314,6 +426,7 @@ internal static class Program
             avStatus = GetAvStatus(),
             internalIp,
             externalIp,
+            license = GetAgentLicenseCode(),
             pendingReboot = IsRebootPending()
         });
         await SendTextAsync(socket, identity, cancellationToken);
@@ -797,6 +910,80 @@ internal static class Program
         agentId = reuseExisting ? existingId : Guid.NewGuid().ToString("D");
         PersistAgentIdentity(path, metadataPath, currentFingerprint);
         return agentId!;
+    }
+
+    private static string GetAgentLicenseCode()
+    {
+        if (!string.IsNullOrWhiteSpace(agentLicenseCode))
+        {
+            return agentLicenseCode;
+        }
+
+        var envLicense = Environment.GetEnvironmentVariable("AGENT_LICENSE_CODE");
+        if (!string.IsNullOrWhiteSpace(envLicense))
+        {
+            agentLicenseCode = envLicense.Trim();
+            return agentLicenseCode;
+        }
+
+        var path = Path.Combine(AppContext.BaseDirectory, LicenseFileName);
+        try
+        {
+            if (File.Exists(path))
+            {
+                var stored = File.ReadAllText(path).Trim();
+                if (!string.IsNullOrWhiteSpace(stored))
+                {
+                    agentLicenseCode = stored;
+                    return agentLicenseCode;
+                }
+            }
+        }
+        catch
+        {
+            // ignore read failures
+        }
+
+        if (Environment.UserInteractive)
+        {
+            Console.Write("Enter license code: ");
+            var input = Console.ReadLine()?.Trim();
+            if (!string.IsNullOrWhiteSpace(input))
+            {
+                agentLicenseCode = input;
+                try
+                {
+                    File.WriteAllText(path, agentLicenseCode);
+                }
+                catch
+                {
+                    // ignore write failures
+                }
+
+                return agentLicenseCode;
+            }
+        }
+
+        Console.Error.WriteLine("License code missing. Set AGENT_LICENSE_CODE or place the code in license.code.");
+        Environment.Exit(1);
+        return agentLicenseCode!;
+    }
+
+    private static void ResetLicenseState()
+    {
+        agentLicenseCode = null;
+        var path = Path.Combine(AppContext.BaseDirectory, LicenseFileName);
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // ignore deletion failures
+        }
     }
 
     private static string GetAgentLocalUser()
@@ -3324,16 +3511,121 @@ internal static class Program
                 await HandleGpoPoliciesAsync(document.RootElement, socket, cancellationToken);
                 break;
             }
+            case "license-result":
+            {
+                var success = document.RootElement.TryGetProperty("success", out var successElement) && successElement.ValueKind == JsonValueKind.True;
+                var message = document.RootElement.TryGetProperty("message", out var messageElement) && messageElement.ValueKind == JsonValueKind.String
+                    ? messageElement.GetString()?.Trim()
+                    : null;
+
+                if (!success)
+                {
+                    licenseValidationTcs?.TrySetResult(false);
+                    licenseRenewalRequested = true;
+                    licenseRenewalReason = string.IsNullOrWhiteSpace(message)
+                        ? "License rejected by the server."
+                        : $"License rejected by the server: {message}";
+
+                    Console.WriteLine();
+                    Console.WriteLine("###############################################");
+                    Console.WriteLine("License rejected by server." + (string.IsNullOrWhiteSpace(message) ? string.Empty : " " + message));
+                    Console.WriteLine("###############################################");
+
+                    allowOutgoing = false;
+                    ResetLicenseState();
+
+                    if (socket.State == WebSocketState.Open)
+                    {
+                        try
+                        {
+                            await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "license invalid", cancellationToken);
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
+                    }
+
+                    return;
+                }
+
+                licenseValidationTcs?.TrySetResult(true);
+                break;
+            }
+            case "license-revoked":
+            {
+                var reason = document.RootElement.TryGetProperty("reason", out var reasonElement) && reasonElement.ValueKind == JsonValueKind.String
+                    ? reasonElement.GetString()?.Trim()
+                    : null;
+                licenseRenewalRequested = true;
+                licenseRenewalReason = string.IsNullOrWhiteSpace(reason)
+                    ? "License revoked by the server."
+                    : $"License revoked by the server: {reason}";
+
+                Console.WriteLine();
+                Console.WriteLine("###############################################");
+                Console.WriteLine("License revoked by server." + (string.IsNullOrWhiteSpace(reason) ? string.Empty : " " + reason));
+                Console.WriteLine("###############################################");
+
+                allowOutgoing = false;
+                ResetLicenseState();
+
+                if (socket.State == WebSocketState.Open)
+                {
+                    try
+                    {
+                        await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "license revoked", cancellationToken);
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+
+                return;
+            }
+            case "license-unassigned":
+            {
+                var reason = document.RootElement.TryGetProperty("reason", out var reasonElement) && reasonElement.ValueKind == JsonValueKind.String
+                    ? reasonElement.GetString()?.Trim()
+                    : null;
+                licenseRenewalRequested = true;
+                licenseRenewalReason = string.IsNullOrWhiteSpace(reason)
+                    ? "License released by the server."
+                    : $"License released by the server: {reason}";
+
+                Console.WriteLine();
+                Console.WriteLine("###############################################");
+                Console.WriteLine("License released by server." + (string.IsNullOrWhiteSpace(reason) ? string.Empty : " " + reason));
+                Console.WriteLine("###############################################");
+
+                allowOutgoing = false;
+                ResetLicenseState();
+
+                if (socket.State == WebSocketState.Open)
+                {
+                    try
+                    {
+                        await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "license unassigned", cancellationToken);
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+
+                return;
             }
         }
-        catch (JsonException)
-        {
-            // Ignore messages that are not JSON control signals.
-        }
-        finally
-        {
-            document?.Dispose();
-        }
+    }
+    catch (JsonException)
+    {
+        // Ignore messages that are not JSON control signals.
+    }
+    finally
+    {
+        document?.Dispose();
+    }
     }
 
     private static void HandleChatRequest(JsonElement root)
@@ -5537,6 +5829,8 @@ internal static class Program
         }
     }
 
+    private static volatile bool allowOutgoing = true;
+
     private static async Task SendTextAsync(ClientWebSocket socket, string text, CancellationToken cancellationToken)
     {
         var data = Encoding.UTF8.GetBytes(text);
@@ -5554,14 +5848,21 @@ internal static class Program
 
         try
         {
-            if (socket.State == WebSocketState.Open)
+            if (!allowOutgoing || socket.State != WebSocketState.Open)
             {
-                await socket.SendAsync(data, WebSocketMessageType.Text, true, cancellationToken);
+                return;
             }
+
+            await socket.SendAsync(data, WebSocketMessageType.Text, true, cancellationToken);
         }
         catch (OperationCanceledException)
         {
             // Swallow cancellations triggered during shutdown.
+        }
+        catch (WebSocketException)
+        {
+            // If the server closed the connection, future sends should be skipped.
+            allowOutgoing = false;
         }
         finally
         {

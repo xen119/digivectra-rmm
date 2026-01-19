@@ -46,5 +46,9 @@
   {
     "id": "gpo",
     "visible": false
+  },
+  {
+    "id": "licenses",
+    "visible": true
   }
 ]

@@ -1,0 +1,34 @@
+[
+  {
+    "code": "810dc0e15f8859107118f67b",
+    "createdAt": "2026-01-19T01:16:00.183Z",
+    "revokedAt": "2026-01-19T01:44:50.078Z",
+    "lastUsedAt": "2026-01-19T01:44:21.138Z",
+    "assignedAgentId": null,
+    "assignedAt": null
+  },
+  {
+    "code": "6bdff337e56d2fb86336a950",
+    "createdAt": "2026-01-19T01:18:08.275Z",
+    "revokedAt": null,
+    "lastUsedAt": "2026-01-19T03:15:03.161Z",
+    "assignedAgentId": null,
+    "assignedAt": null
+  },
+  {
+    "code": "ead435bd4e93a23eb63b65cd",
+    "createdAt": "2026-01-19T01:18:10.285Z",
+    "revokedAt": null,
+    "lastUsedAt": null,
+    "assignedAgentId": null,
+    "assignedAt": null
+  },
+  {
+    "code": "a97ff003fa472f1c1dced120",
+    "createdAt": "2026-01-19T01:18:12.516Z",
+    "revokedAt": "2026-01-19T01:44:36.405Z",
+    "lastUsedAt": null,
+    "assignedAgentId": null,
+    "assignedAt": null
+  }
+]

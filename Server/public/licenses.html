@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Licenses · RMM</title>
+  <link rel="stylesheet" href="compact.css">
+  <style>
+    body {
+      background: #030711;
+      color: #e5e7eb;
+    }
+
+    .panel--dashboard {
+      max-width: 960px;
+      margin: 2rem auto 3rem;
+      gap: 1rem;
+      padding: 1.5rem 2rem;
+      background: #0c111a;
+      border: 1px solid #1f2937;
+      border-radius: 1rem;
+      box-shadow: 0 15px 40px rgba(2, 6, 23, 0.5);
+    }
+
+    .panel__header {
+      flex-wrap: wrap;
+    }
+
+    .panel__header > div {
+      flex: 1;
+      min-width: 240px;
+    }
+
+    .panel__summary,
+    .panel__hint {
+      margin: 0.25rem 0;
+      color: rgba(226, 232, 240, 0.7);
+    }
+
+    .panel__hint {
+      font-size: 0.85rem;
+    }
+
+    .status-message {
+      min-height: 1.5rem;
+      font-size: 0.9rem;
+      margin: 0;
+      color: rgba(148, 163, 184, 0.9);
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 720px;
+      font-size: 0.95rem;
+    }
+
+    .data-table th {
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-size: 0.75rem;
+      color: rgba(226, 232, 240, 0.6);
+      padding-bottom: 0.6rem;
+    }
+
+    .data-table td {
+      padding: 0.6rem 0.35rem;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+      vertical-align: top;
+    }
+
+    .data-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .data-table .license-row td:first-child {
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    .license-row button {
+      margin-right: 0.35rem;
+      padding: 0.4rem 1rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: linear-gradient(125deg, rgba(59, 130, 246, 0.15), rgba(79, 70, 229, 0.25));
+      color: #fff;
+      cursor: pointer;
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+
+    .license-row button:hover {
+      transform: translateY(-1px);
+      background: linear-gradient(125deg, rgba(59, 130, 246, 0.45), rgba(79, 70, 229, 0.5));
+    }
+
+    .status-pill.active {
+      color: #34d399;
+    }
+
+    .status-pill.revoked {
+      color: #f87171;
+    }
+
+    .assigned-at {
+      font-size: 0.8rem;
+      margin-top: 0.2rem;
+      color: rgba(226, 232, 240, 0.6);
+    }
+
+    @media (max-width: 768px) {
+      .panel--dashboard {
+        padding: 1.25rem;
+      }
+
+      .panel__header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .license-row button {
+        margin-bottom: 0.35rem;
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body class="app-shell">
+  <main class="panel panel--dashboard">
+    <div class="panel__header">
+      <div>
+        <h1>Agent Licenses</h1>
+        <p class="panel__summary">Issue, monitor, and revoke the codes that gate agent connectivity.</p>
+        <p class="panel__hint">Revoke disconnects agents immediately; use Unassign to release a consumed code for reuse.</p>
+      </div>
+      <button id="generateLicense" class="primary">Generate license</button>
+    </div>
+    <p id="statusMessage" class="status-message"></p>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Assigned</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Last used</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="licenseTableBody"></tbody>
+      </table>
+    </div>
+  </main>
+  <script src="licenses.js" type="module"></script>
+</body>
+</html>

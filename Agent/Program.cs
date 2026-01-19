@@ -64,6 +64,8 @@ internal static class Program
     private static readonly Regex AuditWhitespaceSplitter = new(@"\s{2,}", RegexOptions.Compiled);
     private static ComplianceDefinitions? complianceDefinitions;
     private static string? assignedComplianceProfileId;
+    private static GpoDefinitions? gpoDefinitions;
+    private static string? assignedGpoProfileId;
     private static Action? screenDataChannelStateHandler;
     private static PerformanceCounter? totalCpuCounter;
     private static CancellationTokenSource? monitoringCts;
@@ -3310,6 +3312,11 @@ internal static class Program
                 await HandleRunComplianceAsync(document.RootElement, socket, cancellationToken);
                 break;
             }
+            case "gpo-policies":
+            {
+                await HandleGpoPoliciesAsync(document.RootElement, socket, cancellationToken);
+                break;
+            }
             }
         }
         catch (JsonException)
@@ -3415,6 +3422,161 @@ internal static class Program
         }
 
         await EvaluateComplianceAsync(socket, profileId, cancellationToken);
+    }
+
+    private static async Task HandleGpoPoliciesAsync(JsonElement root, ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        var definitions = BuildGpoDefinitions(root);
+        gpoDefinitions = definitions;
+        if (root.TryGetProperty("assignedProfileId", out var assignedElement) && assignedElement.ValueKind == JsonValueKind.String)
+        {
+            assignedGpoProfileId = assignedElement.GetString()?.Trim();
+        }
+        assignedGpoProfileId ??= definitions.DefaultProfileId;
+        if (string.IsNullOrWhiteSpace(assignedGpoProfileId))
+        {
+            assignedGpoProfileId = null;
+        }
+
+        var runNow = root.TryGetProperty("runNow", out var runElement) && runElement.ValueKind == JsonValueKind.True;
+        if (runNow)
+        {
+            await ApplyAssignedGpoProfileAsync(socket, cancellationToken);
+        }
+    }
+
+    private static GpoDefinitions BuildGpoDefinitions(JsonElement root)
+    {
+        var profiles = new List<GpoProfileDefinition>();
+        if (root.TryGetProperty("profiles", out var profilesElement) && profilesElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in profilesElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+                var id = item.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.String
+                    ? idElement.GetString()?.Trim()
+                    : null;
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+                var label = item.TryGetProperty("label", out var labelElement) && labelElement.ValueKind == JsonValueKind.String
+                    ? labelElement.GetString()?.Trim()
+                    : id;
+                var description = item.TryGetProperty("description", out var descElement) && descElement.ValueKind == JsonValueKind.String
+                    ? descElement.GetString() ?? string.Empty
+                    : string.Empty;
+                var template = item.TryGetProperty("template", out var templateElement) && templateElement.ValueKind == JsonValueKind.String
+                    ? templateElement.GetString() ?? string.Empty
+                    : string.Empty;
+                profiles.Add(new GpoProfileDefinition(id, label, description, template));
+            }
+        }
+
+        var assignments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (root.TryGetProperty("assignments", out var assignmentsElement) && assignmentsElement.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in assignmentsElement.EnumerateObject())
+            {
+                var value = property.Value.ValueKind == JsonValueKind.String
+                    ? property.Value.GetString()?.Trim()
+                    : null;
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    assignments[property.Name] = value!;
+                }
+            }
+        }
+
+        var defaultProfileId = root.TryGetProperty("defaultProfileId", out var defaultElement) && defaultElement.ValueKind == JsonValueKind.String
+            ? defaultElement.GetString()?.Trim()
+            : null;
+        return new GpoDefinitions(profiles, assignments, defaultProfileId);
+    }
+
+    private static async Task ApplyAssignedGpoProfileAsync(ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        if (gpoDefinitions == null || string.IsNullOrWhiteSpace(assignedGpoProfileId))
+        {
+            await SendGpoResultAsync(socket, assignedGpoProfileId, false, "No GPO profile assigned", cancellationToken);
+            return;
+        }
+
+        var profile = gpoDefinitions.Profiles.FirstOrDefault(entry => string.Equals(entry.Id, assignedGpoProfileId, StringComparison.OrdinalIgnoreCase));
+        if (profile == null)
+        {
+            await SendGpoResultAsync(socket, assignedGpoProfileId, false, "Assigned profile not found", cancellationToken);
+            return;
+        }
+
+        var success = await ApplyGpoTemplateAsync(profile.Template, cancellationToken);
+        var message = success ? "Template applied" : "Failed to apply template";
+        await SendGpoResultAsync(socket, profile.Id, success, message, cancellationToken);
+    }
+
+    private static async Task<bool> ApplyGpoTemplateAsync(string template, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            return false;
+        }
+
+        var tempFile = Path.Combine(Path.GetTempPath(), $"rmm-gpo-{Guid.NewGuid():N}.inf");
+        try
+        {
+            await File.WriteAllTextAsync(tempFile, template, cancellationToken);
+            var psi = new ProcessStartInfo
+            {
+                FileName = "secedit.exe",
+                Arguments = $"/configure /db secedit.sdb /cfg \"{tempFile}\" /areas SECURITYPOLICY /quiet",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+
+            using var process = Process.Start(psi);
+            if (process == null)
+            {
+                return false;
+            }
+
+            await process.WaitForExitAsync(cancellationToken);
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempFile))
+                {
+                    File.Delete(tempFile);
+                }
+            }
+            catch
+            {
+                // ignore cleanup failures
+            }
+        }
+    }
+
+    private static Task SendGpoResultAsync(ClientWebSocket socket, string? profileId, bool success, string message, CancellationToken cancellationToken)
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            type = "gpo-result",
+            profileId,
+            success,
+            message,
+        });
+        return SendTextAsync(socket, payload, cancellationToken);
     }
 
     private static async Task EvaluateComplianceAsync(ClientWebSocket socket, string profileId, CancellationToken cancellationToken)
@@ -5629,5 +5791,35 @@ internal static class Program
     {
         public string FilePath { get; set; } = string.Empty;
         public FileStream Stream { get; set; } = null!;
+    }
+
+    private sealed class GpoDefinitions
+    {
+        public IReadOnlyList<GpoProfileDefinition> Profiles { get; }
+        public IReadOnlyDictionary<string, string> Assignments { get; }
+        public string? DefaultProfileId { get; }
+
+        public GpoDefinitions(IEnumerable<GpoProfileDefinition> profiles, IDictionary<string, string> assignments, string? defaultProfileId)
+        {
+            Profiles = profiles.ToList();
+            Assignments = new Dictionary<string, string>(assignments, StringComparer.OrdinalIgnoreCase);
+            DefaultProfileId = defaultProfileId;
+        }
+    }
+
+    private sealed class GpoProfileDefinition
+    {
+        public string Id { get; }
+        public string Label { get; }
+        public string Description { get; }
+        public string Template { get; }
+
+        public GpoProfileDefinition(string id, string label, string description, string template)
+        {
+            Id = id ?? throw new ArgumentNullException(nameof(id));
+            Label = label ?? id;
+            Description = description ?? string.Empty;
+            Template = template ?? string.Empty;
+        }
     }
 }

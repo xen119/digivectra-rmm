@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>GPO Management</title>
+    <link rel="stylesheet" href="compact.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #05070f;
+        color: #f8fafc;
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 2rem 1.5rem;
+      }
+
+      .panel {
+        background: #0d1117;
+        border: 1px solid #1e293b;
+        border-radius: 0.9rem;
+        padding: 1.5rem;
+        box-shadow: 0 18px 40px rgba(2, 6, 23, 0.4);
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      button,
+      .import-label {
+        border-radius: 0.5rem;
+        border: none;
+        color: #fff;
+        background: #2563eb;
+        padding: 0.45rem 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+
+      button:hover {
+        background: #1d4ed8;
+      }
+
+      .status {
+        font-size: 0.9rem;
+        color: #94a3b8;
+      }
+
+      .profiles {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .profile-card {
+        border: 1px solid #1e293b;
+        border-radius: 0.8rem;
+        padding: 1rem;
+        background: #020617;
+      }
+
+      .profile-card header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .profile-card header h3 {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .profile-card label {
+        display: block;
+        font-size: 0.85rem;
+        margin-top: 0.5rem;
+      }
+
+      .profile-card input,
+      .profile-card textarea {
+        width: 100%;
+        background: #050a17;
+        border: 1px solid #1e2937;
+        border-radius: 0.4rem;
+        color: #fff;
+        padding: 0.4rem 0.6rem;
+        font-size: 0.9rem;
+        margin-top: 0.2rem;
+      }
+
+      .profile-card textarea {
+        min-height: 120px;
+        font-family: inherit;
+        resize: vertical;
+      }
+
+      .assignment-panel {
+        border: 1px solid #1e293b;
+        border-radius: 0.8rem;
+        padding: 1rem;
+        background: #020617;
+      }
+
+      .assignment-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+      }
+
+      .assignment-row select {
+        background: #050a17;
+        border: 1px solid #1e2937;
+        color: #fff;
+        border-radius: 0.35rem;
+        padding: 0.35rem 0.6rem;
+      }
+
+      .assignments-list {
+        margin-top: 1rem;
+        border-top: 1px solid #1e2937;
+        padding-top: 0.8rem;
+        font-size: 0.9rem;
+        color: #cbd5f5;
+      }
+
+      .assignments-list div {
+        margin-bottom: 0.4rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="panel">
+        <div>
+          <h1>GPO Management</h1>
+          <p class="status" id="gpoStatus">Load the policy templates to begin editing and assignment.</p>
+        </div>
+        <div class="actions">
+          <button id="reloadGpo">Reload from server</button>
+          <button id="saveGpo">Save changes</button>
+          <button id="exportGpo">Export JSON</button>
+          <label class="import-label">
+            Import JSON
+            <input id="importGpo" type="file" accept=".json" />
+          </label>
+        </div>
+        <div class="assignment-panel">
+          <div class="assignment-row">
+            <select id="gpoAgentSelect">
+              <option value="">Select agent</option>
+            </select>
+            <select id="gpoProfileSelect">
+              <option value="">Choose profile</option>
+            </select>
+            <button id="assignGpo">Assign</button>
+            <button id="runGpo">Apply now</button>
+          </div>
+          <div class="assignments-list" id="gpoAssignmentList"></div>
+        </div>
+        <div>
+          <h2>Profiles</h2>
+          <p class="status">Each profile stores a raw INF template that will be applied via secedit.</p>
+        </div>
+        <div class="profiles" id="gpoProfiles"></div>
+        <button id="addGpoProfile">Add profile</button>
+      </section>
+    </main>
+    <script src="gpo.js"></script>
+  </body>
+</html>

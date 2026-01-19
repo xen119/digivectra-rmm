@@ -42,5 +42,9 @@
   {
     "id": "compliance-admin",
     "visible": false
+  },
+  {
+    "id": "gpo",
+    "visible": false
   }
 ]

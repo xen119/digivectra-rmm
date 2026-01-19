@@ -181,6 +181,12 @@ const NAVIGATION_ITEMS = [
     href: 'compliance-admin.html',
     description: 'Edit compliance profiles and rule definitions.',
   },
+  {
+    id: 'gpo',
+    label: 'GPO Management',
+    href: 'gpo.html',
+    description: 'Manage and deploy GPO templates to agents.',
+  },
 ];
 const DEFAULT_COMPLIANCE_CONFIG = {
   defaultProfileId: null,
@@ -192,7 +198,11 @@ const COMPLIANCE_CONFIG_PATH = path.join(DATA_DIR, 'compliance.json');
 const complianceStatusByAgent = new Map();
 let complianceConfig = loadComplianceConfig();
 let complianceProfilesById = new Map();
+const GPO_CONFIG_PATH = path.join(DATA_DIR, 'gpo-policies.json');
+let gpoConfig = loadGpoConfig();
+let gpoProfilesById = new Map();
 refreshComplianceCache();
+refreshGpoCache();
 const SESSION_TTL_MS = 30 * 60_1000;
 const SSO_SECRET = process.env.SSO_SECRET ?? 'CHANGE_ME-SSO-KEY';
 const SSO_WINDOW_MS = 5 * 60_1000;
@@ -605,6 +615,137 @@ server.on('request', async (req, res) => {
         requestComplianceRun(agentId);
         res.writeHead(202);
         res.end('Compliance run triggered');
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const gpoProfilesMatch = pathname === '/gpo/profiles';
+  if (gpoProfilesMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      defaultProfileId: gpoConfig.defaultProfileId ?? null,
+      profiles: Array.isArray(gpoConfig.profiles) ? gpoConfig.profiles : [],
+      assignments: gpoConfig.assignments ?? {},
+    }));
+    return;
+  }
+
+  if (gpoProfilesMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const sanitizedProfiles = sanitizeGpoProfilesPayload(payload);
+        if (!sanitizedProfiles.length) {
+          res.writeHead(400);
+          return res.end('At least one GPO profile is required');
+        }
+        const defaultProfileId = typeof payload?.defaultProfileId === 'string' && payload.defaultProfileId.trim()
+          ? payload.defaultProfileId.trim()
+          : sanitizedProfiles[0].id;
+
+        gpoConfig.profiles = sanitizedProfiles;
+        gpoConfig.defaultProfileId = defaultProfileId;
+        persistGpoConfig();
+        refreshGpoCache();
+        broadcastGpoDefinitions({ runNow: true });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          defaultProfileId,
+          profiles: sanitizedProfiles,
+        }));
+      } catch (error) {
+        console.error('Unable to save GPO definitions', error);
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const gpoAssignmentsMatch = pathname === '/gpo/assignments';
+  if (gpoAssignmentsMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ assignments: gpoConfig.assignments ?? {} }));
+    return;
+  }
+
+  if (gpoAssignmentsMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const agentId = typeof payload?.agentId === 'string' && payload.agentId.trim()
+          ? payload.agentId.trim()
+          : null;
+        const profileId = typeof payload?.profileId === 'string' && payload.profileId.trim()
+          ? payload.profileId.trim()
+          : null;
+        if (!agentId) {
+          res.writeHead(400);
+          return res.end('agentId is required');
+        }
+        if (profileId && !getGpoProfile(profileId)) {
+          res.writeHead(400);
+          return res.end('Unknown GPO profile');
+        }
+
+        gpoConfig.assignments = gpoConfig.assignments ?? {};
+        if (profileId) {
+          gpoConfig.assignments[agentId] = profileId;
+        } else {
+          delete gpoConfig.assignments[agentId];
+        }
+        persistGpoConfig();
+        broadcastGpoDefinitions({ targetAgentId: agentId, runNow: true });
+
+        res.writeHead(204);
+        return res.end();
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const gpoRunMatch = pathname === '/gpo/run' && req.method === 'POST';
+  if (gpoRunMatch) {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const agentId = typeof payload?.agentId === 'string' && payload.agentId.trim()
+          ? payload.agentId.trim()
+          : null;
+        requestGpoRun(agentId);
+        res.writeHead(202);
+        res.end('GPO apply triggered');
       } catch (error) {
         res.writeHead(400);
         res.end('Invalid request');
@@ -3134,6 +3275,7 @@ wss.on('connection', (socket, request) => {
         clientsById.set(info.id, { socket, info });
         notifyMonitoringState({ socket, info });
         sendComplianceDefinitions(socket, info.id, true);
+        sendGpoDefinitions(socket, info.id, true);
       } else if (parsed?.type === 'shell-output') {
         emitShellOutput(info.id, parsed);
       } else if (parsed?.type === 'screen-offer') {
@@ -3354,9 +3496,11 @@ wss.on('connection', (socket, request) => {
           scriptName: parsed.scriptName ?? '',
           timestamp: new Date().toISOString(),
         });
-      } else if (parsed?.type === 'compliance-report') {
-        handleComplianceReport(info.id, parsed);
-      }
+        } else if (parsed?.type === 'compliance-report') {
+          handleComplianceReport(info.id, parsed);
+        } else if (parsed?.type === 'gpo-result') {
+          console.log(`GPO apply result from ${info.id}: ${parsed.success ? 'success' : 'failure'} - ${parsed.message ?? 'no details'}`);
+        }
     } catch (error) {
       // ignore invalid JSON and continue echoing
     }
@@ -5132,6 +5276,58 @@ function loadComplianceConfig() {
   return config;
 }
 
+function loadGpoConfig() {
+  ensureDataDirectory();
+  let stored = null;
+  try {
+    if (fs.existsSync(GPO_CONFIG_PATH)) {
+      let raw = fs.readFileSync(GPO_CONFIG_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      stored = JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load GPO config', error);
+  }
+
+  const normalize = (payload) => {
+    const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+    const assignments = payload?.assignments && typeof payload.assignments === 'object' && !Array.isArray(payload.assignments)
+      ? payload.assignments
+      : {};
+    const defaultProfileId = typeof payload?.defaultProfileId === 'string' && payload.defaultProfileId.trim()
+      ? payload.defaultProfileId.trim()
+      : (profiles[0]?.id ?? null);
+    return {
+      defaultProfileId,
+      assignments,
+      profiles,
+    };
+  };
+
+  const config = normalize(stored ?? { defaultProfileId: null, assignments: {}, profiles: [] });
+  if (!stored) {
+    try {
+      fs.writeFileSync(GPO_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+    } catch (error) {
+      console.error('Failed to persist default GPO config', error);
+    }
+  }
+
+  return config;
+}
+
+function persistGpoConfig() {
+  ensureDataDirectory();
+  try {
+    fs.writeFileSync(GPO_CONFIG_PATH, JSON.stringify(gpoConfig, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('Failed to persist GPO config', error);
+  }
+}
+
+
 function sanitizeProfilesPayload(payload) {
   const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
   const normalized = [];
@@ -5215,6 +5411,25 @@ function sanitizeProfilesPayload(payload) {
   return normalized;
 }
 
+function sanitizeGpoProfilesPayload(payload) {
+  const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+  const normalized = [];
+  for (const entry of profiles) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : null;
+    if (!id) {
+      continue;
+    }
+    const label = typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : id;
+    const description = typeof entry.description === 'string' ? entry.description.trim() : '';
+    const template = typeof entry.template === 'string' ? entry.template : '';
+    normalized.push({ id, label, description, template });
+  }
+  return normalized;
+}
+
 function persistComplianceConfig() {
   try {
     ensureDataDirectory();
@@ -5253,6 +5468,35 @@ function getAssignedComplianceProfileId(agentId) {
     return assignment;
   }
   return complianceConfig.defaultProfileId ?? (complianceConfig.profiles?.[0]?.id ?? null);
+}
+
+function refreshGpoCache() {
+  gpoProfilesById = new Map();
+  const profiles = Array.isArray(gpoConfig.profiles) ? gpoConfig.profiles : [];
+  for (const profile of profiles) {
+    if (!profile?.id) {
+      continue;
+    }
+    gpoProfilesById.set(profile.id, {
+      ...profile,
+      template: typeof profile.template === 'string' ? profile.template : '',
+    });
+  }
+}
+
+function getGpoProfile(profileId) {
+  if (!profileId) {
+    return null;
+  }
+  return gpoProfilesById.get(profileId) ?? null;
+}
+
+function getAssignedGpoProfileId(agentId) {
+  const assignment = (gpoConfig.assignments ?? {})[agentId];
+  if (assignment && typeof assignment === 'string') {
+    return assignment;
+  }
+  return gpoConfig.defaultProfileId ?? (gpoConfig.profiles?.[0]?.id ?? null);
 }
 
 function getRuleWeight(profile, ruleId) {
@@ -5394,6 +5638,45 @@ function requestComplianceRun(agentId = null) {
   for (const [id, entry] of clientsById) {
     sendComplianceRunRequest(entry.socket, id);
   }
+}
+
+function broadcastGpoDefinitions({ runNow = false, targetAgentId } = {}) {
+  if (targetAgentId) {
+    const entry = clientsById.get(targetAgentId);
+    if (entry) {
+      sendGpoDefinitions(entry.socket, targetAgentId, runNow);
+    }
+    return;
+  }
+
+  for (const [agentId, { socket }] of clientsById) {
+    sendGpoDefinitions(socket, agentId, runNow);
+  }
+}
+
+function sendGpoDefinitions(socket, agentId, runNow = false) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  const payload = {
+    type: 'gpo-policies',
+    profiles: Array.isArray(gpoConfig.profiles) ? gpoConfig.profiles : [],
+    defaultProfileId: gpoConfig.defaultProfileId ?? null,
+    assignments: gpoConfig.assignments ?? {},
+    assignedProfileId: getAssignedGpoProfileId(agentId),
+    runNow,
+  };
+
+  try {
+    socket.send(JSON.stringify(payload));
+  } catch (error) {
+    console.error('Unable to deliver GPO definitions', error);
+  }
+}
+
+function requestGpoRun(agentId = null) {
+  broadcastGpoDefinitions({ runNow: true, targetAgentId: agentId });
 }
 
 function sendComplianceRunRequest(socket, agentId) {

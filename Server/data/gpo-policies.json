@@ -1,0 +1,12 @@
+{
+  "defaultProfileId": "baseline",
+  "assignments": {},
+  "profiles": [
+    {
+      "id": "baseline",
+      "label": "Windows Local Policy Baseline",
+      "description": "Sample GPO template that can be applied to Windows agents via secedit.",
+      "template": "[Unicode]\nUnicode=yes\n\n[Version]\nsignature=\"$CHICAGO$\"\nRevision=1\n\n[System Access]\nMinimumPasswordLength = 10\nMaximumPasswordAge = 42\nPasswordComplexity = 1\nPasswordHistorySize = 24\n\n[Event Audit]\nAuditSystemEvents = Success\nAuditLogonEvents = Success and Failure\n\n"
+    }
+  ]
+}

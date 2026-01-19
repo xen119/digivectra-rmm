@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Navigation settings</title>
+    <title>Settings</title>
     <link rel="stylesheet" href="compact.css" />
     <style>
       :root {
@@ -55,6 +55,43 @@
         margin-top: 0.5rem;
       }
 
+      .tab-list {
+        display: flex;
+        gap: 0.65rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+      }
+
+      .tab-button {
+        border: 1px solid #1e293b;
+        border-radius: 999px;
+        padding: 0.45rem 1.5rem;
+        background: transparent;
+        color: #cdd9e5;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s ease, color 0.2s ease;
+      }
+
+      .tab-button:hover {
+        background: rgba(148, 163, 184, 0.1);
+      }
+
+      .tab-button.active {
+        background: linear-gradient(90deg, #2563eb, #7c3aed);
+        border-color: transparent;
+        color: #fff;
+      }
+
+      .tab-panel {
+        display: none;
+      }
+
+      .tab-panel.active {
+        display: block;
+      }
+
       .setting-row {
         display: flex;
         align-items: center;
@@ -64,6 +101,10 @@
         border-radius: 0.75rem;
         padding: 0.85rem 1rem;
         background: #111827;
+      }
+
+      .settings-card + .settings-card {
+        margin-top: 1.5rem;
       }
 
       .setting-copy {
@@ -111,7 +152,54 @@
   </head>
   <body>
     <main class="content">
-      <section class="settings-card">
+      <div class="tab-list" role="tablist" aria-label="General and navigation controls">
+        <button
+          id="general-tab"
+          class="tab-button active"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          data-tab-target="general"
+        >
+          General
+        </button>
+        <button
+          id="navigation-tab"
+          class="tab-button"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          data-tab-target="navigation"
+        >
+          Navigation
+        </button>
+      </div>
+      <section
+        class="settings-card tab-panel active"
+        data-tab-panel="general"
+        role="tabpanel"
+        aria-labelledby="general-tab"
+      >
+        <header class="settings-header">
+          <h1>General settings</h1>
+          <p>Adjust how the platform interacts with agents and consent-driven requests.</p>
+        </header>
+        <div id="generalStatusMessage" class="status-message">Loading general settings...</div>
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>Require screen-sharing consent</strong>
+            <small>Ask the agent to approve every remote screen share before streaming.</small>
+          </div>
+          <input id="screenConsentToggle" class="setting-toggle" type="checkbox" />
+        </div>
+      </section>
+      <section
+        class="settings-card tab-panel"
+        data-tab-panel="navigation"
+        role="tabpanel"
+        aria-labelledby="navigation-tab"
+        hidden
+      >
         <header class="settings-header">
           <h1>Navigation settings</h1>
           <p>Toggle each sidebar link to hide or show the corresponding feature.</p>

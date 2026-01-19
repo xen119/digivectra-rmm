@@ -80,6 +80,7 @@ internal static class Program
     private static CancellationTokenSource? monitoringCts;
     private static Task? monitoringTask;
     private const int MonitoringIntervalMs = 5_000;
+    private static readonly TimeSpan UpdateSummaryInterval = TimeSpan.FromSeconds(60);
     private static bool monitoringEnabled;
     private static PerformanceCounter? diskTimeCounter;
     private static long previousNetworkBytes = -1;
@@ -189,6 +190,7 @@ internal static class Program
         {
             Console.WriteLine("Connected. Sending identity...");
             await SendAgentIdentityAsync(socket, sessionCts.Token);
+            var updateSummaryTask = StartUpdateSummaryLoopAsync(socket, sessionCts.Token);
 
             bool licenseValid;
             try
@@ -207,7 +209,7 @@ internal static class Program
                 sessionCts.Cancel();
                 try
                 {
-                    await receiveTask;
+                    await Task.WhenAll(receiveTask, updateSummaryTask);
                 }
                 catch (OperationCanceledException)
                 {
@@ -229,7 +231,7 @@ internal static class Program
 
             try
             {
-                await Task.WhenAll(sendTask, receiveTask);
+                await Task.WhenAll(sendTask, receiveTask, updateSummaryTask);
             }
             catch (OperationCanceledException)
             {
@@ -1312,7 +1314,12 @@ internal static class Program
     {
         if (!force && lastUpdateSummary is not null)
         {
-            await SendJsonAsync(socket, new { type = "updates-summary", summary = lastUpdateSummary }, cancellationToken);
+            await SendJsonAsync(socket, new
+            {
+                type = "updates-summary",
+                summary = lastUpdateSummary,
+                pendingReboot = IsRebootPending()
+            }, cancellationToken);
             return;
         }
 
@@ -1340,6 +1347,26 @@ internal static class Program
         }, cancellationToken);
     }
 
+    private static async Task StartUpdateSummaryLoopAsync(ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(UpdateSummaryInterval, cancellationToken);
+                await SendAgentUpdateSummaryAsync(socket, cancellationToken, true);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to refresh updates summary: {ex.Message}");
+            }
+        }
+    }
+
     private static bool IsRebootPending()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -1347,20 +1374,28 @@ internal static class Program
             return false;
         }
 
+        return WindowsUpdateRebootRequired();
+    }
+
+    private static bool WindowsUpdateRebootRequired()
+    {
         var checks = new[]
         {
-            (path: @"SYSTEM\CurrentControlSet\Control\Session Manager", value: "PendingFileRenameOperations"),
             (path: @"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update", value: "RebootRequired"),
             (path: @"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing", value: "RebootPending"),
             (path: @"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing", value: "RebootRequired"),
-            (path: @"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing", value: "RebootInProgress"),
         };
 
-        foreach (var check in checks)
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
-            if (RegistryHasValue(check.path, check.value))
+            using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+            foreach (var check in checks)
             {
-                return true;
+                using var key = baseKey.OpenSubKey(check.path);
+                if (key?.GetValue(check.value) is not null)
+                {
+                    return true;
+                }
             }
         }
 
@@ -3327,7 +3362,13 @@ internal static class Program
                             ? screenIdElement.GetString()
                             : null;
                         var scale = GetRequestedCaptureScale(document.RootElement);
-                        await StartScreenSessionAsync(socket, sessionId, screenId, scale, cancellationToken);
+                        var requireConsent = true;
+                        if (document.RootElement.TryGetProperty("requireConsent", out var requireConsentElement) &&
+                            requireConsentElement.ValueKind == JsonValueKind.False)
+                        {
+                            requireConsent = false;
+                        }
+                        await StartScreenSessionAsync(socket, sessionId, screenId, scale, requireConsent, cancellationToken);
                     }
                 }
 
@@ -4702,15 +4743,22 @@ internal static class Program
         }
     }
 
-    private static async Task StartScreenSessionAsync(ClientWebSocket socket, string sessionId, string? screenId, double requestedScale, CancellationToken cancellationToken)
+    private static async Task StartScreenSessionAsync(ClientWebSocket socket, string sessionId, string? screenId, double requestedScale, bool requireConsent, CancellationToken cancellationToken)
     {
         selectedScreenId = screenId;
         captureScale = ClampCaptureScale(requestedScale);
         Console.WriteLine($"Starting screen session {sessionId} (screen:{selectedScreenId ?? "primary"})");
-        if (!await RequestScreenConsentAsync(cancellationToken))
+        if (requireConsent)
         {
-            await SendJsonAsync(socket, new { type = "screen-error", sessionId, message = "User declined screen share." }, cancellationToken);
-            return;
+            if (!await RequestScreenConsentAsync(cancellationToken))
+            {
+                await SendJsonAsync(socket, new { type = "screen-error", sessionId, message = "User declined screen share." }, cancellationToken);
+                return;
+            }
+        }
+        else
+        {
+            Console.WriteLine("Screen consent disabled by policy; automatically allowing the request.");
         }
 
         screenSessionId = sessionId;

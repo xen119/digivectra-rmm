@@ -1,6 +1,17 @@
 const statusEl = document.getElementById('statusMessage');
 const listEl = document.getElementById('settingsList');
+const generalStatusEl = document.getElementById('generalStatusMessage');
+const screenConsentToggle = document.getElementById('screenConsentToggle');
+const tabButtons = document.querySelectorAll('[data-tab-target]');
+const tabPanels = document.querySelectorAll('[data-tab-panel]');
+const TAB_STORAGE_KEY = 'settings.activeTab';
 const authFetch = (input, init = {}) => fetch(input, { credentials: 'same-origin', ...init });
+
+if (screenConsentToggle) {
+  screenConsentToggle.addEventListener('change', () => {
+    handleScreenConsentToggle(screenConsentToggle.checked);
+  });
+}
 
 function showStatus(message, variant = 'info') {
   if (statusEl) {
@@ -86,6 +97,97 @@ async function handleToggle(id, visible, label, toggle) {
   }
 }
 
+function showGeneralStatus(message, variant = 'info') {
+  if (!generalStatusEl) {
+    return;
+  }
+
+  generalStatusEl.textContent = message;
+  generalStatusEl.classList.remove('error', 'success');
+  if (variant === 'error') {
+    generalStatusEl.classList.add('error');
+  } else if (variant === 'success') {
+    generalStatusEl.classList.add('success');
+  }
+}
+
+async function handleScreenConsentToggle(enabled) {
+  if (!generalStatusEl || !screenConsentToggle) {
+    return;
+  }
+
+  screenConsentToggle.disabled = true;
+  showGeneralStatus('Saving general settings...');
+
+  try {
+    const response = await authFetch('/settings/general', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ screenConsentRequired: enabled }),
+    });
+
+    if (response.status === 401) {
+      window.location.href = '/login.html';
+      return;
+    }
+
+    if (response.status === 403) {
+      showGeneralStatus('Access denied. Contact an administrator.', 'error');
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    screenConsentToggle.checked = Boolean(data.screenConsentRequired);
+    showGeneralStatus('General settings updated.', 'success');
+  } catch (error) {
+    console.error('Unable to update general settings', error);
+    showGeneralStatus('Unable to update settings. Try again.', 'error');
+    screenConsentToggle.checked = !enabled;
+  } finally {
+    screenConsentToggle.disabled = false;
+  }
+}
+
+async function loadGeneralSettings() {
+  if (!generalStatusEl || !screenConsentToggle) {
+    return;
+  }
+
+  screenConsentToggle.disabled = true;
+  showGeneralStatus('Loading general settings...');
+
+  try {
+    const response = await authFetch('/settings/general', { cache: 'no-store' });
+
+    if (response.status === 401) {
+      window.location.href = '/login.html';
+      return;
+    }
+
+    if (response.status === 403) {
+      showGeneralStatus('Access denied. Contact an administrator.', 'error');
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    screenConsentToggle.checked = Boolean(data.screenConsentRequired);
+    showGeneralStatus('General settings loaded.', 'success');
+  } catch (error) {
+    console.error('Unable to load general settings', error);
+    showGeneralStatus('Unable to load general settings.', 'error');
+  } finally {
+    screenConsentToggle.disabled = false;
+  }
+}
+
 async function loadSettings() {
   showStatus('Loading navigation settings...');
   try {
@@ -115,3 +217,48 @@ async function loadSettings() {
 }
 
 loadSettings();
+loadGeneralSettings();
+configureTabs();
+
+function configureTabs() {
+  if (!tabButtons.length || !tabPanels.length) {
+    return;
+  }
+
+  tabButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const target = button.dataset.tabTarget;
+      if (target) {
+        setActiveTab(target);
+      }
+    });
+  });
+
+  const initialTab = localStorage.getItem(TAB_STORAGE_KEY) ?? 'general';
+  setActiveTab(initialTab);
+}
+
+function setActiveTab(tabKey) {
+  const panels = Array.from(tabPanels);
+  const buttons = Array.from(tabButtons);
+  const availableTabs = panels.map((panel) => panel.dataset.tabPanel);
+  const targetKey = availableTabs.includes(tabKey) ? tabKey : 'navigation';
+
+  buttons.forEach((button) => {
+    const isActive = button.dataset.tabTarget === targetKey;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+
+  panels.forEach((panel) => {
+    const isActive = panel.dataset.tabPanel === targetKey;
+    panel.classList.toggle('active', isActive);
+    if (isActive) {
+      panel.removeAttribute('hidden');
+    } else {
+      panel.setAttribute('hidden', '');
+    }
+  });
+
+  localStorage.setItem(TAB_STORAGE_KEY, targetKey);
+}

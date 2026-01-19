@@ -39,6 +39,7 @@ const NAVIGATION_CONFIG_PATH = path.join(DATA_DIR, 'navigation.json');
 const GROUPS_CONFIG_PATH = path.join(DATA_DIR, 'groups.json');
 const AGENT_GROUP_ASSIGNMENTS_PATH = path.join(DATA_DIR, 'agent-groups.json');
 const LICENSES_PATH = path.join(DATA_DIR, 'licenses.json');
+const GENERAL_SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 const VULNERABILITY_CONFIG_PATH = path.join(__dirname, 'config', 'vulnerability.json');
 const VULNERABILITY_STORE_PATH = path.join(DATA_DIR, 'vulnerabilities.json');
 const vulnerabilityIngestionJobs = new Map(); // sourceId -> { timer }
@@ -197,6 +198,11 @@ const NAVIGATION_ITEMS = [
     description: 'Manage and revoke agent license keys.',
   },
 ];
+const DEFAULT_GENERAL_SETTINGS = {
+  screenConsentRequired: true,
+};
+let generalSettings = loadGeneralSettings();
+
 const DEFAULT_COMPLIANCE_CONFIG = {
   defaultProfileId: null,
   assignments: {},
@@ -586,6 +592,51 @@ server.on('request', async (req, res) => {
         updateNavigationVisibility(updates);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ items: getNavigationPayload() }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const generalSettingsMatch = pathname === '/settings/general';
+  if (generalSettingsMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      screenConsentRequired: Boolean(generalSettings?.screenConsentRequired !== false),
+    }));
+    return;
+  }
+
+  if (generalSettingsMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        if (typeof payload.screenConsentRequired !== 'boolean') {
+          res.writeHead(400);
+          return res.end('screenConsentRequired must be true or false');
+        }
+
+        generalSettings = {
+          ...generalSettings,
+          screenConsentRequired: payload.screenConsentRequired,
+        };
+        persistGeneralSettings();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          screenConsentRequired: Boolean(generalSettings.screenConsentRequired !== false),
+        }));
       } catch (error) {
         res.writeHead(400);
         res.end('Invalid request');
@@ -1114,7 +1165,12 @@ server.on('request', async (req, res) => {
         });
 
         console.log(`Sending start-screen to agent ${agentId} for session ${sessionId}`);
-        sendControl(entry.socket, 'start-screen', { sessionId, screenId: requestedScreenId, scale: requestedScale });
+        sendControl(entry.socket, 'start-screen', {
+          sessionId,
+          screenId: requestedScreenId,
+          scale: requestedScale,
+          requireConsent: Boolean(generalSettings?.screenConsentRequired !== false),
+        });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ sessionId }));
       } catch (error) {
@@ -3312,10 +3368,11 @@ wss.on('connection', (socket, request) => {
     loggedInUser: 'Unknown',
     pendingReboot: false,
     softwareSummary: null,
-      features: [],
-      bitlockerStatus: null,
-      avStatus: null,
+    features: [],
+    bitlockerStatus: null,
+    avStatus: null,
     license: null,
+    identified: false,
   };
 
   {
@@ -3405,6 +3462,7 @@ wss.on('connection', (socket, request) => {
           info.externalIp = null;
         }
         info.license = licenseCode;
+        info.identified = true;
         markLicenseUsed(licenseCode);
         sendControl(socket, 'license-result', { success: true });
         if (parsed.specs != null) {
@@ -3665,6 +3723,10 @@ wss.on('connection', (socket, request) => {
     info.lastSeen = new Date().toISOString();
     clients.delete(socket);
     clientsById.delete(id);
+    if (!info.identified) {
+      agents.delete(id);
+      agentGroupAssignments.delete(id);
+    }
     shellStreams.delete(id);
     screenLists.delete(id);
     cancelScreenListRequest(id, new Error('agent disconnected'));
@@ -5512,6 +5574,54 @@ function updateNavigationVisibility(entries) {
   }
 
   return mutated;
+}
+
+function loadGeneralSettings() {
+  ensureDataDirectory();
+  let stored = null;
+  let foundFile = false;
+  try {
+    if (fs.existsSync(GENERAL_SETTINGS_PATH)) {
+      foundFile = true;
+      let raw = fs.readFileSync(GENERAL_SETTINGS_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      stored = JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load general settings', error);
+  }
+
+  const settings = {
+    ...DEFAULT_GENERAL_SETTINGS,
+  };
+  if (stored && typeof stored === 'object') {
+    if (typeof stored.screenConsentRequired === 'boolean') {
+      settings.screenConsentRequired = stored.screenConsentRequired;
+    }
+  }
+
+  if (!foundFile) {
+    persistGeneralSettings(settings);
+  }
+
+  return settings;
+}
+
+function persistGeneralSettings(settings = generalSettings) {
+  if (!settings) {
+    return false;
+  }
+
+  try {
+    ensureDataDirectory();
+    fs.writeFileSync(GENERAL_SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to persist general settings', error);
+    return false;
+  }
 }
 
 function loadComplianceConfig() {

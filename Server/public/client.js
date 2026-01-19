@@ -119,7 +119,11 @@ function renderAgentGroups(agents, groups) {
     return acc;
   }, {});
 
-  const allGroupNames = Array.from(new Set([...groups, ...Object.keys(grouped)]));
+  const uniqueGroupNames = new Set([...groups, ...Object.keys(grouped)]);
+  const groupedNames = Array.from(uniqueGroupNames)
+    .filter((name) => name !== 'Ungrouped')
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  const allGroupNames = ['Ungrouped', ...groupedNames];
   if (allGroupNames.length === 0) {
     listEl.textContent = 'No groups available.';
     return;

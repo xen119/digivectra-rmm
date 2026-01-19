@@ -312,7 +312,24 @@
       }
 
       #groupPanel {
-        margin-bottom: 1.25rem;
+        border: 1px solid #1f2937;
+        border-radius: 0.75rem;
+        padding: 1rem 1.25rem;
+        background: #0d1117;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      #groupPanel header h2 {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      #groupPanel header p {
+        margin: 0;
+        font-size: 0.85rem;
+        color: #94a3b8;
       }
 
       #groupPanel form {
@@ -367,6 +384,7 @@
           <a data-nav-id="compliance-admin" href="compliance-admin.html" target="_blank" rel="noopener" class="sidebar-link">Compliance Admin</a>
           <a data-nav-id="gpo" href="gpo.html" target="_blank" rel="noopener" class="sidebar-link">GPO Management</a>
           <a data-nav-id="licenses" href="licenses.html" target="_blank" rel="noopener" class="sidebar-link">Licenses</a>
+          <a data-nav-id="groups-admin" href="groups.html" target="_blank" rel="noopener" class="sidebar-link">Groups</a>
           <a href="settings.html" target="_blank" rel="noopener" class="sidebar-link">Settings</a>
         </nav>
       </aside>
@@ -379,15 +397,6 @@
           <a id="downloadAgentLink" href="/agent/download" class="download-button" download>Download agent</a>
         </div>
         <p id="status">Loading agent list.</p>
-        <div id="groupPanel">
-          <form id="newGroupForm">
-            <label for="newGroupName">Create group</label>
-            <div class="input-row">
-              <input id="newGroupName" placeholder="Group name" required />
-              <button type="submit">Add</button>
-            </div>
-          </form>
-        </div>
         <div id="agents" class="groups"></div>
       </main>
     </div>

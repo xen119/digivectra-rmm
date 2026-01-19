@@ -351,6 +351,51 @@ server.on('request', async (req, res) => {
     return;
   }
 
+  if (pathname === '/groups' && req.method === 'DELETE') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+    collectBody(req, (body) => {
+      try {
+        const { name } = JSON.parse(body);
+        const normalized = normalizeGroupName(name);
+        if (!normalized || normalized === DEFAULT_GROUP) {
+          res.writeHead(400);
+          return res.end('Invalid group name');
+        }
+        if (!groups.has(normalized)) {
+          res.writeHead(404);
+          return res.end('Group not found');
+        }
+
+        groups.delete(normalized);
+        persistGroups();
+
+        for (const entry of clientsById.values()) {
+          if ((entry.info.group ?? DEFAULT_GROUP) === normalized) {
+            entry.info.group = DEFAULT_GROUP;
+          }
+        }
+
+        for (const [agentId, groupName] of agentGroupAssignments) {
+          if (groupName === normalized) {
+            agentGroupAssignments.set(agentId, DEFAULT_GROUP);
+          }
+        }
+
+        persistAgentGroupAssignments();
+        res.writeHead(204);
+        res.end();
+      } catch (error) {
+        console.error('Failed to delete group', error);
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
   if (pathname === '/groups/assign' && req.method === 'POST') {
     if (!ensureRole(req, res, 'operator')) {
       return;

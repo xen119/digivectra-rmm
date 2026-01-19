@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Group Management</title>
+    <link rel="stylesheet" href="compact.css" />
+    <style>
+      :root {
+        background: #0d1117;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #0d1117;
+        color: #cdd9e5;
+        font-family: system-ui, sans-serif;
+      }
+
+      .content {
+        padding: 2rem;
+        max-width: 960px;
+        margin: 0 auto;
+      }
+
+      .panel {
+        background: #0f141a;
+        border: 1px solid #1e293b;
+        border-radius: 1rem;
+        padding: 1.75rem;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+      }
+
+      .panel header h1 {
+        margin: 0;
+        font-size: 1.5rem;
+      }
+
+      .panel header p {
+        margin: 0;
+        color: #94a3b8;
+      }
+
+      .status-message {
+        font-size: 0.95rem;
+        color: #94a3b8;
+      }
+
+      .status-message.success {
+        color: #34d399;
+      }
+
+      .status-message.error {
+        color: #f87171;
+      }
+
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .input-row {
+        display: flex;
+        gap: 0.5rem;
+      }
+
+      input {
+        flex: 1;
+        border-radius: 0.5rem;
+        border: 1px solid #1f2937;
+        background: #0d1117;
+        color: #cdd9e5;
+        padding: 0.55rem 0.75rem;
+      }
+
+      button {
+        border: none;
+        border-radius: 0.5rem;
+        padding: 0.55rem 0.9rem;
+        background: #2563eb;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .group-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
+      }
+
+      .group-row {
+        border: 1px solid #1f2937;
+        border-radius: 0.75rem;
+        padding: 0.9rem 1rem;
+        background: #111827;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+
+      .group-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+
+      .group-meta small {
+        color: #94a3b8;
+        font-size: 0.85rem;
+      }
+
+      .group-actions {
+        display: flex;
+        gap: 0.35rem;
+      }
+
+      .group-actions button.secondary {
+        background: #0f172a;
+        border: 1px solid #30363d;
+        color: #cdd9e5;
+      }
+
+      @media (max-width: 640px) {
+        .group-row {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+        .input-row {
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="content">
+      <section class="panel">
+        <header>
+          <h1>Device groups</h1>
+          <p>View all groups, add new ones, and remove unused entries from this page.</p>
+        </header>
+        <div id="groupStatus" class="status-message">Loading groups...</div>
+        <form id="newGroupForm">
+          <label for="newGroupName">Create group</label>
+          <div class="input-row">
+            <input id="newGroupName" placeholder="Group name" required />
+            <button type="submit">Add</button>
+          </div>
+        </form>
+        <div id="groupList" class="group-list" aria-live="polite"></div>
+      </section>
+    </main>
+    <script src="groups.js"></script>
+  </body>
+</html>

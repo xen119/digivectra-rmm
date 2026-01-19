@@ -265,6 +265,7 @@ internal static class Program
     }
 
     private const string AgentIdFile = "agent.id";
+    private const string AgentMetadataFile = "agent.meta";
     private static string? agentId;
     private static DeviceSpecs? deviceSpecs;
     private static UpdateSummary? lastUpdateSummary;
@@ -761,7 +762,20 @@ internal static class Program
             return agentId;
         }
 
-        var path = Path.Combine(AppContext.BaseDirectory, AgentIdFile);
+        var basePath = AppContext.BaseDirectory;
+        var path = Path.Combine(basePath, AgentIdFile);
+        var metadataPath = Path.Combine(basePath, AgentMetadataFile);
+        var currentFingerprint = GetMachineFingerprint();
+        string? storedFingerprint = null;
+        try
+        {
+            storedFingerprint = ReadAgentFingerprint(metadataPath);
+        }
+        catch
+        {
+            // ignore metadata read errors
+        }
+        string? existingId = null;
         try
         {
             if (File.Exists(path))
@@ -769,8 +783,7 @@ internal static class Program
                 var existing = File.ReadAllText(path).Trim();
                 if (!string.IsNullOrWhiteSpace(existing))
                 {
-                    agentId = existing;
-                    return agentId;
+                    existingId = existing;
                 }
             }
         }
@@ -779,17 +792,11 @@ internal static class Program
             // ignore read failures
         }
 
-        agentId = Guid.NewGuid().ToString("D");
-        try
-        {
-            File.WriteAllText(path, agentId);
-        }
-        catch
-        {
-            // ignore write failures
-        }
-
-        return agentId;
+        var reuseExisting = !string.IsNullOrWhiteSpace(existingId) &&
+            (storedFingerprint is null || string.Equals(storedFingerprint, currentFingerprint, StringComparison.Ordinal));
+        agentId = reuseExisting ? existingId : Guid.NewGuid().ToString("D");
+        PersistAgentIdentity(path, metadataPath, currentFingerprint);
+        return agentId!;
     }
 
     private static string GetAgentLocalUser()
@@ -3403,6 +3410,75 @@ internal static class Program
             !string.IsNullOrWhiteSpace(assignedComplianceProfileId))
         {
             await EvaluateComplianceAsync(socket, assignedComplianceProfileId!, cancellationToken);
+        }
+    }
+
+    private static string GetMachineFingerprint()
+    {
+        try
+        {
+            var host = Environment.MachineName.Trim();
+            var macAddress = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(nic => nic.OperationalStatus == OperationalStatus.Up && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                .Select(nic => nic.GetPhysicalAddress()?.ToString()?.Trim())
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
+            return string.IsNullOrWhiteSpace(macAddress) ? host : $"{host}-{macAddress}";
+        }
+        catch
+        {
+            return Environment.MachineName.Trim();
+        }
+    }
+
+    private static string? ReadAgentFingerprint(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var content = File.ReadAllText(path);
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(content);
+            if (document.RootElement.TryGetProperty("fingerprint", out var property) && property.ValueKind == JsonValueKind.String)
+            {
+                return property.GetString()?.Trim();
+            }
+        }
+        catch
+        {
+            // ignore parse problems
+        }
+
+        return null;
+    }
+
+    private static void PersistAgentIdentity(string idPath, string metadataPath, string fingerprint)
+    {
+        try
+        {
+            File.WriteAllText(idPath, agentId ?? Guid.NewGuid().ToString("D"));
+        }
+        catch
+        {
+            // ignore write failures
+        }
+
+        try
+        {
+            var payload = JsonSerializer.Serialize(new { fingerprint });
+            File.WriteAllText(metadataPath, payload);
+        }
+        catch
+        {
+            // ignore write failures
         }
     }
 

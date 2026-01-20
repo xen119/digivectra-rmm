@@ -1,0 +1,77 @@
+[
+  {
+    "id": "3e4cdf73-949b-41e8-b553-0e9c140d2ac4",
+    "timestamp": 1768891582130,
+    "sessionId": "b48de935-23d7-4eb5-9384-3a0759e35d28",
+    "user": "admin",
+    "type": "prompt",
+    "text": "Hi"
+  },
+  {
+    "id": "aa08fcc6-c50f-4000-a093-367b4fd5600b",
+    "timestamp": 1768891583866,
+    "sessionId": "b48de935-23d7-4eb5-9384-3a0759e35d28",
+    "user": "admin",
+    "type": "response",
+    "text": "Hello! How can I assist you today? Are you looking for information about your agents, or do you need help with something specific?"
+  },
+  {
+    "id": "009bddb4-c95f-4161-9b82-f5fdf02fccf7",
+    "timestamp": 1768891612917,
+    "sessionId": "b48de935-23d7-4eb5-9384-3a0759e35d28",
+    "user": "admin",
+    "type": "prompt",
+    "text": "What can you assist me with?"
+  },
+  {
+    "id": "5c3e2e1e-efd4-49c6-9d3a-b7809473e015",
+    "timestamp": 1768891616665,
+    "sessionId": "b48de935-23d7-4eb5-9384-3a0759e35d28",
+    "user": "admin",
+    "type": "response",
+    "text": "I can assist you with the following tasks related to your fleet of agents:\n\n1. **Reviewing Connected Agents**: I can provide a summary of the agents connected to the platform, including their health status.\n\n2. **Detailed Agent Information**: If you need more in-depth information about a specific agent, I can retrieve detailed data about that agent.\n\n3. **Managing Agent Groups**: If you want to organize your agents, I can help you move agents into different groups for targeting.\n\n4. **Identifying Risks**: I can help you assess the health of your agents and identify any potential risks.\n\nIf you have a specific task in mind or need assistance with something else, please let me know!"
+  },
+  {
+    "id": "79acb577-613f-43cf-bfa1-b6258721bdd4",
+    "timestamp": 1768891655981,
+    "sessionId": "b48de935-23d7-4eb5-9384-3a0759e35d28",
+    "user": "admin",
+    "type": "prompt",
+    "text": "please List the agents"
+  },
+  {
+    "id": "34fcae15-09fe-4344-b831-a90b764d9277",
+    "timestamp": 1768891657307,
+    "sessionId": "b48de935-23d7-4eb5-9384-3a0759e35d28",
+    "user": "admin",
+    "type": "tool",
+    "tool": "list_agents",
+    "arguments": {
+      "limit": 10
+    },
+    "result": {
+      "agents": [
+        {
+          "id": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+          "name": "SLT-LPT-CPT013",
+          "status": "online",
+          "group": "ZA-CPT",
+          "os": "Microsoft Windows 10.0.26200",
+          "connectedAt": "2026-01-20T06:44:19.716Z",
+          "lastSeen": null,
+          "monitoringAlert": false,
+          "pendingReboot": false
+        }
+      ]
+    },
+    "error": null
+  },
+  {
+    "id": "37417877-27e6-46b1-9c87-20bc0238d1f7",
+    "timestamp": 1768891661876,
+    "sessionId": "b48de935-23d7-4eb5-9384-3a0759e35d28",
+    "user": "admin",
+    "type": "response",
+    "text": "Here is a summary of the connected agents:\n\n1. **Agent Name**: SLT-LPT-CPT013\n   - **ID**: 7c0cf07f-f76b-4984-9385-ffa54c65d630\n   - **Status**: Online\n   - **Group**: ZA-CPT\n   - **Operating System**: Microsoft Windows 10.0.26200\n   - **Connected At**: January 20, 2026\n   - **Monitoring Alert**: No alerts\n   - **Pending Reboot**: No pending reboot\n\nWould you like to see more agents, or do you need detailed information about a specific agent?"
+  }
+]

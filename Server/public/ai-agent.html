@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>AI Agent</title>
+    <link rel="stylesheet" href="compact.css" />
+    <style>
+      :root {
+        background: #0d1117;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #0c1117;
+        color: #cdd9e5;
+        font-family: system-ui, sans-serif;
+      }
+
+      main.ai-page {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+        gap: 1rem;
+        padding: 1.5rem;
+        box-sizing: border-box;
+      }
+
+      .ai-main,
+      .ai-sidebar {
+        background: #0f141a;
+        border: 1px solid #1f2937;
+        border-radius: 1rem;
+        padding: 1.25rem;
+        box-shadow: 0 10px 35px rgba(2, 6, 23, 0.5);
+      }
+
+      .ai-main {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        min-height: 70vh;
+      }
+
+      .ai-main-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+
+      .ai-status {
+        font-size: 0.9rem;
+        color: #94a3b8;
+      }
+
+      .ai-message-list {
+        flex: 1;
+        overflow-y: auto;
+        border: 1px solid #1f2937;
+        border-radius: 0.85rem;
+        padding: 1rem;
+        background: #090c13;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .ai-message {
+        display: flex;
+      }
+
+      .ai-message .ai-bubble {
+        padding: 0.65rem 0.85rem;
+        border-radius: 0.65rem;
+        max-width: 80%;
+        font-size: 0.95rem;
+        line-height: 1.4;
+      }
+
+      .ai-message.user .ai-bubble {
+        background: #1f2937;
+        margin-left: auto;
+      }
+
+      .ai-message.assistant .ai-bubble {
+        background: #111827;
+      }
+
+      .ai-tool-call {
+        border: 1px dashed #2dd4bf;
+        border-radius: 0.6rem;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.85rem;
+        background: rgba(16, 185, 129, 0.05);
+        color: #2dd4bf;
+      }
+
+      .ai-prompt-form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.65rem;
+      }
+
+      .ai-prompt-form textarea {
+        width: 100%;
+        min-height: 100px;
+        border-radius: 0.75rem;
+        border: 1px solid #1f2937;
+        background: #090c13;
+        color: #cdd9e5;
+        padding: 0.9rem;
+        font-size: 1rem;
+        resize: vertical;
+        line-height: 1.4;
+        font-family: inherit;
+      }
+
+      .ai-form-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+
+      .ai-form-actions button {
+        border: none;
+        border-radius: 0.65rem;
+        padding: 0.6rem 1.25rem;
+        background: linear-gradient(135deg, #2563eb, #7c3aed);
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .ai-form-actions button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .ai-session-meta {
+        font-size: 0.85rem;
+        color: #94a3b8;
+      }
+
+      .ai-sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .ai-sidebar-panel {
+        border: 1px solid #1f2937;
+        border-radius: 0.85rem;
+        padding: 1rem;
+        background: #090c13;
+      }
+
+      .ai-sidebar-panel h2 {
+        margin: 0 0 0.4rem;
+        font-size: 1rem;
+      }
+
+      .ai-sidebar-panel p {
+        margin: 0;
+        color: #94a3b8;
+        font-size: 0.9rem;
+      }
+
+      .ai-activity-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        max-height: 360px;
+        overflow-y: auto;
+      }
+
+      .ai-activity-entry {
+        border-bottom: 1px solid #1f2937;
+        padding-bottom: 0.5rem;
+      }
+
+      .ai-activity-entry:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+
+      .ai-activity-entry small {
+        color: #94a3b8;
+        display: block;
+        margin-top: 0.25rem;
+      }
+
+      .ai-config-link {
+        margin: 0;
+        font-size: 0.9rem;
+        color: #94a3b8;
+      }
+
+      .ai-config-link a {
+        color: #38bdf8;
+        text-decoration: none;
+      }
+
+      .ai-empty {
+        color: #7c8ba3;
+        text-align: center;
+        width: 100%;
+      }
+
+      @media (max-width: 960px) {
+        main.ai-page {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="ai-page">
+      <section class="ai-main">
+        <div class="ai-main-header">
+          <div>
+            <h1>AI Agent</h1>
+            <p class="ai-config-link">
+              Connect an OpenAI API key in <a href="settings.html" target="_blank" rel="noopener">Settings</a> to begin.
+            </p>
+          </div>
+          <div id="aiStatusMessage" class="ai-status" role="status"></div>
+        </div>
+        <div id="aiMessageList" class="ai-message-list">
+          <p class="ai-empty">Ask the assistant about agents, monitoring, or actions.</p>
+        </div>
+        <form id="aiPromptForm" class="ai-prompt-form">
+          <textarea
+            id="aiPromptInput"
+            name="prompt"
+            placeholder="Describe the task you want the assistant to perform..."
+            autocomplete="off"
+          ></textarea>
+          <div class="ai-form-actions">
+            <button id="aiSendButton" type="submit">Send</button>
+            <span class="ai-session-meta"
+              >Session <strong id="aiSessionId">—</strong></span
+            >
+          </div>
+        </form>
+      </section>
+      <aside class="ai-sidebar">
+        <div class="ai-sidebar-panel">
+          <h2>Session information</h2>
+          <p id="aiConfigStatus">Loading configuration…</p>
+        </div>
+        <div class="ai-sidebar-panel">
+          <h2>Recent activity</h2>
+          <div id="aiActivityList" class="ai-activity-list" aria-live="polite">
+            <p class="ai-empty">Loading the activity log…</p>
+          </div>
+        </div>
+      </aside>
+    </main>
+    <script src="ai-agent.js"></script>
+  </body>
+</html>

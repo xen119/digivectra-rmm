@@ -168,6 +168,12 @@ const NAVIGATION_ITEMS = [
     description: 'Create recurring automation or patch campaigns.',
   },
   {
+    id: 'ai-agent',
+    label: 'AI Agent',
+    href: 'ai-agent.html',
+    description: 'Talk to an assistant that can review agents and take guided actions.',
+  },
+  {
     id: 'users',
     label: 'Users',
     href: 'users.html',
@@ -198,10 +204,81 @@ const NAVIGATION_ITEMS = [
     description: 'Manage and revoke agent license keys.',
   },
 ];
+
+const AI_HISTORY_PATH = path.join(DATA_DIR, 'ai-history.json');
+const AI_HISTORY_LIMIT = 400;
+const AI_SESSION_TTL_MS = 2 * 60 * 60_1000;
+const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+const OPENAI_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
+const DEFAULT_AI_AGENT_SETTINGS = {
+  systemPrompt:
+    'You are the RMM operations assistant. Help administrators understand the fleet, surface risks, and take safe actions via the provided tools. Ask clarifying questions before acting, think step-by-step, and explain each outcome.',
+  apiKey: null,
+};
+const AI_TOOL_INSTRUCTIONS = [
+  'Use list_agents to review connected agents and their health.',
+  'Use get_agent_details when you need historical context for a specific agent.',
+  'Use assign_agent_group to move an agent between groups when an action is requested.',
+].join(' ');
+const AI_TOOL_DEFINITIONS = [
+  {
+    name: 'list_agents',
+    description: 'Return a short summary of agents that are connected to the platform.',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 50,
+          description: 'Maximum number of agents to return.',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_agent_details',
+    description: 'Read detailed information about a single agent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent to describe.',
+        },
+      },
+      required: ['agent_id'],
+    },
+  },
+  {
+    name: 'assign_agent_group',
+    description: 'Move an agent into a different group for targeting.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent to move.',
+        },
+        group: {
+          type: 'string',
+          description: 'Destination group name.',
+        },
+      },
+      required: ['agent_id', 'group'],
+    },
+  },
+];
+const AI_CONVERSATION_HISTORY_LIMIT = 20;
 const DEFAULT_GENERAL_SETTINGS = {
   screenConsentRequired: true,
+  aiAgent: {
+    ...DEFAULT_AI_AGENT_SETTINGS,
+  },
 };
 let generalSettings = loadGeneralSettings();
+const aiHistory = loadAiHistory();
+const aiConversations = new Map();
 
 const DEFAULT_COMPLIANCE_CONFIG = {
   defaultProfileId: null,
@@ -691,6 +768,192 @@ server.on('request', async (req, res) => {
     return;
   }
 
+  const aiSettingsMatch = pathname === '/settings/ai';
+  if (aiSettingsMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    const payload = {
+      systemPrompt: generalSettings.aiAgent?.systemPrompt ?? DEFAULT_AI_AGENT_SETTINGS.systemPrompt,
+      apiKeyConfigured: Boolean(generalSettings.aiAgent?.apiKey),
+    };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(payload));
+    return;
+  }
+
+  if (aiSettingsMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const systemPrompt = typeof payload.systemPrompt === 'string'
+          ? payload.systemPrompt
+          : generalSettings.aiAgent?.systemPrompt ?? DEFAULT_AI_AGENT_SETTINGS.systemPrompt;
+        const updatedAiAgent = {
+          ...generalSettings.aiAgent,
+          systemPrompt,
+        };
+
+        if (payload.apiKey !== undefined) {
+          const key = typeof payload.apiKey === 'string' ? payload.apiKey.trim() : '';
+          updatedAiAgent.apiKey = key ? key : null;
+        }
+
+        generalSettings = {
+          ...generalSettings,
+          aiAgent: updatedAiAgent,
+        };
+        persistGeneralSettings();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          systemPrompt: updatedAiAgent.systemPrompt,
+          apiKeyConfigured: Boolean(updatedAiAgent.apiKey),
+        }));
+      } catch (error) {
+        console.error('Unable to update AI settings', error);
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const aiSessionMatch = pathname === '/ai/session';
+  if (aiSessionMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    const sessionId = createAiSession();
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ sessionId }));
+    return;
+  }
+
+  const aiHistoryMatch = pathname === '/ai/history';
+  if (aiHistoryMatch && req.method === 'GET') {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    const limit = Number.parseInt(requestedUrl.searchParams.get('limit') ?? '', 10) || 50;
+    const history = getRecentAiHistory({ limit });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ history }));
+    return;
+  }
+
+  const aiMessageMatch = pathname === '/ai/message';
+  if (aiMessageMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    collectBody(req, async (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+        if (!text) {
+          res.writeHead(400);
+          res.end('Message text is required');
+          return;
+        }
+
+        const sessionId = typeof payload.sessionId === 'string' && payload.sessionId.trim()
+          ? payload.sessionId.trim()
+          : createAiSession();
+        const session = getAiConversation(sessionId);
+        const sessionUser = req.userSession?.user?.username ?? 'server';
+
+        recordAiHistory({
+          sessionId,
+          user: sessionUser,
+          type: 'prompt',
+          text,
+        });
+
+        const baseMessages = buildAiMessages(session, text);
+        const initialResponse = await callOpenAi(baseMessages);
+        let assistantMessage = initialResponse.choice?.message ?? null;
+        let functionCallMessage = null;
+        let functionResultMessage = null;
+        let toolDetails = null;
+
+        if (assistantMessage?.function_call) {
+          const toolResult = await executeAiTool(assistantMessage.function_call);
+          toolDetails = {
+            name: assistantMessage.function_call.name,
+            arguments: toolResult.arguments,
+            result: toolResult.result,
+            error: toolResult.error ?? null,
+          };
+          recordAiHistory({
+            sessionId,
+            user: sessionUser,
+            type: 'tool',
+            tool: assistantMessage.function_call.name,
+            arguments: toolResult.arguments,
+            result: toolResult.result,
+            error: toolResult.error ?? null,
+          });
+
+          functionCallMessage = {
+            role: 'assistant',
+            content: null,
+            function_call: assistantMessage.function_call,
+          };
+          functionResultMessage = {
+            role: 'function',
+            name: assistantMessage.function_call.name,
+            content: JSON.stringify(toolResult.result ?? { error: toolResult.error ?? 'No result' }),
+          };
+
+          const followUpMessages = [
+            ...baseMessages,
+            functionCallMessage,
+            functionResultMessage,
+          ];
+          const followUpResponse = await callOpenAi(followUpMessages, { function_call: 'none' });
+          assistantMessage = followUpResponse.choice?.message ?? null;
+        }
+
+        const assistantContent = assistantMessage?.content ?? '';
+        recordAiHistory({
+          sessionId,
+          user: sessionUser,
+          type: 'response',
+          text: assistantContent,
+        });
+
+        const sessionEntries = [
+          { role: 'user', content: text },
+          ...(functionCallMessage && functionResultMessage ? [functionCallMessage, functionResultMessage] : []),
+          { role: 'assistant', content: assistantContent },
+        ];
+        appendSessionMessages(session, sessionEntries);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          sessionId,
+          message: assistantContent,
+          toolCall: toolDetails,
+        }));
+      } catch (error) {
+        console.error('AI message failed', error);
+        res.writeHead(502);
+        res.end('AI service unavailable');
+      }
+    });
+
+    return;
+  }
   const complianceProfilesMatch = pathname === '/compliance/profiles';
   if (complianceProfilesMatch && req.method === 'GET') {
     if (!ensureRole(req, res, 'viewer')) {
@@ -5639,11 +5902,25 @@ function loadGeneralSettings() {
   }
 
   const settings = {
-    ...DEFAULT_GENERAL_SETTINGS,
+    screenConsentRequired: true,
+    aiAgent: {
+      ...DEFAULT_AI_AGENT_SETTINGS,
+    },
   };
   if (stored && typeof stored === 'object') {
     if (typeof stored.screenConsentRequired === 'boolean') {
       settings.screenConsentRequired = stored.screenConsentRequired;
+    }
+    if (stored.aiAgent && typeof stored.aiAgent === 'object') {
+      const aiAgent = stored.aiAgent;
+      if (typeof aiAgent.systemPrompt === 'string') {
+        settings.aiAgent.systemPrompt = aiAgent.systemPrompt;
+      }
+      if (typeof aiAgent.apiKey === 'string') {
+        settings.aiAgent.apiKey = aiAgent.apiKey.trim() ? aiAgent.apiKey : null;
+      } else if (aiAgent.apiKey === null) {
+        settings.aiAgent.apiKey = null;
+      }
     }
   }
 
@@ -5666,6 +5943,326 @@ function persistGeneralSettings(settings = generalSettings) {
   } catch (error) {
     console.error('Failed to persist general settings', error);
     return false;
+  }
+}
+
+function loadAiHistory() {
+  ensureDataDirectory();
+  try {
+    if (fs.existsSync(AI_HISTORY_PATH)) {
+      let raw = fs.readFileSync(AI_HISTORY_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load AI history', error);
+  }
+  return [];
+}
+
+function persistAiHistory() {
+  try {
+    ensureDataDirectory();
+    fs.writeFileSync(AI_HISTORY_PATH, JSON.stringify(aiHistory, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to persist AI history', error);
+    return false;
+  }
+}
+
+function recordAiHistory(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return;
+  }
+
+  aiHistory.push({
+    id: uuidv4(),
+    timestamp: Date.now(),
+    ...payload,
+  });
+  while (aiHistory.length > AI_HISTORY_LIMIT) {
+    aiHistory.shift();
+  }
+
+  persistAiHistory();
+}
+
+function getRecentAiHistory(options = {}) {
+  const limit = Math.max(1, Math.min(options.limit || 50, AI_HISTORY_LIMIT));
+  const slice = aiHistory.slice(-limit);
+  return slice.reverse().map((entry) => ({ ...entry }));
+}
+
+function pruneAiSessions() {
+  const now = Date.now();
+  for (const [sessionId, session] of aiConversations.entries()) {
+    if (!session || typeof session.lastUsed !== 'number') {
+      aiConversations.delete(sessionId);
+      continue;
+    }
+    if (now - session.lastUsed > AI_SESSION_TTL_MS) {
+      aiConversations.delete(sessionId);
+    }
+  }
+}
+
+function createAiSession(providedId) {
+  pruneAiSessions();
+  const sessionId = typeof providedId === 'string' && providedId.trim()
+    ? providedId.trim()
+    : uuidv4();
+  aiConversations.set(sessionId, {
+    id: sessionId,
+    messages: [],
+    lastUsed: Date.now(),
+  });
+  return sessionId;
+}
+
+function getAiConversation(sessionId) {
+  if (!sessionId) {
+    return null;
+  }
+  pruneAiSessions();
+  const existing = aiConversations.get(sessionId);
+  if (existing) {
+    existing.lastUsed = Date.now();
+    return existing;
+  }
+  const newSession = {
+    id: sessionId,
+    messages: [],
+    lastUsed: Date.now(),
+  };
+  aiConversations.set(sessionId, newSession);
+  return newSession;
+}
+
+function appendSessionMessages(session, entries) {
+  if (!session || !Array.isArray(entries)) {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry || !entry.role) {
+      continue;
+    }
+    session.messages.push({ ...entry });
+  }
+
+  while (session.messages.length > AI_CONVERSATION_HISTORY_LIMIT) {
+    session.messages.shift();
+  }
+
+  session.lastUsed = Date.now();
+}
+
+function buildAiMessages(session, userContent) {
+  const systemPrompt = generalSettings.aiAgent?.systemPrompt ?? DEFAULT_AI_AGENT_SETTINGS.systemPrompt;
+  const history = Array.isArray(session?.messages) ? session.messages.slice() : [];
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'system', content: `Tool guidance: ${AI_TOOL_INSTRUCTIONS}` },
+    ...history,
+    { role: 'user', content: userContent },
+  ];
+}
+
+async function callOpenAi(messages, overrides = {}) {
+  const apiKey = generalSettings.aiAgent?.apiKey;
+  if (!apiKey) {
+    throw new Error('OpenAI API key is not configured');
+  }
+
+  const payload = {
+    model: OPENAI_MODEL,
+    messages,
+    temperature: 0.2,
+    max_tokens: 700,
+    functions: AI_TOOL_DEFINITIONS,
+    function_call: 'auto',
+    ...overrides,
+  };
+
+  if (!overrides.functions) {
+    payload.functions = AI_TOOL_DEFINITIONS;
+  }
+  if (!overrides.function_call) {
+    payload.function_call = 'auto';
+  }
+
+  const response = await fetch(OPENAI_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`OpenAI request failed (${response.status}) ${errorBody}`);
+  }
+
+  const data = await response.json();
+  const choice = Array.isArray(data.choices) ? data.choices[0] : null;
+  if (!choice) {
+    throw new Error('OpenAI returned no choices');
+  }
+  return { choice, data };
+}
+
+function parseFunctionArguments(raw) {
+  if (!raw) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
+  } catch (error) {
+    return null;
+  }
+  return null;
+}
+
+function formatAgentSummary(info) {
+  if (!info) {
+    return null;
+  }
+  return {
+    id: info.id,
+    name: info.name ?? 'Unknown',
+    status: info.status ?? 'offline',
+    group: info.group ?? DEFAULT_GROUP,
+    os: info.os ?? info.platform ?? 'Unknown',
+    connectedAt: info.connectedAt ? new Date(info.connectedAt).toISOString() : null,
+    lastSeen: info.lastSeen ? new Date(info.lastSeen).toISOString() : null,
+    monitoringAlert: agentAlertStatus.get(info.id) ?? false,
+    pendingReboot: Boolean(info.pendingReboot),
+  };
+}
+
+function formatAgentDetails(info) {
+  if (!info) {
+    return null;
+  }
+  return {
+    id: info.id,
+    name: info.name ?? 'Unknown',
+    status: info.status ?? 'offline',
+    os: info.os ?? info.platform ?? 'Unknown',
+    group: info.group ?? DEFAULT_GROUP,
+    components: {
+      monitoring: shouldMonitorAgent(info),
+    },
+    lastSeen: info.lastSeen ? new Date(info.lastSeen).toISOString() : null,
+    connectedAt: info.connectedAt ? new Date(info.connectedAt).toISOString() : null,
+    pendingReboot: Boolean(info.pendingReboot),
+    specs: info.specs ?? null,
+    features: Array.isArray(info.features) ? info.features : [],
+    softwareSummary: info.softwareSummary ?? null,
+  };
+}
+
+async function executeAiTool(functionCall) {
+  if (!functionCall) {
+    return {
+      arguments: {},
+      result: null,
+      error: 'No function call was provided.',
+    };
+  }
+
+  const args = parseFunctionArguments(functionCall.arguments);
+  if (args === null) {
+    return {
+      arguments: null,
+      result: null,
+      error: 'Unable to decode function arguments.',
+    };
+  }
+
+  switch (functionCall.name) {
+    case 'list_agents': {
+      const limit = Number.isFinite(Number(args?.limit))
+        ? Math.min(50, Math.max(1, Number(args.limit)))
+        : 20;
+      const summaries = Array.from(clientsById.values())
+        .map((entry) => formatAgentSummary(entry.info))
+        .filter(Boolean)
+        .slice(0, limit);
+      return {
+        arguments: args,
+        result: { agents: summaries },
+      };
+    }
+    case 'get_agent_details': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const liveEntry = clientsById.get(agentId);
+      const targetInfo = liveEntry?.info ?? agents.get(agentId) ?? null;
+      if (!targetInfo) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'Agent not found.',
+        };
+      }
+      return {
+        arguments: args,
+        result: { agent: formatAgentDetails(targetInfo) },
+      };
+    }
+    case 'assign_agent_group': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      const groupName = typeof args?.group === 'string' ? args.group.trim() : '';
+      if (!agentId || !groupName) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id and group are required.',
+        };
+      }
+      const entry = clientsById.get(agentId);
+      if (!entry) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'Agent is not connected.',
+        };
+      }
+      const previousGroup = entry.info.group ?? DEFAULT_GROUP;
+      const assignedGroup = assignAgentToGroup(agentId, groupName);
+      return {
+        arguments: args,
+        result: {
+          agentId,
+          previousGroup,
+          group: assignedGroup,
+        },
+      };
+    }
+    default:
+      return {
+        arguments: args,
+        result: null,
+        error: 'Requested tool is not implemented.',
+      };
   }
 }
 

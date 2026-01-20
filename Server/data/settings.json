@@ -1,3 +1,7 @@
 {
-  "screenConsentRequired": false
+  "screenConsentRequired": false,
+  "aiAgent": {
+    "systemPrompt": "You are the RMM operations assistant. Help administrators understand the fleet, surface risks, and take safe actions via the provided tools. Ask clarifying questions before acting, think step-by-step, and explain each outcome.",
+    "apiKey": "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"
+  }
 }

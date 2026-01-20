@@ -4,6 +4,11 @@ const generalStatusEl = document.getElementById('generalStatusMessage');
 const screenConsentToggle = document.getElementById('screenConsentToggle');
 const tabButtons = document.querySelectorAll('[data-tab-target]');
 const tabPanels = document.querySelectorAll('[data-tab-panel]');
+const aiStatusEl = document.getElementById('aiStatusMessage');
+const aiApiKeyInput = document.getElementById('aiApiKey');
+const aiSystemPromptInput = document.getElementById('aiSystemPrompt');
+const aiSaveButton = document.getElementById('aiSaveButton');
+const aiClearKeyButton = document.getElementById('aiClearKeyButton');
 const TAB_STORAGE_KEY = 'settings.activeTab';
 const authFetch = (input, init = {}) => fetch(input, { credentials: 'same-origin', ...init });
 
@@ -11,6 +16,14 @@ if (screenConsentToggle) {
   screenConsentToggle.addEventListener('change', () => {
     handleScreenConsentToggle(screenConsentToggle.checked);
   });
+}
+
+if (aiSaveButton) {
+  aiSaveButton.addEventListener('click', handleAiSave);
+}
+
+if (aiClearKeyButton) {
+  aiClearKeyButton.addEventListener('click', handleAiClearKey);
 }
 
 function showStatus(message, variant = 'info') {
@@ -216,8 +229,119 @@ async function loadSettings() {
   }
 }
 
+function showAiStatus(message, variant = 'info') {
+  if (!aiStatusEl) {
+    return;
+  }
+
+  aiStatusEl.textContent = message;
+  aiStatusEl.classList.remove('error', 'success');
+  if (variant === 'error') {
+    aiStatusEl.classList.add('error');
+  } else if (variant === 'success') {
+    aiStatusEl.classList.add('success');
+  }
+}
+
+async function loadAiSettings() {
+  if (!aiStatusEl || !aiSystemPromptInput) {
+    return;
+  }
+
+  showAiStatus('Loading AI settings...');
+  try {
+    const response = await authFetch('/settings/ai', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    aiSystemPromptInput.value = typeof data.systemPrompt === 'string' ? data.systemPrompt : '';
+    showAiStatus(data.apiKeyConfigured ? 'AI key configured.' : 'Enter an OpenAI API key to enable the agent.');
+  } catch (error) {
+    console.error('Unable to load AI settings', error);
+    showAiStatus('Unable to load AI settings.', 'error');
+  }
+}
+
+async function handleAiSave() {
+  if (!aiSaveButton || !aiSystemPromptInput) {
+    return;
+  }
+
+  aiSaveButton.disabled = true;
+  showAiStatus('Saving AI settings...');
+  const payload = {
+    systemPrompt: aiSystemPromptInput.value ?? '',
+  };
+  const apiKeyValue = aiApiKeyInput?.value?.trim();
+  if (apiKeyValue) {
+    payload.apiKey = apiKeyValue;
+  }
+
+  try {
+    const response = await authFetch('/settings/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    if (aiApiKeyInput) {
+      aiApiKeyInput.value = '';
+    }
+    showAiStatus('AI settings saved.', 'success');
+    await loadAiSettings();
+  } catch (error) {
+    console.error('Unable to save AI settings', error);
+    showAiStatus('Unable to save AI settings.', 'error');
+  } finally {
+    aiSaveButton.disabled = false;
+  }
+}
+
+async function handleAiClearKey() {
+  if (!aiClearKeyButton) {
+    return;
+  }
+
+  aiClearKeyButton.disabled = true;
+  showAiStatus('Clearing stored API key...');
+  const payload = {
+    systemPrompt: aiSystemPromptInput?.value ?? '',
+    apiKey: '',
+  };
+
+  try {
+    const response = await authFetch('/settings/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    if (aiApiKeyInput) {
+      aiApiKeyInput.value = '';
+    }
+    showAiStatus('Stored API key cleared.', 'success');
+    await loadAiSettings();
+  } catch (error) {
+    console.error('Unable to clear API key', error);
+    showAiStatus('Unable to clear API key.', 'error');
+  } finally {
+    aiClearKeyButton.disabled = false;
+  }
+}
+
 loadSettings();
 loadGeneralSettings();
+loadAiSettings();
 configureTabs();
 
 function configureTabs() {

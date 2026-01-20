@@ -32,6 +32,10 @@
     "visible": false
   },
   {
+    "id": "ai-agent",
+    "visible": true
+  },
+  {
     "id": "users",
     "visible": false
   },

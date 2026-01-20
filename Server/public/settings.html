@@ -103,6 +103,11 @@
         background: #111827;
       }
 
+      .setting-textarea {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
       .settings-card + .settings-card {
         margin-top: 1.5rem;
       }
@@ -127,6 +132,33 @@
         height: 1.1rem;
         accent-color: #22c55e;
         cursor: pointer;
+      }
+
+      .ai-api-input {
+        border-radius: 0.75rem;
+        border: 1px solid #1f2937;
+        background: #0b1220;
+        padding: 0.65rem 0.9rem;
+        color: #cdd9e5;
+        font-size: 0.95rem;
+        width: 220px;
+      }
+
+      .setting-textarea textarea {
+        width: 100%;
+        border-radius: 0.75rem;
+        border: 1px solid #1f2937;
+        background: #0b1220;
+        color: #cdd9e5;
+        padding: 0.75rem;
+        font-size: 0.95rem;
+        font-family: inherit;
+        resize: vertical;
+      }
+
+      .ai-action-buttons {
+        display: flex;
+        gap: 0.5rem;
       }
 
       .status-message {
@@ -173,6 +205,16 @@
         >
           Navigation
         </button>
+        <button
+          id="ai-tab"
+          class="tab-button"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          data-tab-target="ai"
+        >
+          AI Agent
+        </button>
       </div>
       <section
         class="settings-card tab-panel active"
@@ -206,6 +248,43 @@
         </header>
         <div id="statusMessage" class="status-message">Loading settings...</div>
         <div id="settingsList" class="settings-list" aria-live="polite"></div>
+      </section>
+      <section
+        class="settings-card tab-panel"
+        data-tab-panel="ai"
+        role="tabpanel"
+        aria-labelledby="ai-tab"
+        hidden
+      >
+        <header class="settings-header">
+          <h1>AI agent</h1>
+          <p>Define the assistant’s tone, system prompt, and credentials.</p>
+        </header>
+        <div id="aiStatusMessage" class="status-message">Loading AI settings...</div>
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>OpenAI API key</strong>
+            <small>Securely store the key used to run the assistant (leave blank to keep the current key).</small>
+          </div>
+          <input id="aiApiKey" class="ai-api-input" type="password" autocomplete="new-password" placeholder="sk-..." />
+        </div>
+        <div class="setting-row setting-textarea">
+          <div class="setting-copy">
+            <strong>System prompt</strong>
+            <small>Explain the assistant’s mission and tone.</small>
+          </div>
+          <textarea id="aiSystemPrompt" rows="4"></textarea>
+        </div>
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>Actions</strong>
+            <small>Save your configuration or clear the stored key.</small>
+          </div>
+          <div class="ai-action-buttons">
+            <button id="aiSaveButton" class="tab-button" type="button">Save</button>
+            <button id="aiClearKeyButton" class="tab-button" type="button">Clear key</button>
+          </div>
+        </div>
       </section>
     </main>
     <script src="settings.js"></script>

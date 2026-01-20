@@ -2,6 +2,7 @@ const statusEl = document.getElementById('statusMessage');
 const listEl = document.getElementById('settingsList');
 const generalStatusEl = document.getElementById('generalStatusMessage');
 const screenConsentToggle = document.getElementById('screenConsentToggle');
+const autoAiChatToggle = document.getElementById('autoAiChatToggle');
 const tabButtons = document.querySelectorAll('[data-tab-target]');
 const tabPanels = document.querySelectorAll('[data-tab-panel]');
 const aiStatusEl = document.getElementById('aiStatusMessage');
@@ -15,6 +16,12 @@ const authFetch = (input, init = {}) => fetch(input, { credentials: 'same-origin
 if (screenConsentToggle) {
   screenConsentToggle.addEventListener('change', () => {
     handleScreenConsentToggle(screenConsentToggle.checked);
+  });
+}
+
+if (autoAiChatToggle) {
+  autoAiChatToggle.addEventListener('change', () => {
+    handleAutoAiChatToggle(autoAiChatToggle.checked);
   });
 }
 
@@ -125,18 +132,32 @@ function showGeneralStatus(message, variant = 'info') {
 }
 
 async function handleScreenConsentToggle(enabled) {
-  if (!generalStatusEl || !screenConsentToggle) {
+  if (!screenConsentToggle) {
+    return;
+  }
+  await updateGeneralSettings({ screenConsentRequired: enabled }, screenConsentToggle, !enabled);
+}
+
+async function handleAutoAiChatToggle(enabled) {
+  if (!autoAiChatToggle) {
+    return;
+  }
+  await updateGeneralSettings({ autoRespondToAgentChat: enabled }, autoAiChatToggle, !enabled);
+}
+
+async function updateGeneralSettings(payload, toggleEl, fallbackValue) {
+  if (!toggleEl) {
     return;
   }
 
-  screenConsentToggle.disabled = true;
+  toggleEl.disabled = true;
   showGeneralStatus('Saving general settings...');
 
   try {
     const response = await authFetch('/settings/general', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ screenConsentRequired: enabled }),
+      body: JSON.stringify(payload),
     });
 
     if (response.status === 401) {
@@ -154,14 +175,19 @@ async function handleScreenConsentToggle(enabled) {
     }
 
     const data = await response.json();
-    screenConsentToggle.checked = Boolean(data.screenConsentRequired);
+    if (screenConsentToggle) {
+      screenConsentToggle.checked = Boolean(data.screenConsentRequired);
+    }
+    if (autoAiChatToggle) {
+      autoAiChatToggle.checked = Boolean(data.autoRespondToAgentChat);
+    }
     showGeneralStatus('General settings updated.', 'success');
   } catch (error) {
     console.error('Unable to update general settings', error);
     showGeneralStatus('Unable to update settings. Try again.', 'error');
-    screenConsentToggle.checked = !enabled;
+    toggleEl.checked = fallbackValue;
   } finally {
-    screenConsentToggle.disabled = false;
+    toggleEl.disabled = false;
   }
 }
 
@@ -170,7 +196,10 @@ async function loadGeneralSettings() {
     return;
   }
 
-  screenConsentToggle.disabled = true;
+  const toggles = [screenConsentToggle, autoAiChatToggle].filter(Boolean);
+  toggles.forEach((toggle) => {
+    toggle.disabled = true;
+  });
   showGeneralStatus('Loading general settings...');
 
   try {
@@ -192,12 +221,17 @@ async function loadGeneralSettings() {
 
     const data = await response.json();
     screenConsentToggle.checked = Boolean(data.screenConsentRequired);
+    if (autoAiChatToggle) {
+      autoAiChatToggle.checked = Boolean(data.autoRespondToAgentChat);
+    }
     showGeneralStatus('General settings loaded.', 'success');
   } catch (error) {
     console.error('Unable to load general settings', error);
     showGeneralStatus('Unable to load general settings.', 'error');
   } finally {
-    screenConsentToggle.disabled = false;
+    toggles.forEach((toggle) => {
+      toggle.disabled = false;
+    });
   }
 }
 

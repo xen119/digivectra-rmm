@@ -73,5 +73,184 @@
     "user": "admin",
     "type": "response",
     "text": "Here is a summary of the connected agents:\n\n1. **Agent Name**: SLT-LPT-CPT013\n   - **ID**: 7c0cf07f-f76b-4984-9385-ffa54c65d630\n   - **Status**: Online\n   - **Group**: ZA-CPT\n   - **Operating System**: Microsoft Windows 10.0.26200\n   - **Connected At**: January 20, 2026\n   - **Monitoring Alert**: No alerts\n   - **Pending Reboot**: No pending reboot\n\nWould you like to see more agents, or do you need detailed information about a specific agent?"
+  },
+  {
+    "id": "533e67c0-1505-46d1-93d1-13970de0898d",
+    "timestamp": 1768893459812,
+    "sessionId": "c5a73373-d8c4-448e-b681-84841604aa1f",
+    "user": "admin",
+    "type": "prompt",
+    "text": "hey"
+  },
+  {
+    "id": "5d126400-afe2-49a3-9f48-f6bd8c24f6c4",
+    "timestamp": 1768893461831,
+    "sessionId": "c5a73373-d8c4-448e-b681-84841604aa1f",
+    "user": "admin",
+    "type": "response",
+    "text": "Hello! How can I assist you today? If you have any questions about the fleet, surface risks, or need help with specific actions, feel free to let me know!"
+  },
+  {
+    "id": "c788db0a-b77f-4136-8104-23d990b46fec",
+    "timestamp": 1768894518697,
+    "sessionId": "5be2d8d0-0280-45f8-a1f1-279d67b81f6e",
+    "user": "admin",
+    "type": "prompt",
+    "text": "what can you assist me with?"
+  },
+  {
+    "id": "d6e7ffb2-c5e3-4bd9-b451-1d1cf29835cf",
+    "timestamp": 1768894522063,
+    "sessionId": "5be2d8d0-0280-45f8-a1f1-279d67b81f6e",
+    "user": "admin",
+    "type": "response",
+    "text": "I can assist you with managing your fleet of agents connected to the platform. This includes:\n\n1. **Listing Agents**: I can provide a summary of the agents currently connected, including their health status.\n2. **Detailed Agent Information**: If you need more specific information about a particular agent, I can retrieve detailed data about it.\n3. **Assigning Agent Groups**: If you need to organize your agents, I can help move them into different groups for targeting purposes.\n\nIf you have a specific task or question in mind, please let me know, and I can assist you further!"
+  },
+  {
+    "id": "4d8c5477-c17f-40c5-b985-72902884373d",
+    "timestamp": 1768894541816,
+    "sessionId": "5be2d8d0-0280-45f8-a1f1-279d67b81f6e",
+    "user": "admin",
+    "type": "prompt",
+    "text": "List agents"
+  },
+  {
+    "id": "f0cd54ed-a9a1-4bc4-85b1-0c56cb188fbe",
+    "timestamp": 1768894542833,
+    "sessionId": "5be2d8d0-0280-45f8-a1f1-279d67b81f6e",
+    "user": "admin",
+    "type": "tool",
+    "tool": "list_agents",
+    "arguments": {
+      "limit": 10
+    },
+    "result": {
+      "agents": [
+        {
+          "id": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+          "name": "SLT-LPT-CPT013",
+          "status": "online",
+          "group": "ZA-CPT",
+          "os": "Microsoft Windows 10.0.26200",
+          "connectedAt": "2026-01-20T07:16:15.427Z",
+          "lastSeen": null,
+          "monitoringAlert": false,
+          "pendingReboot": false
+        }
+      ]
+    },
+    "error": null
+  },
+  {
+    "id": "4c41210c-3ed9-44d5-bc06-124712ebb37d",
+    "timestamp": 1768894547210,
+    "sessionId": "5be2d8d0-0280-45f8-a1f1-279d67b81f6e",
+    "user": "admin",
+    "type": "response",
+    "text": "Here is a summary of the agents currently connected to the platform:\n\n1. **Agent Name**: SLT-LPT-CPT013\n   - **ID**: 7c0cf07f-f76b-4984-9385-ffa54c65d630\n   - **Status**: Online\n   - **Group**: ZA-CPT\n   - **Operating System**: Microsoft Windows 10.0.26200\n   - **Connected At**: January 20, 2026\n   - **Monitoring Alert**: No alerts\n   - **Pending Reboot**: No pending reboot\n\nIf you need more information about this agent or want to take any specific actions, please let me know!"
+  },
+  {
+    "id": "38d946a2-a641-4eb7-bc97-e7d7acf8f14a",
+    "timestamp": 1768895034835,
+    "sessionId": "193f05b3-197c-445b-a2de-e3482c59d4c7",
+    "user": "admin",
+    "type": "prompt",
+    "text": "test"
+  },
+  {
+    "id": "35f79864-7ce8-411f-a99d-11d3e0076b0f",
+    "timestamp": 1768895036290,
+    "sessionId": "193f05b3-197c-445b-a2de-e3482c59d4c7",
+    "user": "admin",
+    "type": "response",
+    "text": "It seems like you might be testing the system. How can I assist you today? Are you looking for information about connected agents, their health, or something else? Please provide more details so I can help you effectively."
+  },
+  {
+    "id": "aab943f6-7f29-459d-a8e9-dc29e5d94bff",
+    "timestamp": 1768898714118,
+    "sessionId": "agent-chat:149e7e92-fa7b-4edb-8588-0c324e50e1be",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "149e7e92-fa7b-4edb-8588-0c324e50e1be",
+    "text": "It seems like we have an agent that is communicating with us. However, the agent is unnamed and has a loopback address (::1), which typically indicates it is running locally.\n\nWould you like to gather more information about this agent, or do you have a specific action in mind for it? If you want to proceed with gathering information, I can list the connected agents to see if there are any other relevant details."
+  },
+  {
+    "id": "eca8c12a-ae4c-4625-8c89-4cc624270b70",
+    "timestamp": 1768899422607,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "It seems like Agent SLT-LPT-CPT013 is sending a test message. Would you like me to check the status of this agent or provide any specific information about it? Please clarify what action you would like to take."
+  },
+  {
+    "id": "7d0bfc29-b4dc-45cd-bc47-c9f16d7ba69e",
+    "timestamp": 1768899451624,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "Agent SLT-LPT-CPT013 is sending a greeting. Would you like me to check the status or health of this agent? Please let me know how you would like to proceed!"
+  },
+  {
+    "id": "267c42e1-d0b0-46c3-be8b-f65bc4c632e2",
+    "timestamp": 1768899485460,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "To assist Agent SLT-LPT-CPT013 with their slow laptop, I can check the agent's status and health to identify any potential issues. \n\nWould you like me to proceed with that? If you have specific concerns or actions in mind, please let me know!"
+  },
+  {
+    "id": "ade81a0a-15ba-4498-b479-02a57cb08f24",
+    "timestamp": 1768899506145,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "I'll start by checking the status and health of Agent SLT-LPT-CPT013 to identify any potential issues causing the slow performance. \n\nLet's retrieve the details for this agent. One moment please. \n\nI'll proceed with that now."
+  },
+  {
+    "id": "e6c3ed60-373e-43f5-bf84-7a352759db9e",
+    "timestamp": 1768899531768,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "I need to first gather the details about Agent SLT-LPT-CPT013 to determine the cause of the slow performance. Let me retrieve that information now. \n\nPlease hold on for a moment."
+  },
+  {
+    "id": "1d79e07e-f1bf-4811-8adb-0419e0b167cf",
+    "timestamp": 1768899564521,
+    "sessionId": "cf5a119b-d0c6-45f7-a6ce-5e3fa7f219ac",
+    "user": "admin",
+    "type": "prompt",
+    "text": "hey"
+  },
+  {
+    "id": "4bbf95c8-0b05-4942-8afa-7944e1557b95",
+    "timestamp": 1768899566270,
+    "sessionId": "cf5a119b-d0c6-45f7-a6ce-5e3fa7f219ac",
+    "user": "admin",
+    "type": "response",
+    "text": "Hello! How can I assist you today? If you have any questions about the fleet, surface risks, or need help with specific actions, feel free to ask!"
+  },
+  {
+    "id": "9904b81e-ced8-40de-86db-9ae96d108ef2",
+    "timestamp": 1768899622010,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "I understand that Agent SLT-LPT-CPT013 is still engaged. I will now retrieve the details for this agent to assess the situation regarding their slow laptop. \n\nLet me proceed with that. One moment please. \n\nI'll check the agent's status now."
+  },
+  {
+    "id": "93f4d465-d7e8-4dc5-bba8-6bdb36a56055",
+    "timestamp": 1768903599172,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "It seems Agent SLT-LPT-CPT013 is actively communicating. I will now check the status of this agent to diagnose the slow laptop issue. \n\nLet me proceed with retrieving the details for Agent SLT-LPT-CPT013. One moment please."
   }
 ]

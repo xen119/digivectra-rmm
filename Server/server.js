@@ -270,8 +270,16 @@ const AI_TOOL_DEFINITIONS = [
   },
 ];
 const AI_CONVERSATION_HISTORY_LIMIT = 20;
+const AI_AGENT_SESSION_PREFIX = 'agent-chat:';
+const AI_AGENT_USER = 'AI Assistant';
+const AI_AGENT_ROLE = 'ai';
+const AI_AGENT_RESPONSE_OPTIONS = {
+  temperature: 0.3,
+  max_tokens: 500,
+};
 const DEFAULT_GENERAL_SETTINGS = {
   screenConsentRequired: true,
+  autoRespondToAgentChat: false,
   aiAgent: {
     ...DEFAULT_AI_AGENT_SETTINGS,
   },
@@ -732,6 +740,7 @@ server.on('request', async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       screenConsentRequired: Boolean(generalSettings?.screenConsentRequired !== false),
+      autoRespondToAgentChat: Boolean(generalSettings?.autoRespondToAgentChat),
     }));
     return;
   }
@@ -744,20 +753,36 @@ server.on('request', async (req, res) => {
     collectBody(req, (body) => {
       try {
         const payload = JSON.parse(body);
-        if (typeof payload.screenConsentRequired !== 'boolean') {
+        const updates = {};
+        if ('screenConsentRequired' in payload) {
+          if (typeof payload.screenConsentRequired !== 'boolean') {
+            res.writeHead(400);
+            return res.end('screenConsentRequired must be true or false');
+          }
+          updates.screenConsentRequired = payload.screenConsentRequired;
+        }
+        if ('autoRespondToAgentChat' in payload) {
+          if (typeof payload.autoRespondToAgentChat !== 'boolean') {
+            res.writeHead(400);
+            return res.end('autoRespondToAgentChat must be true or false');
+          }
+          updates.autoRespondToAgentChat = payload.autoRespondToAgentChat;
+        }
+        if (!Object.keys(updates).length) {
           res.writeHead(400);
-          return res.end('screenConsentRequired must be true or false');
+          return res.end('No valid settings to update.');
         }
 
         generalSettings = {
           ...generalSettings,
-          screenConsentRequired: payload.screenConsentRequired,
+          ...updates,
         };
         persistGeneralSettings();
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           screenConsentRequired: Boolean(generalSettings.screenConsentRequired !== false),
+          autoRespondToAgentChat: Boolean(generalSettings.autoRespondToAgentChat),
         }));
       } catch (error) {
         res.writeHead(400);
@@ -3659,6 +3684,7 @@ wss.on('connection', (socket, request) => {
   const id = uuidv4();
   let info = {
     id,
+    socket,
     name: `unnamed (${remote})`,
     remoteAddress: remote,
     internalIp: null,
@@ -3704,6 +3730,29 @@ wss.on('connection', (socket, request) => {
 
     try {
       const parsed = JSON.parse(payload);
+      if (parsed?.type === 'chat-response') {
+        const text = typeof parsed.text === 'string' ? parsed.text.trim() : '';
+        if (text.length > 0) {
+          const chatEvent = {
+            sessionId: typeof parsed.sessionId === 'string' && parsed.sessionId.trim()
+              ? parsed.sessionId.trim()
+              : uuidv4(),
+            agentId: info.id,
+            agentName: info.name,
+            direction: 'agent',
+            text,
+            timestamp: new Date().toISOString(),
+            user: info.loggedInUser ?? info.name,
+            role: 'agent',
+          };
+
+          recordChatHistory(info.id, chatEvent);
+          dispatchChatEvent(info.id, chatEvent);
+          scheduleAiAgentResponse(info, chatEvent);
+        }
+        return;
+      }
+
       if (parsed?.type === 'hello' && typeof parsed.name === 'string' && parsed.name.trim()) {
         const licenseCode = typeof parsed.license === 'string'
           ? parsed.license.trim()
@@ -3789,6 +3838,7 @@ wss.on('connection', (socket, request) => {
         info.status = 'online';
         info.lastSeen = null;
         console.log(`Identified client as ${info.name}`);
+        info.socket = socket;
         clients.set(socket, info);
         clientsById.set(info.id, { socket, info });
         notifyMonitoringState({ socket, info });
@@ -3957,26 +4007,7 @@ wss.on('connection', (socket, request) => {
             level: typeof parsed.level === 'string' ? parsed.level : 'Information',
           });
         }
-      } else if (parsed?.type === 'chat-response') {
-        const text = typeof parsed.text === 'string' ? parsed.text.trim() : '';
-        if (text.length > 0) {
-          const chatEvent = {
-            sessionId: typeof parsed.sessionId === 'string' && parsed.sessionId.trim()
-              ? parsed.sessionId.trim()
-              : uuidv4(),
-            agentId: info.id,
-            agentName: info.name,
-            direction: 'agent',
-            text,
-            timestamp: new Date().toISOString(),
-            user: info.loggedInUser ?? info.name,
-            role: 'agent',
-          };
-
-          recordChatHistory(info.id, chatEvent);
-          dispatchChatEvent(info.id, chatEvent);
-        }
-        } else if (parsed?.type === 'software-operation-result') {
+    } else if (parsed?.type === 'software-operation-result') {
           handleSoftwareOperationResult(info, parsed);
         } else if (parsed?.type === 'action-result') {
           logPatchEvent({
@@ -5903,6 +5934,7 @@ function loadGeneralSettings() {
 
   const settings = {
     screenConsentRequired: true,
+    autoRespondToAgentChat: DEFAULT_GENERAL_SETTINGS.autoRespondToAgentChat ?? false,
     aiAgent: {
       ...DEFAULT_AI_AGENT_SETTINGS,
     },
@@ -5910,6 +5942,9 @@ function loadGeneralSettings() {
   if (stored && typeof stored === 'object') {
     if (typeof stored.screenConsentRequired === 'boolean') {
       settings.screenConsentRequired = stored.screenConsentRequired;
+    }
+    if (typeof stored.autoRespondToAgentChat === 'boolean') {
+      settings.autoRespondToAgentChat = stored.autoRespondToAgentChat;
     }
     if (stored.aiAgent && typeof stored.aiAgent === 'object') {
       const aiAgent = stored.aiAgent;
@@ -6264,6 +6299,108 @@ async function executeAiTool(functionCall) {
         error: 'Requested tool is not implemented.',
       };
   }
+}
+
+async function respondToAgentWithAi(info, chatEvent) {
+  if (!info?.id || !info.socket || info.socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  if (!generalSettings.aiAgent?.apiKey) {
+    console.log('AI auto reply skipped: API key missing');
+    return;
+  }
+  if (!generalSettings.autoRespondToAgentChat) {
+    console.log('AI auto reply skipped: feature disabled');
+    return;
+  }
+
+  console.log(`AI auto reply triggered for agent ${info.id}`);
+
+  console.log('respondToAgentWithAi start', chatEvent.text);
+
+  const sessionId = `${AI_AGENT_SESSION_PREFIX}${info.id}`;
+  const conversation = getAiConversation(sessionId);
+  const userContent = `Agent ${info.name ?? info.id} says: ${chatEvent.text}`;
+  const messages = buildAiMessages(conversation, userContent);
+
+  try {
+    const response = await callOpenAi(messages, { ...AI_AGENT_RESPONSE_OPTIONS, function_call: 'none' });
+    const reply = response.choice?.message?.content?.trim() ?? '';
+    if (!reply) {
+      console.log('AI auto reply produced empty completion');
+      return;
+    }
+
+    appendSessionMessages(conversation, [
+      { role: 'user', content: userContent },
+      { role: 'assistant', content: reply },
+    ]);
+
+    const aiEvent = {
+      sessionId: chatEvent.sessionId ?? uuidv4(),
+      agentId: info.id,
+      agentName: info.name,
+      direction: 'server',
+      text: reply,
+      timestamp: new Date().toISOString(),
+      user: AI_AGENT_USER,
+      role: AI_AGENT_ROLE,
+    };
+
+    recordChatHistory(info.id, aiEvent);
+    dispatchChatEvent(info.id, aiEvent);
+    sendControl(info.socket, 'chat-request', {
+      sessionId: aiEvent.sessionId,
+      text: reply,
+      user: AI_AGENT_USER,
+      role: AI_AGENT_ROLE,
+    });
+
+    recordAiHistory({
+      sessionId,
+      user: AI_AGENT_USER,
+      type: 'auto-response',
+      agentId: info.id,
+      text: reply,
+    });
+  } catch (error) {
+    console.log('AI auto reply failed', error?.message ?? error);
+    console.error('AI agent reply failed', error);
+
+    const messageText = `Auto-reply failed: ${error?.message ?? (typeof error === 'string' ? error : 'Unknown error')}`;
+    recordAiHistory({
+      sessionId,
+      user: AI_AGENT_USER,
+      type: 'auto-response-error',
+      agentId: info.id,
+      text: messageText,
+    });
+
+    const fallbackEvent = {
+      sessionId: chatEvent.sessionId ?? uuidv4(),
+      agentId: info.id,
+      agentName: info.name,
+      direction: 'server',
+      text: messageText,
+      timestamp: new Date().toISOString(),
+      user: AI_AGENT_USER,
+      role: AI_AGENT_ROLE,
+    };
+
+    recordChatHistory(info.id, fallbackEvent);
+    dispatchChatEvent(info.id, fallbackEvent);
+    sendControl(info.socket, 'chat-request', {
+      sessionId: fallbackEvent.sessionId,
+      text: fallbackEvent.text,
+      user: AI_AGENT_USER,
+      role: AI_AGENT_ROLE,
+    });
+  }
+}
+
+function scheduleAiAgentResponse(info, chatEvent) {
+  console.log(`Scheduling AI agent reply for ${info?.id}`);
+  void respondToAgentWithAi(info, chatEvent);
 }
 
 function loadComplianceConfig() {

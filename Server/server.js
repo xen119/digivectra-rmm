@@ -217,6 +217,10 @@ const DEFAULT_AI_AGENT_SETTINGS = {
     'You are the RMM operations assistant. Help administrators understand the fleet, surface risks, and take safe actions via the provided tools. Ask clarifying questions before acting, think step-by-step, and explain each outcome.',
   apiKey: null,
 };
+const DEFAULT_TECH_DIRECT_SETTINGS = {
+  apiKey: null,
+  apiSecret: null,
+};
 const AI_TOOL_INSTRUCTIONS = [
   'Use list_agents to review connected agents and their health.',
   'Use get_agent_details when you need historical context for a specific agent.',
@@ -505,7 +509,16 @@ const DEFAULT_GENERAL_SETTINGS = {
   aiAgent: {
     ...DEFAULT_AI_AGENT_SETTINGS,
   },
+  techDirect: {
+    ...DEFAULT_TECH_DIRECT_SETTINGS,
+  },
 };
+const TECH_DIRECT_WARRANTY_ENDPOINT = 'https://apigtwb2c.us.dell.com/PROD/sbil/eapi/v5/asset-entitlements';
+const TECH_DIRECT_WARRANTY_TTL_MS = 6 * 60 * 60 * 1000;
+const TECH_DIRECT_TOKEN_ENDPOINT = 'https://apigtwb2c.us.dell.com/auth/oauth/v2/token';
+const TECH_DIRECT_TOKEN_MIN_TTL_MS = 60_000;
+let cachedTechDirectToken = null;
+let cachedTechDirectTokenExpiresAt = 0;
 let generalSettings = loadGeneralSettings();
 const aiHistory = loadAiHistory();
 const aiConversations = new Map();
@@ -625,6 +638,7 @@ server.on('request', async (req, res) => {
       features: Array.isArray(info.features) ? info.features : [],
       bitlockerStatus: info.bitlockerStatus ?? null,
       avStatus: info.avStatus ?? null,
+      warranty: info.warranty ?? null,
       chatNotifications: chatNotificationCounts.get(info.id) ?? 0,
     }));
     return res.end(JSON.stringify(payload));
@@ -964,6 +978,9 @@ server.on('request', async (req, res) => {
     res.end(JSON.stringify({
       screenConsentRequired: Boolean(generalSettings?.screenConsentRequired !== false),
       autoRespondToAgentChat: Boolean(generalSettings?.autoRespondToAgentChat),
+      techDirectConfigured: Boolean(
+        generalSettings?.techDirect?.apiKey && generalSettings?.techDirect?.apiSecret,
+      ),
     }));
     return;
   }
@@ -991,6 +1008,26 @@ server.on('request', async (req, res) => {
           }
           updates.autoRespondToAgentChat = payload.autoRespondToAgentChat;
         }
+        const techDirectUpdates = {};
+        if ('techDirectApiKey' in payload) {
+          const key = typeof payload.techDirectApiKey === 'string' ? payload.techDirectApiKey.trim() : '';
+          techDirectUpdates.apiKey = key ? key : null;
+        }
+        if ('techDirectApiSecret' in payload) {
+          const secret = typeof payload.techDirectApiSecret === 'string' ? payload.techDirectApiSecret.trim() : '';
+          techDirectUpdates.apiSecret = secret ? secret : null;
+        }
+        const techDirectChanged = Object.keys(techDirectUpdates).length > 0;
+        if (techDirectChanged) {
+          const current = {
+            ...DEFAULT_TECH_DIRECT_SETTINGS,
+            ...(generalSettings.techDirect ?? {}),
+          };
+          updates.techDirect = {
+            ...current,
+            ...techDirectUpdates,
+          };
+        }
         if (!Object.keys(updates).length) {
           res.writeHead(400);
           return res.end('No valid settings to update.');
@@ -1006,7 +1043,14 @@ server.on('request', async (req, res) => {
         res.end(JSON.stringify({
           screenConsentRequired: Boolean(generalSettings.screenConsentRequired !== false),
           autoRespondToAgentChat: Boolean(generalSettings.autoRespondToAgentChat),
+          techDirectConfigured: Boolean(
+            generalSettings?.techDirect?.apiKey && generalSettings?.techDirect?.apiSecret,
+          ),
         }));
+        if (techDirectChanged) {
+          clearTechDirectTokenCache();
+          void refreshDellWarrantyForAllAgents({ force: true });
+        }
       } catch (error) {
         res.writeHead(400);
         res.end('Invalid request');
@@ -4022,6 +4066,7 @@ wss.on('connection', (socket, request) => {
         sendControl(socket, 'license-result', { success: true });
         if (parsed.specs != null) {
           info.specs = parsed.specs;
+          void maybeRefreshWarranty(info);
         }
         if (Array.isArray(parsed.features)) {
           info.features = parsed.features.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim());
@@ -6156,6 +6201,9 @@ function loadGeneralSettings() {
     aiAgent: {
       ...DEFAULT_AI_AGENT_SETTINGS,
     },
+    techDirect: {
+      ...DEFAULT_TECH_DIRECT_SETTINGS,
+    },
   };
   if (stored && typeof stored === 'object') {
     if (typeof stored.screenConsentRequired === 'boolean') {
@@ -6173,6 +6221,21 @@ function loadGeneralSettings() {
         settings.aiAgent.apiKey = aiAgent.apiKey.trim() ? aiAgent.apiKey : null;
       } else if (aiAgent.apiKey === null) {
         settings.aiAgent.apiKey = null;
+      }
+    }
+    if (stored.techDirect && typeof stored.techDirect === 'object') {
+      const techDirect = stored.techDirect;
+      if (typeof techDirect.apiKey === 'string') {
+        const trimmedKey = techDirect.apiKey.trim();
+        settings.techDirect.apiKey = trimmedKey ? trimmedKey : null;
+      } else if (techDirect.apiKey === null) {
+        settings.techDirect.apiKey = null;
+      }
+      if (typeof techDirect.apiSecret === 'string') {
+        const trimmedSecret = techDirect.apiSecret.trim();
+        settings.techDirect.apiSecret = trimmedSecret ? trimmedSecret : null;
+      } else if (techDirect.apiSecret === null) {
+        settings.techDirect.apiSecret = null;
       }
     }
   }
@@ -8227,6 +8290,371 @@ async function fetchJson(url, options = {}) {
     throw new Error(`HTTP ${res.status} ${res.statusText}`);
   }
   return res.json();
+}
+
+function clearTechDirectTokenCache() {
+  cachedTechDirectToken = null;
+  cachedTechDirectTokenExpiresAt = 0;
+}
+
+async function getTechDirectAccessToken() {
+  const techDirectSettings = {
+    ...DEFAULT_TECH_DIRECT_SETTINGS,
+    ...(generalSettings?.techDirect ?? {}),
+  };
+  const apiKey = (techDirectSettings.apiKey ?? '').trim();
+  const apiSecret = (techDirectSettings.apiSecret ?? '').trim();
+
+  if (!apiKey || !apiSecret) {
+    clearTechDirectTokenCache();
+    throw new Error('TechDirect credentials are missing');
+  }
+
+  const now = Date.now();
+  if (cachedTechDirectToken && cachedTechDirectTokenExpiresAt > now) {
+    return cachedTechDirectToken;
+  }
+
+  const params = new URLSearchParams();
+  params.set('grant_type', 'client_credentials');
+  params.set('client_id', apiKey);
+  params.set('client_secret', apiSecret);
+  const headers = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    Authorization: `Basic ${Buffer.from(`${apiKey}:${apiSecret}`).toString('base64')}`,
+  };
+  let payload;
+  try {
+    payload = await fetchJson(TECH_DIRECT_TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers,
+      body: params.toString(),
+    });
+  } catch (error) {
+    console.error('TechDirect token fetch failed', {
+      error: error?.message ?? error,
+      apiKey: techDirectSettings.apiKey ? '<redacted>' : null,
+    });
+    throw error;
+  }
+
+  if (!payload || typeof payload !== 'object' || typeof payload.access_token !== 'string') {
+    throw new Error('TechDirect access token missing from response');
+  }
+
+  const expiresIn = Number(payload.expires_in);
+  const ttl = Number.isFinite(expiresIn) && expiresIn > 0
+    ? expiresIn * 1000
+    : TECH_DIRECT_TOKEN_MIN_TTL_MS;
+  cachedTechDirectToken = payload.access_token;
+  cachedTechDirectTokenExpiresAt = now + Math.max(ttl, TECH_DIRECT_TOKEN_MIN_TTL_MS);
+  return cachedTechDirectToken;
+}
+
+function hasTechDirectCredentials() {
+  const techDirect = generalSettings?.techDirect ?? {};
+  const hasCredentials = Boolean(
+    typeof techDirect.apiKey === 'string'
+      && techDirect.apiKey.trim()
+      && typeof techDirect.apiSecret === 'string'
+      && techDirect.apiSecret.trim(),
+  );
+  if (!hasCredentials) {
+    clearTechDirectTokenCache();
+  }
+  return hasCredentials;
+}
+
+function shouldCheckDellWarranty(info) {
+  const manufacturer = (info?.specs?.Manufacturer ?? '').toString();
+  if (!manufacturer) {
+    return false;
+  }
+  return manufacturer.toLowerCase().includes('dell');
+}
+
+function getServiceTagFromInfo(info) {
+  const serial = info?.specs?.SerialNumber;
+  if (!serial) {
+    return '';
+  }
+  return `${serial}`.trim();
+}
+
+function normalizeWarrantyDate(value) {
+  if (!value && value !== 0) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return null;
+  }
+  return new Date(parsed).toISOString();
+}
+
+function collectWarrantyEntries(payload) {
+  if (!payload) {
+    return [];
+  }
+
+  const entries = [];
+  if (Array.isArray(payload)) {
+    entries.push(...payload);
+  }
+
+  if (typeof payload === 'object') {
+    const candidateKeys = ['Asset', 'Assets', 'asset', 'assets'];
+    for (const key of candidateKeys) {
+      if (Array.isArray(payload[key])) {
+        entries.push(...payload[key]);
+      }
+    }
+
+    const nested = payload?.ResponseData ?? payload?.responseData ?? payload?.data;
+    if (nested) {
+      if (Array.isArray(nested)) {
+        entries.push(...nested);
+      }
+      for (const key of candidateKeys) {
+        if (Array.isArray(nested[key])) {
+          entries.push(...nested[key]);
+        }
+      }
+    }
+  }
+
+  return entries;
+}
+
+function parseDellWarrantyResponse(payload, serviceTag) {
+  if (!payload) {
+    throw new Error('Unexpected warranty response');
+  }
+
+  const errorMessage = [
+    payload?.message,
+    payload?.Message,
+    payload?.errorMessage,
+    payload?.error?.message,
+  ].find(Boolean);
+
+  const statusCode = Number(payload?.status ?? payload?.Status ?? payload?.StatusCode);
+  const entries = collectWarrantyEntries(payload);
+
+  if ((!entries.length && statusCode >= 400) || (!entries.length && errorMessage)) {
+    throw new Error(errorMessage ?? 'Dell warranty data unavailable');
+  }
+  if (!entries.length) {
+    console.error('Dell warranty response returned no entries', {
+      serviceTag,
+      statusCode,
+      payloadType: Array.isArray(payload) ? 'array' : typeof payload,
+    });
+    throw new Error('Dell warranty data unavailable');
+  }
+
+  const normalizedTag = (serviceTag ?? '').toString().toLowerCase();
+  const asset = entries.find((entry) => (entry?.ServiceTag ?? entry?.serviceTag ?? '')
+    .toString()
+    .toLowerCase() === normalizedTag) ?? entries[0];
+  if (!asset) {
+    throw new Error('Warranty entry not found');
+  }
+
+  const startDate = normalizeWarrantyDate(
+    asset?.WarrantyStartDate
+      ?? asset?.StartDate
+      ?? asset?.ServiceLevelStartDate
+      ?? asset?.WarrantyFromDate
+      ?? asset?.ShipDate
+      ?? asset?.shipDate,
+  );
+  const endDate = normalizeWarrantyDate(
+    asset?.WarrantyEndDate
+      ?? asset?.EndDate
+      ?? asset?.ServiceLevelEndDate
+      ?? asset?.WarrantyToDate
+      ?? asset?.entitlementEndDate
+      ?? asset?.endDate,
+  );
+  const serviceLevelFromAsset =
+    asset?.ServiceLevelDescription
+    ?? asset?.ServiceLevel
+    ?? asset?.ServiceLevelCode
+    ?? asset?.ServiceLevelName
+    ?? asset?.serviceLevelDescription
+    ?? null;
+  const description =
+    asset?.ProductDescription
+    ?? asset?.ProductName
+    ?? asset?.ProductType
+    ?? asset?.productLineDescription
+    ?? asset?.productLobDescription
+    ?? null;
+
+  const entitlements = (Array.isArray(asset?.Entitlements) ? asset.Entitlements : [])
+    .concat(Array.isArray(asset?.entitlements) ? asset.entitlements : [])
+    .map((entry) => ({
+      name:
+        entry?.ServiceLevelDescription
+        ?? entry?.Description
+        ?? entry?.ServiceLevel
+        ?? entry?.ServiceLevelName
+        ?? entry?.serviceLevelDescription
+        ?? null,
+      startDate: normalizeWarrantyDate(
+        entry?.StartDate ?? entry?.ServiceLevelStartDate ?? entry?.WarrantyStartDate ?? entry?.startDate,
+      ),
+      endDate: normalizeWarrantyDate(
+        entry?.EndDate ?? entry?.ServiceLevelEndDate ?? entry?.WarrantyEndDate ?? entry?.endDate,
+      ),
+    }))
+    .filter((entry) => entry.name);
+
+  const summaryEndDate = entitlements
+    .map((entry) => entry.endDate)
+    .filter(Boolean)
+    .map((date) => Date.parse(date))
+    .filter((ts) => !Number.isNaN(ts));
+  const summaryEndDateValue = summaryEndDate.length
+    ? Math.max(...summaryEndDate)
+    : endDate
+      ? Date.parse(endDate)
+      : null;
+
+  const summaryStartDate = entitlements
+    .map((entry) => entry.startDate)
+    .filter(Boolean)
+    .map((date) => Date.parse(date))
+    .filter((ts) => !Number.isNaN(ts));
+  const summaryStartDateValue = summaryStartDate.length
+    ? Math.min(...summaryStartDate)
+    : startDate
+      ? Date.parse(startDate)
+      : null;
+
+  const computedEndDate = summaryEndDateValue ? new Date(summaryEndDateValue).toISOString() : null;
+  const computedStartDate = summaryStartDateValue ? new Date(summaryStartDateValue).toISOString() : null;
+  const entitlementServiceLevel = entitlements[0]?.name ?? null;
+
+  let status = 'unknown';
+  if (computedEndDate || endDate) {
+    const parsedEnd = Date.parse(computedEndDate ?? endDate);
+    if (!Number.isNaN(parsedEnd)) {
+      status = parsedEnd > Date.now() ? 'active' : 'expired';
+    }
+  }
+
+  return {
+    status,
+    startDate: computedStartDate ?? startDate,
+    endDate: computedEndDate ?? endDate,
+    serviceLevel: serviceLevelFromAsset ?? entitlementServiceLevel,
+    description,
+    entitlements,
+  };
+}
+
+async function fetchDellWarrantyForTag(serviceTag) {
+  const techDirect = {
+    ...DEFAULT_TECH_DIRECT_SETTINGS,
+    ...(generalSettings?.techDirect ?? {}),
+  };
+  const apiKey = (techDirect.apiKey ?? '').trim();
+  const hasSecret = typeof techDirect.apiSecret === 'string' && techDirect.apiSecret.trim();
+  if (!apiKey || !hasSecret) {
+    throw new Error('TechDirect credentials are missing');
+  }
+
+  const accessToken = await getTechDirectAccessToken();
+  const params = new URLSearchParams();
+  const normalizedTag = (serviceTag ?? '').toString().trim().toLowerCase();
+  params.set('servicetags', normalizedTag);
+  params.set('format', 'json');
+
+  const headers = {
+    Accept: 'application/json',
+    Authorization: `Bearer ${accessToken}`,
+  };
+
+  const url = `${TECH_DIRECT_WARRANTY_ENDPOINT}?${params.toString()}`;
+  const payload = await fetchJson(url, { headers });
+  return parseDellWarrantyResponse(payload, serviceTag);
+}
+
+async function maybeRefreshWarranty(info, { force = false } = {}) {
+  if (!info) {
+    return;
+  }
+
+  if (!shouldCheckDellWarranty(info)) {
+    if (info.warranty) {
+      info.warranty = null;
+    }
+    return;
+  }
+
+  if (!hasTechDirectCredentials()) {
+    if (info.warranty) {
+      info.warranty = null;
+    }
+    return;
+  }
+
+  const serviceTag = getServiceTagFromInfo(info);
+  if (!serviceTag) {
+    info.warranty = {
+      serviceTag: null,
+      status: 'unknown',
+      lastRefreshed: new Date().toISOString(),
+      error: 'Service tag missing',
+    };
+    return;
+  }
+
+  const lastRefreshed = info.warranty?.lastRefreshed
+    ? Date.parse(info.warranty.lastRefreshed)
+    : null;
+  if (!force && Number.isFinite(lastRefreshed) && Date.now() - lastRefreshed < TECH_DIRECT_WARRANTY_TTL_MS) {
+    return;
+  }
+
+  try {
+    const summary = await fetchDellWarrantyForTag(serviceTag);
+    info.warranty = {
+      ...summary,
+      serviceTag,
+      lastRefreshed: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('Dell warranty refresh failed', {
+      agentId: info.id,
+      serviceTag,
+      error: error?.message ?? error,
+    });
+    info.warranty = {
+      serviceTag,
+      status: 'unknown',
+      lastRefreshed: new Date().toISOString(),
+      error: error?.message ?? 'Unable to fetch warranty',
+    };
+  }
+}
+
+async function refreshDellWarrantyForAllAgents({ force = false } = {}) {
+  if (!hasTechDirectCredentials()) {
+    clearTechDirectTokenCache();
+    for (const info of agents.values()) {
+      if (info.warranty) {
+        info.warranty = null;
+      }
+    }
+    return;
+  }
+
+  for (const info of agents.values()) {
+    await maybeRefreshWarranty(info, { force });
+  }
 }
 
 async function fetchNvdPage(limit, startIndex = 1, headers = {}) {

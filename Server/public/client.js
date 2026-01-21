@@ -315,6 +315,15 @@ function createAgentCard(agent, groups) {
     : 'Logged in user: unknown';
   card.appendChild(loginLine);
 
+  const warrantyLine = document.createElement('div');
+  const warrantyClasses = ['agent-warranty'];
+  if (agent.warranty?.status === 'active' || agent.warranty?.status === 'expired') {
+    warrantyClasses.push(`agent-warranty--${agent.warranty.status}`);
+  }
+  warrantyLine.className = warrantyClasses.join(' ');
+  warrantyLine.textContent = formatWarrantyInfo(agent.warranty);
+  card.appendChild(warrantyLine);
+
   const actions = document.createElement('div');
   actions.className = 'actions';
   const streamButton = document.createElement('button');
@@ -819,6 +828,41 @@ function formatDeviceSpecs(specs) {
   }
 
   return parts.length > 0 ? parts.join(' · ') : 'Device info unavailable.';
+}
+
+function formatWarrantyInfo(warranty) {
+  if (!warranty) {
+    return 'Warranty info unavailable.';
+  }
+
+  if (warranty.error) {
+    return `Warranty lookup failed: ${warranty.error}`;
+  }
+
+  const parts = [];
+  if (warranty.description) {
+    parts.push(warranty.description);
+  }
+  if (warranty.serviceLevel) {
+    parts.push(warranty.serviceLevel);
+  }
+  if (warranty.status === 'active') {
+    parts.push('Active');
+  } else if (warranty.status === 'expired') {
+    parts.push('Expired');
+  }
+  if (warranty.endDate) {
+    const parsed = new Date(warranty.endDate);
+    if (!Number.isNaN(parsed)) {
+      parts.push(`Expires ${parsed.toLocaleDateString()}`);
+    }
+  }
+
+  if (!parts.length) {
+    return 'Warranty info unavailable.';
+  }
+
+  return `Warranty: ${parts.join(' · ')}`;
 }
 
 function formatBytes(bytes) {

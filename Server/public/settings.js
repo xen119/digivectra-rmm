@@ -10,6 +10,11 @@ const aiApiKeyInput = document.getElementById('aiApiKey');
 const aiSystemPromptInput = document.getElementById('aiSystemPrompt');
 const aiSaveButton = document.getElementById('aiSaveButton');
 const aiClearKeyButton = document.getElementById('aiClearKeyButton');
+const techDirectStatusEl = document.getElementById('techDirectStatusMessage');
+const techDirectApiKeyInput = document.getElementById('techDirectApiKey');
+const techDirectApiSecretInput = document.getElementById('techDirectApiSecret');
+const techDirectSaveButton = document.getElementById('techDirectSaveButton');
+const techDirectClearButton = document.getElementById('techDirectClearButton');
 const TAB_STORAGE_KEY = 'settings.activeTab';
 const authFetch = (input, init = {}) => fetch(input, { credentials: 'same-origin', ...init });
 
@@ -31,6 +36,14 @@ if (aiSaveButton) {
 
 if (aiClearKeyButton) {
   aiClearKeyButton.addEventListener('click', handleAiClearKey);
+}
+
+if (techDirectSaveButton) {
+  techDirectSaveButton.addEventListener('click', handleTechDirectSave);
+}
+
+if (techDirectClearButton) {
+  techDirectClearButton.addEventListener('click', handleTechDirectClear);
 }
 
 function showStatus(message, variant = 'info') {
@@ -131,6 +144,32 @@ function showGeneralStatus(message, variant = 'info') {
   }
 }
 
+function showTechDirectStatus(message, variant = 'info') {
+  if (!techDirectStatusEl) {
+    return;
+  }
+
+  techDirectStatusEl.textContent = message;
+  techDirectStatusEl.classList.remove('error', 'success');
+  if (variant === 'error') {
+    techDirectStatusEl.classList.add('error');
+  } else if (variant === 'success') {
+    techDirectStatusEl.classList.add('success');
+  }
+}
+
+function updateTechDirectStatus(configured) {
+  if (!techDirectStatusEl) {
+    return;
+  }
+
+  if (configured) {
+    showTechDirectStatus('TechDirect credentials configured.', 'success');
+  } else {
+    showTechDirectStatus('Enter TechDirect API credentials to display Dell warranty info.');
+  }
+}
+
 async function handleScreenConsentToggle(enabled) {
   if (!screenConsentToggle) {
     return;
@@ -143,6 +182,117 @@ async function handleAutoAiChatToggle(enabled) {
     return;
   }
   await updateGeneralSettings({ autoRespondToAgentChat: enabled }, autoAiChatToggle, !enabled);
+}
+
+async function handleTechDirectSave() {
+  if (!techDirectSaveButton) {
+    return;
+  }
+
+  const apiKeyValue = techDirectApiKeyInput?.value?.trim() ?? '';
+  const apiSecretValue = techDirectApiSecretInput?.value?.trim() ?? '';
+  if (!apiKeyValue || !apiSecretValue) {
+    showTechDirectStatus('Provide both API key and secret before saving.', 'error');
+    return;
+  }
+
+  techDirectSaveButton.disabled = true;
+  if (techDirectClearButton) {
+    techDirectClearButton.disabled = true;
+  }
+  showTechDirectStatus('Saving TechDirect credentials...');
+
+  try {
+    const response = await authFetch('/settings/general', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        techDirectApiKey: apiKeyValue,
+        techDirectApiSecret: apiSecretValue,
+      }),
+    });
+
+    if (response.status === 401) {
+      window.location.href = '/login.html';
+      return;
+    }
+
+    if (response.status === 403) {
+      showTechDirectStatus('Access denied. Contact an administrator.', 'error');
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (techDirectApiKeyInput) {
+      techDirectApiKeyInput.value = '';
+    }
+    if (techDirectApiSecretInput) {
+      techDirectApiSecretInput.value = '';
+    }
+    showTechDirectStatus('TechDirect credentials saved.', 'success');
+    updateTechDirectStatus(Boolean(data.techDirectConfigured));
+  } catch (error) {
+    console.error('Unable to save TechDirect credentials', error);
+    showTechDirectStatus('Unable to save TechDirect credentials.', 'error');
+  } finally {
+    techDirectSaveButton.disabled = false;
+    if (techDirectClearButton) {
+      techDirectClearButton.disabled = false;
+    }
+  }
+}
+
+async function handleTechDirectClear() {
+  if (!techDirectClearButton) {
+    return;
+  }
+
+  techDirectClearButton.disabled = true;
+  if (techDirectSaveButton) {
+    techDirectSaveButton.disabled = true;
+  }
+  showTechDirectStatus('Clearing stored credentials...');
+
+  try {
+    const response = await authFetch('/settings/general', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        techDirectApiKey: '',
+        techDirectApiSecret: '',
+      }),
+    });
+
+    if (response.status === 401) {
+      window.location.href = '/login.html';
+      return;
+    }
+
+    if (response.status === 403) {
+      showTechDirectStatus('Access denied. Contact an administrator.', 'error');
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    showTechDirectStatus('Stored TechDirect credentials cleared.', 'success');
+    updateTechDirectStatus(Boolean(data.techDirectConfigured));
+  } catch (error) {
+    console.error('Unable to clear TechDirect credentials', error);
+    showTechDirectStatus('Unable to clear TechDirect credentials.', 'error');
+  } finally {
+    techDirectClearButton.disabled = false;
+    if (techDirectSaveButton) {
+      techDirectSaveButton.disabled = false;
+    }
+  }
 }
 
 async function updateGeneralSettings(payload, toggleEl, fallbackValue) {
@@ -196,6 +346,10 @@ async function loadGeneralSettings() {
     return;
   }
 
+  if (techDirectStatusEl) {
+    showTechDirectStatus('Loading TechDirect settings...');
+  }
+
   const toggles = [screenConsentToggle, autoAiChatToggle].filter(Boolean);
   toggles.forEach((toggle) => {
     toggle.disabled = true;
@@ -224,10 +378,12 @@ async function loadGeneralSettings() {
     if (autoAiChatToggle) {
       autoAiChatToggle.checked = Boolean(data.autoRespondToAgentChat);
     }
+    updateTechDirectStatus(Boolean(data.techDirectConfigured));
     showGeneralStatus('General settings loaded.', 'success');
   } catch (error) {
     console.error('Unable to load general settings', error);
     showGeneralStatus('Unable to load general settings.', 'error');
+    showTechDirectStatus('Unable to load TechDirect settings.', 'error');
   } finally {
     toggles.forEach((toggle) => {
       toggle.disabled = false;

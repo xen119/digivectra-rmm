@@ -156,6 +156,65 @@
         resize: vertical;
       }
 
+      .techdirect-section {
+        border: 1px solid #1f2937;
+        border-radius: 0.75rem;
+        padding: 1rem;
+        background: #0f141a;
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+      }
+
+      .techdirect-header {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+
+      .techdirect-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 0.75rem;
+      }
+
+      .techdirect-grid label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.9rem;
+      }
+
+      .techdirect-grid input {
+        border-radius: 0.5rem;
+        border: 1px solid #1f2937;
+        background: #0b1220;
+        color: #cdd9e5;
+        padding: 0.5rem 0.65rem;
+        font-size: 0.9rem;
+      }
+
+      .techdirect-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      .techdirect-actions button {
+        border-radius: 0.45rem;
+        border: 1px solid #1e293b;
+        background: transparent;
+        color: #cdd9e5;
+        padding: 0.45rem 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .techdirect-actions button:hover {
+        border-color: #374151;
+        background: rgba(148, 163, 184, 0.1);
+      }
+
       .ai-action-buttons {
         display: flex;
         gap: 0.5rem;
@@ -240,6 +299,27 @@
             <small>Respond automatically when an agent sends a message.</small>
           </div>
           <input id="autoAiChatToggle" class="setting-toggle" type="checkbox" />
+        </div>
+        <div class="techdirect-section">
+          <div class="techdirect-header">
+            <strong>TechDirect warranty lookup</strong>
+            <small>Store your Dell TechDirect API key and secret to display Dell warranty data per agent.</small>
+          </div>
+          <div id="techDirectStatusMessage" class="status-message">Loading TechDirect settings...</div>
+          <div class="techdirect-grid">
+            <label for="techDirectApiKey">
+              <span>TechDirect API key</span>
+              <input id="techDirectApiKey" type="text" autocomplete="off" placeholder="Enter API key" />
+            </label>
+            <label for="techDirectApiSecret">
+              <span>TechDirect API secret</span>
+              <input id="techDirectApiSecret" type="password" autocomplete="new-password" placeholder="Enter API secret" />
+            </label>
+          </div>
+          <div class="techdirect-actions">
+            <button id="techDirectSaveButton" type="button">Save credentials</button>
+            <button id="techDirectClearButton" type="button">Clear stored credentials</button>
+          </div>
         </div>
       </section>
       <section

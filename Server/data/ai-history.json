@@ -252,5 +252,341 @@
     "type": "auto-response",
     "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
     "text": "It seems Agent SLT-LPT-CPT013 is actively communicating. I will now check the status of this agent to diagnose the slow laptop issue. \n\nLet me proceed with retrieving the details for Agent SLT-LPT-CPT013. One moment please."
+  },
+  {
+    "id": "1a78131c-5fb0-443f-be65-7f803a5d8854",
+    "timestamp": 1768910226100,
+    "sessionId": "256152e8-218c-410c-a5f8-e53492cc3d4e",
+    "user": "admin",
+    "type": "prompt",
+    "text": "test"
+  },
+  {
+    "id": "dc7d5f1d-8c88-442d-ad0f-00bf236e5ca8",
+    "timestamp": 1768910227734,
+    "sessionId": "256152e8-218c-410c-a5f8-e53492cc3d4e",
+    "user": "admin",
+    "type": "response",
+    "text": "It seems like you might be testing the system. How can I assist you today? If you have specific tasks or questions about the fleet or surface risks, please let me know!"
+  },
+  {
+    "id": "1e700a16-adf9-410d-b023-1383b9f95c66",
+    "timestamp": 1768910234844,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "Hello! How can I assist you today? Are you looking for information about your agents, or do you have a specific task in mind?"
+  },
+  {
+    "id": "73d02b6a-3c68-435f-8ed2-a9b872e15abc",
+    "timestamp": 1768910301521,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "I don't have direct access to your computer's name. However, if you're looking for information about your agents connected to the RMM platform, I can help you with that. Would you like me to list the agents and their details?"
+  },
+  {
+    "id": "60abbbe9-cf5b-4ad0-8d46-2af8f44e4ea8",
+    "timestamp": 1768914358679,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "Hello! How can I assist you today regarding agent SLT-LPT-CPT013?"
+  },
+  {
+    "id": "6e2c0f8e-4246-4a35-92b9-3233fbfadf51",
+    "timestamp": 1768914413087,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "Hi again! If you have any questions or need assistance with agent SLT-LPT-CPT013, feel free to let me know!"
+  },
+  {
+    "id": "5b67fe3a-9944-485e-ab53-3f93e6867a1e",
+    "timestamp": 1768914664654,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "To assist with the performance issue of agent SLT-LPT-CPT013, I can check its system health and recent monitoring history. This will help identify any alerts or issues that might be causing the slowdown.\n\nWould you like me to proceed with checking the system health first, or would you prefer to review the recent monitoring history?"
+  },
+  {
+    "id": "8692daaf-ae52-413e-b58b-464a446a9c42",
+    "timestamp": 1768914706775,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "I'll start by checking the system health of agent SLT-LPT-CPT013 to identify any issues that might be affecting its performance. Please hold on for a moment. \n\nI'll retrieve the relevant information now."
+  },
+  {
+    "id": "b7341a4f-efd1-47b9-9147-27f6ef587524",
+    "timestamp": 1768916011058,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "Hello! How can I assist you today with agent SLT-LPT-CPT013? If you have specific questions or tasks in mind, please let me know!"
+  },
+  {
+    "id": "42853507-0322-4fef-9c8c-e716c7f1d3a7",
+    "timestamp": 1768916051582,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "To provide you with the top 5 tasks running on agent SLT-LPT-CPT013, I'll need to execute a command to gather that information. \n\nWould you like me to proceed with that?"
+  },
+  {
+    "id": "76e2b6d9-22d0-40b5-8b35-07a54958c9b3",
+    "timestamp": 1768916070440,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "tool",
+    "tool": "run_agent_shell_command",
+    "arguments": {
+      "agent_id": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+      "command": "Get-Process | Sort-Object CPU -Descending | Select-Object -First 5 | Format-Table -AutoSize",
+      "language": "powershell"
+    },
+    "result": {
+      "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+      "command": "Get-Process | Sort-Object CPU -Descending | Select-Object -First 5 | Format-Table -AutoSize",
+      "language": "powershell",
+      "output": []
+    },
+    "error": null
+  },
+  {
+    "id": "88bd1f1c-bd17-4e5d-b254-bbebc55899ab",
+    "timestamp": 1768916070442,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "It seems that there was an issue retrieving the top 5 tasks running on agent SLT-LPT-CPT013, as the output returned empty. This could be due to various reasons, such as permissions or the command not executing properly.\n\nWould you like me to try a different approach to gather the information, or is there something else you would like to check regarding this agent?"
+  },
+  {
+    "id": "9e2c1cd5-b61a-4253-923e-c453a99b1582",
+    "timestamp": 1768917362631,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "Hello! How can I assist you today regarding the agent SLT-LPT-CPT013?"
+  },
+  {
+    "id": "e834254f-b0a3-4e93-b9a1-6a82cd8bf13b",
+    "timestamp": 1768917480104,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "tool",
+    "tool": "get_agent_services",
+    "arguments": {
+      "agent_id": "7c0cf07f-f76b-4984-9385-ffa54c65d630"
+    },
+    "result": {
+      "error": "Service request timed out"
+    },
+    "error": "Service request timed out"
+  },
+  {
+    "id": "86821cb4-faeb-4b4b-b645-37e227ac1805",
+    "timestamp": 1768917480141,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "It seems that the request to retrieve the running services on agent SLT-LPT-CPT013 timed out. I can try again or check for other information related to this agent. Would you like me to attempt to gather the services again, or is there something else you would like to know?"
+  },
+  {
+    "id": "d320942a-cb09-4574-9822-9de6b04e12b9",
+    "timestamp": 1768917616774,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "tool",
+    "tool": "get_agent_services",
+    "arguments": {
+      "agent_id": "7c0cf07f-f76b-4984-9385-ffa54c65d630"
+    },
+    "result": {
+      "error": "Service request timed out"
+    },
+    "error": "Service request timed out"
+  },
+  {
+    "id": "1eab2d66-61a0-4d28-8a31-7b0dc39e3703",
+    "timestamp": 1768917616777,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "The request to retrieve the running services on agent SLT-LPT-CPT013 has timed out again. This could indicate a connectivity issue or that the agent is currently unresponsive.\n\nWould you like me to check the system health of this agent to see if there are any underlying issues?"
+  },
+  {
+    "id": "2e1b5586-98a3-44ef-8613-47662154dd68",
+    "timestamp": 1768918097752,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "tool",
+    "tool": "run_agent_shell_command",
+    "arguments": {
+      "agent_id": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+      "command": "Get-Process | Sort-Object CPU -Descending | Select-Object -First 5",
+      "language": "powershell"
+    },
+    "result": {
+      "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+      "command": "Get-Process | Sort-Object CPU -Descending | Select-Object -First 5",
+      "language": "powershell",
+      "output": []
+    },
+    "error": null
+  },
+  {
+    "id": "15af3ede-0f93-4118-928b-229a54111e54",
+    "timestamp": 1768918097755,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "It appears that the command to fetch the top 5 processes running on agent SLT-LPT-CPT013 did not return any output. This could be due to the agent being unresponsive or other issues.\n\nWould you like me to check the system health of this agent to diagnose any potential problems?"
+  },
+  {
+    "id": "89446317-093e-4436-b36a-3a6e2881806c",
+    "timestamp": 1768918907241,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "Hello! How can I assist you today regarding agent SLT-LPT-CPT013? If you have specific questions or actions in mind, please let me know!"
+  },
+  {
+    "id": "ab0e87cb-1bd8-4e41-9231-f7266ae1fd95",
+    "timestamp": 1768918931264,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "tool",
+    "tool": "run_agent_shell_command",
+    "arguments": {
+      "agent_id": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+      "command": "Get-Process | Sort-Object CPU -Descending | Select-Object -First 5",
+      "language": "powershell"
+    },
+    "result": {
+      "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+      "command": "Get-Process | Sort-Object CPU -Descending | Select-Object -First 5",
+      "language": "powershell",
+      "output": []
+    },
+    "error": null
+  },
+  {
+    "id": "ecc0767a-5d18-410f-ac7c-e0825bf23134",
+    "timestamp": 1768918931266,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "It seems that there was no output returned for the command to retrieve the top 5 running processes on agent SLT-LPT-CPT013. This could be due to various reasons, such as permissions or the command not executing properly.\n\nWould you like me to try a different command, or is there something else you would like to check regarding this agent?"
+  },
+  {
+    "id": "21930586-ac80-426d-b2a6-1a1a67be3ada",
+    "timestamp": 1768920007865,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "Hello! How can I assist you today with agent SLT-LPT-CPT013? If you have specific questions or tasks in mind, please let me know!"
+  },
+  {
+    "id": "93e37e22-7e1d-4cec-a1f2-e0d776a9cbc6",
+    "timestamp": 1768920095673,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "tool",
+    "tool": "get_agent_services",
+    "arguments": {
+      "agent_id": "7c0cf07f-f76b-4984-9385-ffa54c65d630"
+    },
+    "result": {
+      "error": "Service request timed out"
+    },
+    "error": "Service request timed out"
+  },
+  {
+    "id": "439aed67-df14-4d03-b1e7-281de736a87d",
+    "timestamp": 1768920095676,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "It seems that the request to retrieve the running services for agent SLT-LPT-CPT013 timed out. This can happen due to various reasons, such as network issues or the agent being unresponsive.\n\nWould you like me to try again, or is there something else you would like to check or do regarding this agent?"
+  },
+  {
+    "id": "1e5163ef-3b72-4c2a-af6c-3868c8b5eb28",
+    "timestamp": 1768920140499,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "tool",
+    "tool": "run_agent_shell_command",
+    "arguments": {
+      "agent_id": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+      "command": "Get-Process | Select-Object -First 5",
+      "language": "powershell"
+    },
+    "result": {
+      "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+      "command": "Get-Process | Select-Object -First 5",
+      "language": "powershell",
+      "output": []
+    },
+    "error": null
+  },
+  {
+    "id": "60098658-7169-4736-9e9e-27c4da843193",
+    "timestamp": 1768920140502,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "It appears that the command to retrieve the top 5 running processes on agent SLT-LPT-CPT013 did not return any output. This could be due to the agent being unresponsive or an issue with executing the command.\n\nWould you like to try a different approach, or is there another task or information you need regarding this agent?"
+  },
+  {
+    "id": "c2350c34-810f-4cd0-8b04-b1aa2b7bcd9f",
+    "timestamp": 1768921833591,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "Hello! How can I assist you today regarding agent SLT-LPT-CPT013?"
+  },
+  {
+    "id": "11d193e7-21c3-46e2-bfa8-6e970e312d92",
+    "timestamp": 1768921923177,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "tool",
+    "tool": "get_agent_services",
+    "arguments": {
+      "agent_id": "7c0cf07f-f76b-4984-9385-ffa54c65d630"
+    },
+    "result": {
+      "error": "Service request timed out"
+    },
+    "error": "Service request timed out"
+  },
+  {
+    "id": "51c2c051-4a93-4ee3-b34f-0e8a4a49c81c",
+    "timestamp": 1768921923180,
+    "sessionId": "agent-chat:7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "user": "AI Assistant",
+    "type": "auto-response",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "text": "It seems that the request to retrieve the running services for agent SLT-LPT-CPT013 timed out. Would you like me to try again, or is there something else you would like to check regarding this agent?"
   }
 ]

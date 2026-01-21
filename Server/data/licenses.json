@@ -11,7 +11,7 @@
     "code": "6bdff337e56d2fb86336a950",
     "createdAt": "2026-01-19T01:18:08.275Z",
     "revokedAt": null,
-    "lastUsedAt": "2026-01-20T08:56:12.778Z",
+    "lastUsedAt": "2026-01-20T15:09:57.329Z",
     "assignedAgentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
     "assignedAt": "2026-01-19T07:39:13.312Z"
   },
@@ -35,18 +35,24 @@
     "code": "1d90b7bc6acae74de1d38b89",
     "createdAt": "2026-01-20T10:04:09.002Z",
     "revokedAt": null,
-    "lastUsedAt": null
+    "lastUsedAt": null,
+    "assignedAgentId": null,
+    "assignedAt": null
   },
   {
     "code": "8a6007be63a19d784557040b",
     "createdAt": "2026-01-20T10:04:09.481Z",
     "revokedAt": null,
-    "lastUsedAt": null
+    "lastUsedAt": null,
+    "assignedAgentId": null,
+    "assignedAt": null
   },
   {
     "code": "4f31742b022ea4e51897bbaf",
     "createdAt": "2026-01-20T10:04:09.659Z",
     "revokedAt": null,
-    "lastUsedAt": null
+    "lastUsedAt": null,
+    "assignedAgentId": null,
+    "assignedAt": null
   }
 ]

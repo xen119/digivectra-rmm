@@ -77,6 +77,8 @@ const clients = new Map(); // socket -> info
 const agents = new Map(); // id -> info (persist offline)
 const clientsById = new Map(); // id -> { socket, info }
 const shellStreams = new Map(); // id -> response
+const shellOutputHistory = new Map(); // agentId -> [{ stream, timestamp, output }]
+const SHELL_HISTORY_LIMIT = 200;
 const screenSessions = new Map(); // sessionId -> session data
 const groups = loadGroups();
 const agentGroupAssignments = loadAgentGroupAssignments(groups);
@@ -219,6 +221,17 @@ const AI_TOOL_INSTRUCTIONS = [
   'Use list_agents to review connected agents and their health.',
   'Use get_agent_details when you need historical context for a specific agent.',
   'Use assign_agent_group to move an agent between groups when an action is requested.',
+  'Use get_agent_monitoring_history to surface recent monitoring events for the focal agent.',
+  'Use get_agent_system_health to retrieve event statistics and log entries for that agent.',
+  'Use get_agent_firewall_rules when you need to inspect what the endpoint firewall is doing.',
+  'Use get_agent_vulnerabilities to see the latest vulnerability findings tied to the agent.',
+  'Use get_agent_patch_history to understand which patch operations involved the agent.',
+  'Use get_agent_software_inventory to review the agent’s reported applications.',
+  'Use get_agent_scripts to list remediation scripts and any recent script activity for this agent.',
+  'Use get_agent_compliance_report to read the assigned compliance profile and score for the agent.',
+  'Use get_agent_license_info to confirm the license currently associated with the agent.',
+  'Use run_agent_shell_command to execute shell commands and gather their output from the agent.',
+  'Use get_agent_services and manage_agent_service to inspect and control Windows services on that agent.',
 ].join(' ');
 const AI_TOOL_DEFINITIONS = [
   {
@@ -266,6 +279,215 @@ const AI_TOOL_DEFINITIONS = [
         },
       },
       required: ['agent_id', 'group'],
+    },
+  },
+  {
+    name: 'get_agent_monitoring_history',
+    description: 'Return recent monitoring events (alerts, script requests, remediation, etc.) for a single agent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent whose monitoring history is requested.',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 50,
+          description: 'Maximum number of events to return (default 20).',
+        },
+      },
+      required: ['agent_id'],
+    },
+  },
+  {
+    name: 'get_agent_system_health',
+    description: 'Fetch the latest event statistics and log entries for a single agent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent whose system health is requested.',
+        },
+        level: {
+          type: 'string',
+          enum: ['Information', 'Warning', 'Error'],
+          description: 'Optional severity level for returned event entries.',
+        },
+      },
+      required: ['agent_id'],
+    },
+  },
+  {
+    name: 'get_agent_firewall_rules',
+    description: 'Inspect the Windows firewall rules, profiles, and defaults configured on the agent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent to inspect.',
+        },
+      },
+      required: ['agent_id'],
+    },
+  },
+  {
+    name: 'get_agent_vulnerabilities',
+    description: 'List vulnerability matches attributed to the agent including severity and affected component.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent whose vulnerabilities you need.',
+        },
+      },
+      required: ['agent_id'],
+    },
+  },
+  {
+    name: 'get_agent_patch_history',
+    description: 'Review patch schedules or actions that were targeted at the agent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent whose patch history you need.',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 50,
+          description: 'Maximum number of patch events to return (default 20).',
+        },
+      },
+      required: ['agent_id'],
+    },
+  },
+  {
+    name: 'get_agent_software_inventory',
+    description: 'Gather the software inventory report that the agent recently sent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent whose software inventory is requested.',
+        },
+      },
+      required: ['agent_id'],
+    },
+  },
+  {
+    name: 'get_agent_scripts',
+    description: 'List remediation scripts in the catalog plus the recent script activity for the agent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent whose script activity is requested.',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 20,
+          description: 'Maximum number of recent script events to return (default 5).',
+        },
+      },
+      required: ['agent_id'],
+    },
+  },
+  {
+    name: 'get_agent_compliance_report',
+    description: 'Retrieve the compliance profile, score, and results for the agent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent whose compliance report is requested.',
+        },
+      },
+      required: ['agent_id'],
+    },
+  },
+  {
+    name: 'get_agent_license_info',
+    description: 'Confirm which license key is assigned to that agent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent whose license info is requested.',
+        },
+      },
+      required: ['agent_id'],
+    },
+  },
+  {
+    name: 'run_agent_shell_command',
+    description: 'Execute a shell command on the agent and collect the resulting output.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent to target.',
+        },
+        command: {
+          type: 'string',
+          description: 'The command string to execute.',
+        },
+        language: {
+          type: 'string',
+          enum: ['powershell', 'cmd'],
+          description: 'The shell language to use (defaults to powershell).',
+        },
+      },
+      required: ['agent_id', 'command'],
+    },
+  },
+  {
+    name: 'get_agent_services',
+    description: 'List the Windows services running on the agent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent.',
+        },
+      },
+      required: ['agent_id'],
+    },
+  },
+  {
+    name: 'manage_agent_service',
+    description: 'Start, stop, or restart a specific service on the agent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'Identifier of the agent.',
+        },
+        service_name: {
+          type: 'string',
+          description: 'Exact service name to manage.',
+        },
+        action: {
+          type: 'string',
+          enum: ['start', 'stop', 'restart'],
+          description: 'Service action to perform.',
+        },
+      },
+      required: ['agent_id', 'service_name', 'action'],
     },
   },
 ];
@@ -321,6 +543,7 @@ const EVENT_ENTRIES_TIMEOUT_MS = 30_000;
 const eventStatsRequests = new Map();
 const eventEntriesRequests = new Map();
 const agentEventStatsCache = new Map();
+const agentEventEntriesCache = new Map();
 
 let USERS_CONFIG = loadUsersConfig();
 const monitoringEvents = new Set();
@@ -905,51 +1128,26 @@ server.on('request', async (req, res) => {
         });
 
         const baseMessages = buildAiMessages(session, text);
-        const initialResponse = await callOpenAi(baseMessages);
-        let assistantMessage = initialResponse.choice?.message ?? null;
-        let functionCallMessage = null;
-        let functionResultMessage = null;
-        let toolDetails = null;
+        const {
+          assistantMessage,
+          toolDetails,
+          functionCallMessage,
+          functionResultMessage,
+        } = await callAiWithToolLoop(baseMessages);
+        const assistantContent = assistantMessage?.content ?? '';
 
-        if (assistantMessage?.function_call) {
-          const toolResult = await executeAiTool(assistantMessage.function_call);
-          toolDetails = {
-            name: assistantMessage.function_call.name,
-            arguments: toolResult.arguments,
-            result: toolResult.result,
-            error: toolResult.error ?? null,
-          };
+        if (toolDetails) {
           recordAiHistory({
             sessionId,
             user: sessionUser,
             type: 'tool',
-            tool: assistantMessage.function_call.name,
-            arguments: toolResult.arguments,
-            result: toolResult.result,
-            error: toolResult.error ?? null,
+            tool: toolDetails.name,
+            arguments: toolDetails.arguments,
+            result: toolDetails.result,
+            error: toolDetails.error,
           });
-
-          functionCallMessage = {
-            role: 'assistant',
-            content: null,
-            function_call: assistantMessage.function_call,
-          };
-          functionResultMessage = {
-            role: 'function',
-            name: assistantMessage.function_call.name,
-            content: JSON.stringify(toolResult.result ?? { error: toolResult.error ?? 'No result' }),
-          };
-
-          const followUpMessages = [
-            ...baseMessages,
-            functionCallMessage,
-            functionResultMessage,
-          ];
-          const followUpResponse = await callOpenAi(followUpMessages, { function_call: 'none' });
-          assistantMessage = followUpResponse.choice?.message ?? null;
         }
 
-        const assistantContent = assistantMessage?.content ?? '';
         recordAiHistory({
           sessionId,
           user: sessionUser,
@@ -4002,9 +4200,15 @@ wss.on('connection', (socket, request) => {
         const pending = completeEventEntriesRequest(parsed.requestId);
         if (pending) {
           const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+          const normalizedLevel = typeof parsed.level === 'string' ? parsed.level : 'Information';
+          agentEventEntriesCache.set(info.id, {
+            entries: entries.slice(0, 100),
+            level: normalizedLevel,
+            retrievedAt: new Date().toISOString(),
+          });
           pending.resolve({
             entries,
-            level: typeof parsed.level === 'string' ? parsed.level : 'Information',
+            level: normalizedLevel,
           });
         }
     } else if (parsed?.type === 'software-operation-result') {
@@ -4067,6 +4271,7 @@ wss.on('connection', (socket, request) => {
       agentGroupAssignments.delete(id);
     }
     shellStreams.delete(id);
+    shellOutputHistory.delete(id);
     screenLists.delete(id);
     cancelScreenListRequest(id, new Error('agent disconnected'));
     agentProfileStatus.delete(id);
@@ -4141,10 +4346,23 @@ function emitShellOutput(agentId, data) {
     return;
   }
 
-  const payload = {
+  const entry = {
     output: data.output,
     stream: data.stream,
     timestamp: new Date().toISOString(),
+  };
+  const history = shellOutputHistory.get(agentId) ?? [];
+  history.push(entry);
+  if (history.length > SHELL_HISTORY_LIMIT) {
+    history.shift();
+  }
+  shellOutputHistory.set(agentId, history);
+  notifyShellOutputWaiters(agentId);
+
+  const payload = {
+    output: data.output,
+    stream: data.stream,
+    timestamp: entry.timestamp,
   };
 
   stream.write('event: shell\n');
@@ -6098,12 +6316,13 @@ function appendSessionMessages(session, entries) {
   session.lastUsed = Date.now();
 }
 
-function buildAiMessages(session, userContent) {
+function buildAiMessages(session, userContent, extraSystemMessages = []) {
   const systemPrompt = generalSettings.aiAgent?.systemPrompt ?? DEFAULT_AI_AGENT_SETTINGS.systemPrompt;
   const history = Array.isArray(session?.messages) ? session.messages.slice() : [];
   return [
     { role: 'system', content: systemPrompt },
     { role: 'system', content: `Tool guidance: ${AI_TOOL_INSTRUCTIONS}` },
+    ...extraSystemMessages,
     ...history,
     { role: 'user', content: userContent },
   ];
@@ -6154,6 +6373,53 @@ async function callOpenAi(messages, overrides = {}) {
   return { choice, data };
 }
 
+async function callAiWithToolLoop(messages, overrides = {}) {
+  const initialResponse = await callOpenAi(messages, overrides);
+  let assistantMessage = initialResponse.choice?.message ?? null;
+  let functionCallMessage = null;
+  let functionResultMessage = null;
+  let toolDetails = null;
+
+  if (assistantMessage?.function_call) {
+    const toolResult = await executeAiTool(assistantMessage.function_call);
+    toolDetails = {
+      name: assistantMessage.function_call.name,
+      arguments: toolResult.arguments,
+      result: toolResult.result,
+      error: toolResult.error ?? null,
+    };
+
+    functionCallMessage = {
+      role: 'assistant',
+      content: null,
+      function_call: assistantMessage.function_call,
+    };
+    functionResultMessage = {
+      role: 'function',
+      name: assistantMessage.function_call.name,
+      content: JSON.stringify(
+        toolResult.result ?? { error: toolResult.error ?? 'No result' }
+      ),
+    };
+
+    const followUpMessages = [
+      ...messages,
+      functionCallMessage,
+      functionResultMessage,
+    ];
+    const followUpResponse = await callOpenAi(
+      followUpMessages,
+      {
+        ...overrides,
+        function_call: 'none',
+      },
+    );
+    assistantMessage = followUpResponse.choice?.message ?? null;
+  }
+
+  return { assistantMessage, functionCallMessage, functionResultMessage, toolDetails };
+}
+
 function parseFunctionArguments(raw) {
   if (!raw) {
     return {};
@@ -6167,6 +6433,336 @@ function parseFunctionArguments(raw) {
     return null;
   }
   return null;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runAgentShellCommand(agentId, command, language = 'powershell', timeoutMs = 3000) {
+  const entry = clientsById.get(agentId);
+  if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+    return {
+      error: 'Agent is not connected or offline.',
+    };
+  }
+
+  const normalizedCommand = typeof command === 'string' ? command.trim() : '';
+  if (!normalizedCommand) {
+    return {
+      error: 'command is required.',
+    };
+  }
+
+  const resolvedLanguage = typeof language === 'string' && language.trim()
+    ? language.trim()
+    : 'powershell';
+  const initialHistory = shellOutputHistory.get(agentId) ?? [];
+  const startIndex = initialHistory.length;
+
+  sendControl(entry.socket, 'start-shell', { language: resolvedLanguage });
+  await sleep(100);
+  sendControl(entry.socket, 'shell-input', { input: `${normalizedCommand}\n` });
+  await sleep(timeoutMs);
+  const history = shellOutputHistory.get(agentId) ?? [];
+  const outputEntries = history.slice(startIndex);
+  return {
+    agentId,
+    command: normalizedCommand,
+    language: resolvedLanguage,
+    output: outputEntries.slice(-20),
+  };
+}
+
+async function fetchAgentServicesForTool(agentId) {
+  const entry = clientsById.get(agentId);
+  if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+    return {
+      error: 'Agent is not connected or offline.',
+    };
+  }
+
+  try {
+    const services = await requestAgentServiceList(entry);
+    return {
+      agentId,
+      services,
+    };
+  } catch (error) {
+    return {
+      error: error?.message ?? 'Unable to retrieve services.',
+    };
+  }
+}
+
+async function controlAgentService(agentId, serviceName, action) {
+  const entry = clientsById.get(agentId);
+  if (!entry || entry.socket.readyState !== WebSocket.OPEN) {
+    return {
+      error: 'Agent is not connected or offline.',
+    };
+  }
+
+  const normalizedAction = (action ?? '').toString().trim().toLowerCase();
+  if (!['start', 'stop', 'restart'].includes(normalizedAction)) {
+    return {
+      error: 'Invalid action. Allowed values are start, stop, restart.',
+    };
+  }
+
+  try {
+    const result = await performServiceAction(entry, serviceName, normalizedAction);
+    return {
+      agentId,
+      serviceName,
+      action: normalizedAction,
+      success: Boolean(result.success),
+      message: result.message ?? '',
+    };
+  } catch (error) {
+    return {
+      error: error?.message ?? 'Service action failed.',
+    };
+  }
+}
+
+function resolveAgentEntry(agentId) {
+  if (!agentId) {
+    return null;
+  }
+  const connected = clientsById.get(agentId);
+  if (connected) {
+    return connected;
+  }
+  const cachedInfo = agents.get(agentId);
+  if (!cachedInfo) {
+    return null;
+  }
+  return { socket: null, info: cachedInfo };
+}
+
+function clampLimit(value, fallback = 10, min = 1, max = 100) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(Math.max(min, parsed), max);
+}
+
+function getAgentMonitoringHistory(agentId, limit = 20) {
+  const normalizedLimit = clampLimit(limit, 20, 1, 50);
+  const events = [];
+  for (let index = monitoringHistory.length - 1; index >= 0 && events.length < normalizedLimit; index -= 1) {
+    const entry = monitoringHistory[index];
+    const payload = entry?.payload ?? {};
+    const candidateId = payload.agentId
+      ?? (typeof payload.agent === 'string' ? payload.agent : null)
+      ?? payload.agent?.id
+      ?? payload.agent?.agentId
+      ?? null;
+    if (!candidateId || candidateId !== agentId) {
+      continue;
+    }
+    events.push({
+      eventName: entry.eventName ?? null,
+      timestamp: payload.timestamp ?? payload.updatedAt ?? payload.createdAt ?? null,
+      summary: payload.summary ?? null,
+      details: payload,
+    });
+  }
+  return events;
+}
+
+function getAgentPatchHistory(agentId, limit = 20) {
+  const normalizedLimit = clampLimit(limit, 20, 1, 50);
+  const entries = [];
+  for (const entry of patchHistory) {
+    if (!entry || entry.agentId !== agentId) {
+      continue;
+    }
+    entries.push(entry);
+    if (entries.length >= normalizedLimit) {
+      break;
+    }
+  }
+  return entries;
+}
+
+function getAgentSoftwareInventory(agentId) {
+  const entry = resolveAgentEntry(agentId);
+  const info = entry?.info ?? null;
+  if (!info) {
+    return null;
+  }
+  const software = Array.isArray(info.softwareEntries) ? info.softwareEntries : [];
+  return {
+    agentId,
+    agentName: info.name ?? agentId,
+    retrievedAt: info.softwareRetrievedAt ?? null,
+    total: software.length,
+    list: software.map((item) => ({
+      name: item?.name ?? 'Unknown',
+      version: item?.version ?? '',
+      publisher: item?.publisher ?? '',
+      installDate: item?.installDate ?? null,
+      location: item?.location ?? null,
+      source: item?.source ?? null,
+    })),
+  };
+}
+
+function getAgentScriptActivity(agentId, limit = 5) {
+  const normalizedLimit = clampLimit(limit, 5, 1, 20);
+  const activities = [];
+  for (let index = monitoringHistory.length - 1; index >= 0 && activities.length < normalizedLimit; index -= 1) {
+    const entry = monitoringHistory[index];
+    const payload = entry?.payload ?? {};
+    const candidateId = payload.agentId
+      ?? (typeof payload.agent === 'string' ? payload.agent : null)
+      ?? payload.agent?.id
+      ?? payload.agent?.agentId
+      ?? null;
+    if (candidateId !== agentId) {
+      continue;
+    }
+    if (!payload.scriptName) {
+      continue;
+    }
+    activities.push({
+      eventName: entry.eventName ?? null,
+      scriptName: payload.scriptName,
+      timestamp: payload.timestamp ?? payload.requestedAt ?? null,
+      status: payload.status ?? null,
+      details: payload,
+    });
+  }
+  return activities;
+}
+
+function getAgentComplianceSummary(agentId) {
+  if (!agentId) {
+    return null;
+  }
+  const summary = complianceStatusByAgent.get(agentId);
+  if (!summary) {
+    return null;
+  }
+  const profile = getComplianceProfile(summary.profileId);
+  return {
+    ...summary,
+    profile,
+  };
+}
+
+function getAgentLicenseRecord(agentId) {
+  if (!agentId) {
+    return null;
+  }
+  const record = licenseRecords.find((entry) => entry.assignedAgentId === agentId) ?? null;
+  if (!record) {
+    return null;
+  }
+  return {
+    ...record,
+    status: record.revokedAt ? 'revoked' : 'assigned',
+  };
+}
+
+function getAgentVulnerabilities(agentId) {
+  const entry = resolveAgentEntry(agentId);
+  const info = entry?.info ?? null;
+  if (!info) {
+    return null;
+  }
+  const results = evaluateAssetVulnerabilities(info);
+  return {
+    agentId,
+    agentName: info.name ?? agentId,
+    total: results.length,
+    vulnerabilities: results,
+  };
+}
+
+async function gatherAgentSystemHealth(agentId, level = 'Information') {
+  const entry = clientsById.get(agentId);
+  const info = entry?.info ?? agents.get(agentId) ?? null;
+  const normalizedLevel = typeof level === 'string' && level.trim() ? level.trim() : 'Information';
+  const response = {
+    agentId,
+    agentName: info?.name ?? agentId,
+    online: Boolean(entry?.socket?.readyState === WebSocket.OPEN),
+    stats: null,
+    since: null,
+    retrievedAt: null,
+    entries: [],
+    entryLevel: normalizedLevel,
+    entriesRetrievedAt: null,
+    errors: [],
+  };
+
+  const cachedStats = agentEventStatsCache.get(agentId);
+  if (cachedStats) {
+    response.stats = cachedStats.stats;
+    response.since = cachedStats.since;
+    response.retrievedAt = cachedStats.retrievedAt;
+  }
+
+  const cachedEntries = agentEventEntriesCache.get(agentId);
+  if (cachedEntries) {
+    response.entries = cachedEntries.entries;
+    response.entryLevel = cachedEntries.level ?? response.entryLevel;
+    response.entriesRetrievedAt = cachedEntries.retrievedAt ?? response.entriesRetrievedAt;
+  }
+
+  if (entry?.socket?.readyState === WebSocket.OPEN) {
+    try {
+      const stats = await requestAgentEventStats(entry);
+      response.stats = stats.stats;
+      response.since = stats.since;
+      response.retrievedAt = stats.retrievedAt;
+    } catch (error) {
+      response.errors.push(`stats: ${error?.message ?? 'request failed'}`);
+    }
+
+    try {
+      const entriesPayload = await requestAgentEventEntries(entry, normalizedLevel);
+      response.entries = Array.isArray(entriesPayload.entries) ? entriesPayload.entries : [];
+      response.entryLevel = entriesPayload.level ?? normalizedLevel;
+      response.entriesRetrievedAt = new Date().toISOString();
+      agentEventEntriesCache.set(agentId, {
+        entries: response.entries.slice(0, 100),
+        level: response.entryLevel,
+        retrievedAt: response.entriesRetrievedAt,
+      });
+    } catch (error) {
+      response.errors.push(`entries: ${error?.message ?? 'request failed'}`);
+    }
+  }
+
+  return response;
+}
+
+async function fetchAgentFirewallRulesForAgent(agentId) {
+  const entry = clientsById.get(agentId);
+  if (!entry) {
+    return { agentId, error: 'Agent not connected' };
+  }
+  if (!entry.socket || entry.socket.readyState !== WebSocket.OPEN) {
+    return { agentId, error: 'Agent offline' };
+  }
+  try {
+    const rules = await requestAgentFirewallRules(entry);
+    return {
+      agentId,
+      firewallEnabled: rules.firewallEnabled ?? null,
+      profiles: Array.isArray(rules.profiles) ? rules.profiles : null,
+      defaultInboundAction: rules.defaultInboundAction ?? null,
+      defaultOutboundAction: rules.defaultOutboundAction ?? null,
+      rules: Array.isArray(rules.rules) ? rules.rules : [],
+    };
+  } catch (error) {
+    return { agentId, error: error?.message ?? 'Firewall request failed' };
+  }
 }
 
 function formatAgentSummary(info) {
@@ -6292,6 +6888,271 @@ async function executeAiTool(functionCall) {
         },
       };
     }
+    case 'get_agent_monitoring_history': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const resolved = resolveAgentEntry(agentId);
+      const events = getAgentMonitoringHistory(agentId, args?.limit);
+      return {
+        arguments: args,
+        result: {
+          agentId,
+          agentName: resolved?.info?.name ?? agentId,
+          events,
+        },
+      };
+    }
+    case 'get_agent_system_health': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const level = typeof args?.level === 'string' ? args.level : 'Information';
+      const health = await gatherAgentSystemHealth(agentId, level);
+      return {
+        arguments: args,
+        result: health,
+      };
+    }
+    case 'get_agent_firewall_rules': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const firewall = await fetchAgentFirewallRulesForAgent(agentId);
+      if (firewall.error) {
+        return {
+          arguments: args,
+          result: firewall,
+          error: firewall.error,
+        };
+      }
+      return {
+        arguments: args,
+        result: firewall,
+      };
+    }
+    case 'get_agent_vulnerabilities': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const payload = getAgentVulnerabilities(agentId);
+      if (!payload) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'Agent data is unavailable.',
+        };
+      }
+      return {
+        arguments: args,
+        result: payload,
+      };
+    }
+    case 'get_agent_patch_history': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const history = getAgentPatchHistory(agentId, args?.limit);
+      return {
+        arguments: args,
+        result: {
+          agentId,
+          history,
+        },
+      };
+    }
+    case 'get_agent_software_inventory': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const inventory = getAgentSoftwareInventory(agentId);
+      if (!inventory) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'Agent software inventory is unavailable.',
+        };
+      }
+      return {
+        arguments: args,
+        result: inventory,
+      };
+    }
+    case 'get_agent_scripts': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const resolved = resolveAgentEntry(agentId);
+      const activity = getAgentScriptActivity(agentId, args?.limit);
+      const availableScripts = Array.isArray(monitoringConfig.remediationScripts)
+        ? monitoringConfig.remediationScripts.map((entry) => ({
+          name: entry.name,
+          description: entry.description ?? '',
+          language: entry.language ?? null,
+        }))
+        : [];
+      return {
+        arguments: args,
+        result: {
+          agentId,
+          agentName: resolved?.info?.name ?? agentId,
+          availableScripts,
+          recentActivity: activity,
+        },
+      };
+    }
+    case 'get_agent_compliance_report': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const summary = getAgentComplianceSummary(agentId);
+      if (!summary) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'Compliance data is unavailable for that agent.',
+        };
+      }
+      return {
+        arguments: args,
+        result: summary,
+      };
+    }
+    case 'get_agent_license_info': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const license = getAgentLicenseRecord(agentId);
+      return {
+        arguments: args,
+        result: {
+          agentId,
+          license,
+        },
+      };
+    }
+    case 'run_agent_shell_command': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const command = typeof args?.command === 'string' ? args.command : '';
+      if (!command.trim()) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'command is required.',
+        };
+      }
+      const language = typeof args?.language === 'string' ? args.language : 'powershell';
+      const payload = await runAgentShellCommand(agentId, command, language);
+      if (payload.error) {
+        return {
+          arguments: args,
+          result: payload,
+          error: payload.error,
+        };
+      }
+      return {
+        arguments: args,
+        result: payload,
+      };
+    }
+    case 'get_agent_services': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      if (!agentId) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id is required.',
+        };
+      }
+      const payload = await fetchAgentServicesForTool(agentId);
+      if (payload.error) {
+        return {
+          arguments: args,
+          result: payload,
+          error: payload.error,
+        };
+      }
+      return {
+        arguments: args,
+        result: payload,
+      };
+    }
+    case 'manage_agent_service': {
+      const agentId = typeof args?.agent_id === 'string' ? args.agent_id.trim() : '';
+      const serviceName = typeof args?.service_name === 'string' ? args.service_name.trim() : '';
+      const action = typeof args?.action === 'string' ? args.action : '';
+      if (!agentId || !serviceName || !action) {
+        return {
+          arguments: args,
+          result: null,
+          error: 'agent_id, service_name, and action are required.',
+        };
+      }
+      const payload = await controlAgentService(agentId, serviceName, action);
+      if (payload.error) {
+        return {
+          arguments: args,
+          result: payload,
+          error: payload.error,
+        };
+      }
+      return {
+        arguments: args,
+        result: payload,
+      };
+    }
     default:
       return {
         arguments: args,
@@ -6320,21 +7181,47 @@ async function respondToAgentWithAi(info, chatEvent) {
 
   const sessionId = `${AI_AGENT_SESSION_PREFIX}${info.id}`;
   const conversation = getAiConversation(sessionId);
-  const userContent = `Agent ${info.name ?? info.id} says: ${chatEvent.text}`;
-  const messages = buildAiMessages(conversation, userContent);
+  const userContent = chatEvent.text;
+  const agentDisplay = info.name ? `${info.name} (${info.id})` : info.id;
+  const agentFocusInstruction = `Focus exclusively on agent ${agentDisplay}. Only provide information, guidance, and tool actions that target this agent.`;
+  const messages = buildAiMessages(conversation, userContent, [
+    { role: 'system', content: agentFocusInstruction },
+  ]);
 
   try {
-    const response = await callOpenAi(messages, { ...AI_AGENT_RESPONSE_OPTIONS, function_call: 'none' });
-    const reply = response.choice?.message?.content?.trim() ?? '';
+    const {
+      assistantMessage,
+      functionCallMessage,
+      functionResultMessage,
+      toolDetails,
+    } = await callAiWithToolLoop(
+      messages,
+      { ...AI_AGENT_RESPONSE_OPTIONS },
+    );
+    const reply = assistantMessage?.content?.trim() ?? '';
     if (!reply) {
       console.log('AI auto reply produced empty completion');
       return;
     }
 
-    appendSessionMessages(conversation, [
+    const sessionEntries = [
       { role: 'user', content: userContent },
+      ...(functionCallMessage && functionResultMessage ? [functionCallMessage, functionResultMessage] : []),
       { role: 'assistant', content: reply },
-    ]);
+    ];
+    appendSessionMessages(conversation, sessionEntries);
+
+    if (toolDetails) {
+      recordAiHistory({
+        sessionId,
+        user: AI_AGENT_USER,
+        type: 'tool',
+        tool: toolDetails.name,
+        arguments: toolDetails.arguments,
+        result: toolDetails.result,
+        error: toolDetails.error,
+      });
+    }
 
     const aiEvent = {
       sessionId: chatEvent.sessionId ?? uuidv4(),

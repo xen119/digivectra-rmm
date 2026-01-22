@@ -12,7 +12,7 @@
           "id": "reg-1",
           "description": "Ensure RelaxMinimumPasswordLengthLimits under HKLM:\\System\\CurrentControlSet\\Control\\SAM equals 1. This keeps RelaxMinimumPasswordLengthLimits at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\System\\CurrentControlSet\\Control\\SAM",
@@ -39,7 +39,7 @@
           "id": "reg-2",
           "description": "Ensure NoConnectedUser under HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System equals 3. This keeps NoConnectedUser at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
@@ -66,7 +66,7 @@
           "id": "reg-3",
           "description": "Ensure SCENoApplyLegacyAuditPolicy under HKLM:\\System\\CurrentControlSet\\Control\\Lsa equals 1. This keeps SCENoApplyLegacyAuditPolicy at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\System\\CurrentControlSet\\Control\\Lsa",
@@ -93,7 +93,7 @@
           "id": "reg-4",
           "description": "Ensure AddPrinterDrivers under HKLM:\\System\\CurrentControlSet\\Control\\Print\\Providers\\LanMan Print Services\\Servers equals 1. This keeps AddPrinterDrivers at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\System\\CurrentControlSet\\Control\\Print\\Providers\\LanMan Print Services\\Servers",
@@ -120,7 +120,7 @@
           "id": "reg-5",
           "description": "Ensure DisableCAD under HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System equals 0. This keeps DisableCAD at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
@@ -147,7 +147,7 @@
           "id": "reg-6",
           "description": "Ensure DontDisplayLastUserName under HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System equals 1. This keeps DontDisplayLastUserName at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
@@ -174,7 +174,7 @@
           "id": "reg-7",
           "description": "Ensure MaxDevicePasswordFailedAttempts under HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System equals 10. This keeps MaxDevicePasswordFailedAttempts at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
@@ -201,7 +201,7 @@
           "id": "reg-8",
           "description": "Ensure InactivityTimeoutSecs under HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System equals 900. This keeps InactivityTimeoutSecs at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
@@ -228,7 +228,7 @@
           "id": "reg-9",
           "description": "Ensure CachedLogonsCount under HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon equals 4. This keeps CachedLogonsCount at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
@@ -255,7 +255,7 @@
           "id": "reg-10",
           "description": "Ensure ScRemoveOption under HKLM:\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon equals 1. This keeps ScRemoveOption at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
@@ -282,7 +282,7 @@
           "id": "reg-11",
           "description": "Ensure RequireSecuritySignature under HKLM:\\System\\CurrentControlSet\\Services\\LanmanWorkstation\\Parameters equals 1. This keeps RequireSecuritySignature at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\System\\CurrentControlSet\\Services\\LanmanWorkstation\\Parameters",
@@ -309,7 +309,7 @@
           "id": "reg-12",
           "description": "Ensure RequireSecuritySignature under HKLM:\\System\\CurrentControlSet\\Services\\LanManServer\\Parameters equals 1. This keeps RequireSecuritySignature at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\System\\CurrentControlSet\\Services\\LanManServer\\Parameters",
@@ -336,7 +336,7 @@
           "id": "reg-13",
           "description": "Ensure SMBServerNameHardeningLevel under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\LanManServer\\Parameters equals 1. This keeps SMBServerNameHardeningLevel at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\LanManServer\\Parameters",
@@ -363,7 +363,7 @@
           "id": "reg-14",
           "description": "Ensure RestrictAnonymous under HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa equals 1. This keeps RestrictAnonymous at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa",
@@ -390,7 +390,7 @@
           "id": "reg-15",
           "description": "Ensure DisableDomainCreds under HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa equals 1. This keeps DisableDomainCreds at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa",
@@ -417,7 +417,7 @@
           "id": "reg-16",
           "description": "Ensure UseMachineId under HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa equals 1. This keeps UseMachineId at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa",
@@ -444,7 +444,7 @@
           "id": "reg-17",
           "description": "Ensure SupportedEncryptionTypes under HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\\Kerberos\\Parameters equals 2147483640. This keeps SupportedEncryptionTypes at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\\Kerberos\\Parameters",
@@ -471,7 +471,7 @@
           "id": "reg-18",
           "description": "Ensure LmCompatibilityLevel under HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa equals 5. This keeps LmCompatibilityLevel at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa",
@@ -498,7 +498,7 @@
           "id": "reg-19",
           "description": "Ensure NTLMMinClientSec under HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\MSV1_0 equals 537395200. This keeps NTLMMinClientSec at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\MSV1_0",
@@ -525,7 +525,7 @@
           "id": "reg-20",
           "description": "Ensure AuditReceivingNTLMTraffic under HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\MSV1_0 equals 2. This keeps AuditReceivingNTLMTraffic at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\MSV1_0",
@@ -552,7 +552,7 @@
           "id": "reg-21",
           "description": "Ensure RestrictSendingNTLMTraffic under HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\MSV1_0 equals 2. This keeps RestrictSendingNTLMTraffic at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\MSV1_0",
@@ -579,7 +579,7 @@
           "id": "reg-22",
           "description": "Ensure FilterAdministratorToken under HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System equals 1. This keeps FilterAdministratorToken at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
@@ -606,7 +606,7 @@
           "id": "reg-23",
           "description": "Ensure ConsentPromptBehaviorAdmin under HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System equals 2. This keeps ConsentPromptBehaviorAdmin at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
@@ -633,7 +633,7 @@
           "id": "reg-24",
           "description": "Ensure ConsentPromptBehaviorUser under HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System equals 0. This keeps ConsentPromptBehaviorUser at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
@@ -660,7 +660,7 @@
           "id": "reg-25",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\BTAGService equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\BTAGService",
@@ -687,7 +687,7 @@
           "id": "reg-26",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\bthserv equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\bthserv",
@@ -714,7 +714,7 @@
           "id": "reg-27",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\MapsBroker equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\MapsBroker",
@@ -741,7 +741,7 @@
           "id": "reg-28",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\lfsvc equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\lfsvc",
@@ -768,7 +768,7 @@
           "id": "reg-29",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\lltdsvc equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\lltdsvc",
@@ -795,7 +795,7 @@
           "id": "reg-30",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\MSiSCSI equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\MSiSCSI",
@@ -822,7 +822,7 @@
           "id": "reg-31",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Spooler equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Spooler",
@@ -849,7 +849,7 @@
           "id": "reg-32",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\wercplsupport equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\wercplsupport",
@@ -876,7 +876,7 @@
           "id": "reg-33",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\RasAuto equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\RasAuto",
@@ -903,7 +903,7 @@
           "id": "reg-34",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\SessionEnv equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\SessionEnv",
@@ -930,7 +930,7 @@
           "id": "reg-35",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\TermService equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\TermService",
@@ -957,7 +957,7 @@
           "id": "reg-36",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\UmRdpService equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\UmRdpService",
@@ -984,7 +984,7 @@
           "id": "reg-37",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\RpcLocator equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\RpcLocator",
@@ -1011,7 +1011,7 @@
           "id": "reg-38",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\RemoteAccess equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\RemoteAccess",
@@ -1038,7 +1038,7 @@
           "id": "reg-39",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\LanmanServer equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\LanmanServer",
@@ -1065,7 +1065,7 @@
           "id": "reg-40",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\SSDPSRV equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\SSDPSRV",
@@ -1092,7 +1092,7 @@
           "id": "reg-41",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\upnphost equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\upnphost",
@@ -1119,7 +1119,7 @@
           "id": "reg-42",
           "description": "Ensure Start under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\WerSvc equals 4. This keeps Start at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\WerSvc",
@@ -1406,7 +1406,7 @@
           "id": "audit-53",
           "description": "Audit Credential Validation to enable and enable. This captures enable and enable events for Credential Validation so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Credential Validation",
@@ -1432,7 +1432,7 @@
           "id": "audit-54",
           "description": "Audit Application Group Management to enable and enable. This captures enable and enable events for Application Group Management so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Application Group Management",
@@ -1458,7 +1458,7 @@
           "id": "audit-55",
           "description": "Audit Security Group Management to enable and disable. This captures enable and disable events for Security Group Management so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Security Group Management",
@@ -1484,7 +1484,7 @@
           "id": "audit-56",
           "description": "Audit User Account Management to enable and enable. This captures enable and enable events for User Account Management so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "User Account Management",
@@ -1510,7 +1510,7 @@
           "id": "audit-57",
           "description": "Audit Plug and Play Events to enable. This captures enable events for Plug and Play Events so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Plug and Play Events",
@@ -1536,7 +1536,7 @@
           "id": "audit-58",
           "description": "Audit Process Creation to enable. This captures enable events for Process Creation so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Process Creation",
@@ -1562,7 +1562,7 @@
           "id": "audit-59",
           "description": "Audit Account Lockout to enable. This captures enable events for Account Lockout so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Account Lockout",
@@ -1588,7 +1588,7 @@
           "id": "audit-60",
           "description": "Audit Group Membership to enable. This captures enable events for Group Membership so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Group Membership",
@@ -1614,7 +1614,7 @@
           "id": "audit-61",
           "description": "Audit Logoff to enable. This captures enable events for Logoff so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Logoff",
@@ -1640,7 +1640,7 @@
           "id": "audit-62",
           "description": "Audit Logon to enable and enable. This captures enable and enable events for Logon so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Logon",
@@ -1666,7 +1666,7 @@
           "id": "audit-63",
           "description": "Audit Other Logon/Logoff Events to enable and enable. This captures enable and enable events for Other Logon/Logoff Events so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Other Logon/Logoff Events",
@@ -1692,7 +1692,7 @@
           "id": "audit-64",
           "description": "Audit Special Logon to enable. This captures enable events for Special Logon so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Special Logon",
@@ -1718,7 +1718,7 @@
           "id": "audit-65",
           "description": "Audit Detailed File Share to enable. This captures enable events for Detailed File Share so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Detailed File Share",
@@ -1744,7 +1744,7 @@
           "id": "audit-66",
           "description": "Audit File Share to enable and enable. This captures enable and enable events for File Share so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "File Share",
@@ -1770,7 +1770,7 @@
           "id": "audit-67",
           "description": "Audit Other Object Access Events to enable and enable. This captures enable and enable events for Other Object Access Events so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Other Object Access Events",
@@ -1796,7 +1796,7 @@
           "id": "audit-68",
           "description": "Audit Removable Storage to enable and enable. This captures enable and enable events for Removable Storage so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Removable Storage",
@@ -1822,7 +1822,7 @@
           "id": "audit-69",
           "description": "Audit Audit Policy Change to enable. This captures enable events for Audit Policy Change so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Audit Policy Change",
@@ -1848,7 +1848,7 @@
           "id": "audit-70",
           "description": "Audit Authentication Policy Change to enable. This captures enable events for Authentication Policy Change so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Authentication Policy Change",
@@ -1874,7 +1874,7 @@
           "id": "audit-71",
           "description": "Audit Authorization Policy Change to enable. This captures enable events for Authorization Policy Change so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Authorization Policy Change",
@@ -1900,7 +1900,7 @@
           "id": "audit-72",
           "description": "Audit MPSSVC Rule-Level Policy Change to enable and enable. This captures enable and enable events for MPSSVC Rule-Level Policy Change so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "MPSSVC Rule-Level Policy Change",
@@ -1926,7 +1926,7 @@
           "id": "audit-73",
           "description": "Audit Other Policy Change Events to enable. This captures enable events for Other Policy Change Events so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Other Policy Change Events",
@@ -1952,7 +1952,7 @@
           "id": "audit-74",
           "description": "Audit Sensitive Privilege Use to enable and enable. This captures enable and enable events for Sensitive Privilege Use so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Sensitive Privilege Use",
@@ -1978,7 +1978,7 @@
           "id": "audit-75",
           "description": "Audit IPsec Driver to enable and enable. This captures enable and enable events for IPsec Driver so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "IPsec Driver",
@@ -2004,7 +2004,7 @@
           "id": "audit-76",
           "description": "Audit Other System Events to enable and enable. This captures enable and enable events for Other System Events so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Other System Events",
@@ -2030,7 +2030,7 @@
           "id": "audit-77",
           "description": "Audit Security State Change to enable and disable. This captures enable and disable events for Security State Change so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Security State Change",
@@ -2056,7 +2056,7 @@
           "id": "audit-78",
           "description": "Audit Security System Extension to enable and disable. This captures enable and disable events for Security System Extension so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "Security System Extension",
@@ -2082,7 +2082,7 @@
           "id": "audit-79",
           "description": "Audit System Integrity to enable and enable. This captures enable and enable events for System Integrity so you can review both successful and failed activities.",
           "type": "audit",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "subCategory": "System Integrity",
@@ -2108,7 +2108,7 @@
           "id": "reg-80",
           "description": "Ensure NoLockScreenCamera under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Personalization equals 1. This keeps NoLockScreenCamera at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Personalization",
@@ -2135,7 +2135,7 @@
           "id": "reg-81",
           "description": "Ensure NoLockScreenSlideshow under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Personalization equals 1. This keeps NoLockScreenSlideshow at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Personalization",
@@ -2162,7 +2162,7 @@
           "id": "reg-82",
           "description": "Ensure AllowInputPersonalization under HKLM:\\SOFTWARE\\Policies\\Microsoft\\InputPersonalization equals 0. This keeps AllowInputPersonalization at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\InputPersonalization",
@@ -2189,7 +2189,7 @@
           "id": "reg-83",
           "description": "Ensure AllowOnlineTips under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer equals 0. This keeps AllowOnlineTips at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer",
@@ -2216,7 +2216,7 @@
           "id": "reg-84",
           "description": "Ensure EnableCertPaddingCheck under HKLM:\\SOFTWARE\\Microsoft\\Cryptography\\Wintrust\\Config equals 1. This keeps EnableCertPaddingCheck at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Cryptography\\Wintrust\\Config",
@@ -2243,7 +2243,7 @@
           "id": "reg-85",
           "description": "Ensure DisableExceptionChainValidation under HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\kernel equals 0. This keeps DisableExceptionChainValidation at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\kernel",
@@ -2270,7 +2270,7 @@
           "id": "reg-86",
           "description": "Ensure NodeType under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NetBT\\Parameters equals 2. This keeps NodeType at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\NetBT\\Parameters",
@@ -2297,7 +2297,7 @@
           "id": "reg-87",
           "description": "Ensure DisableIPSourceRouting under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters equals 2. This keeps DisableIPSourceRouting at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters",
@@ -2324,7 +2324,7 @@
           "id": "reg-88",
           "description": "Ensure DisableIPSourceRouting under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters equals 2. This keeps DisableIPSourceRouting at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters",
@@ -2351,7 +2351,7 @@
           "id": "reg-89",
           "description": "Ensure DisableSavePassword under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\RasMan\\Parameters equals 1. This keeps DisableSavePassword at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\RasMan\\Parameters",
@@ -2378,7 +2378,7 @@
           "id": "reg-90",
           "description": "Ensure EnableICMPRedirect under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters equals 0. This keeps EnableICMPRedirect at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters",
@@ -2405,7 +2405,7 @@
           "id": "reg-91",
           "description": "Ensure KeepAliveTime under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters equals 300000. This keeps KeepAliveTime at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters",
@@ -2432,7 +2432,7 @@
           "id": "reg-92",
           "description": "Ensure PerformRouterDiscovery under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters equals 0. This keeps PerformRouterDiscovery at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters",
@@ -2459,7 +2459,7 @@
           "id": "reg-93",
           "description": "Ensure TcpMaxDataRetransmissions under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\TCPIP6\\Parameters equals 3. This keeps TcpMaxDataRetransmissions at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\TCPIP6\\Parameters",
@@ -2486,7 +2486,7 @@
           "id": "reg-94",
           "description": "Ensure DisabledComponents under HKLM:\\SYSTEM\\CurrentControlSet\\Services\\TCPIP6\\Parameters equals 255. This keeps DisabledComponents at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\TCPIP6\\Parameters",
@@ -2513,7 +2513,7 @@
           "id": "reg-95",
           "description": "Ensure DisableWcnUi under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WCN\\UI equals 1. This keeps DisableWcnUi at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WCN\\UI",
@@ -2540,7 +2540,7 @@
           "id": "reg-96",
           "description": "Ensure fMinimizeConnections under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WcmSvc\\GroupPolicy equals 3. This keeps fMinimizeConnections at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WcmSvc\\GroupPolicy",
@@ -2567,7 +2567,7 @@
           "id": "reg-97",
           "description": "Ensure fBlockNonDomain under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WcmSvc\\GroupPolicy equals 1. This keeps fBlockNonDomain at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WcmSvc\\GroupPolicy",
@@ -2594,7 +2594,7 @@
           "id": "reg-98",
           "description": "Ensure AutoConnectAllowedOEM under HKLM:\\SOFTWARE\\Microsoft\\WcmSvc\\wifinetworkmanager\\config equals 0. This keeps AutoConnectAllowedOEM at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\WcmSvc\\wifinetworkmanager\\config",
@@ -2621,7 +2621,7 @@
           "id": "reg-99",
           "description": "Ensure RegisterSpoolerRemoteRpcEndPoint under HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers equals 2. This keeps RegisterSpoolerRemoteRpcEndPoint at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers",
@@ -2648,7 +2648,7 @@
           "id": "reg-100",
           "description": "Ensure RedirectionguardPolicy under HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers equals 1. This keeps RedirectionguardPolicy at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers",
@@ -2675,7 +2675,7 @@
           "id": "reg-101",
           "description": "Ensure RpcUseNamedPipeProtocol under HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers equals 0. This keeps RpcUseNamedPipeProtocol at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers",
@@ -2702,7 +2702,7 @@
           "id": "reg-102",
           "description": "Ensure RpcAuthentication under HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers equals 0. This keeps RpcAuthentication at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers",
@@ -2729,7 +2729,7 @@
           "id": "reg-103",
           "description": "Ensure RpcProtocols under HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers equals 7. This keeps RpcProtocols at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers",
@@ -2756,7 +2756,7 @@
           "id": "reg-104",
           "description": "Ensure ForceKerberosForRpc under HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers equals 1. This keeps ForceKerberosForRpc at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers",
@@ -2783,7 +2783,7 @@
           "id": "reg-105",
           "description": "Ensure RpcTcpPort under HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers equals 0. This keeps RpcTcpPort at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers",
@@ -2810,7 +2810,7 @@
           "id": "reg-106",
           "description": "Ensure CopyFilesPolicy under HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers equals 1. This keeps CopyFilesPolicy at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers",
@@ -2837,7 +2837,7 @@
           "id": "reg-107",
           "description": "Ensure UpdatePromptSettings under HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers\\PointAndPrint equals 0. This keeps UpdatePromptSettings at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\Software\\Policies\\Microsoft\\Windows NT\\Printers\\PointAndPrint",
@@ -2864,7 +2864,7 @@
           "id": "reg-108",
           "description": "Ensure NoCloudApplicationNotification under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\CurrentVersion\\PushNotifications equals 1. This keeps NoCloudApplicationNotification at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\CurrentVersion\\PushNotifications",
@@ -2891,7 +2891,7 @@
           "id": "reg-109",
           "description": "Ensure EnableVirtualizationBasedSecurity under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard equals 1. This keeps EnableVirtualizationBasedSecurity at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard",
@@ -2918,7 +2918,7 @@
           "id": "reg-110",
           "description": "Ensure HypervisorEnforcedCodeIntegrity under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard equals 1. This keeps HypervisorEnforcedCodeIntegrity at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard",
@@ -2945,7 +2945,7 @@
           "id": "reg-111",
           "description": "Ensure HVCIMATRequired under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard equals 1. This keeps HVCIMATRequired at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard",
@@ -2972,7 +2972,7 @@
           "id": "reg-112",
           "description": "Ensure LsaCfgFlags under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard equals 1. This keeps LsaCfgFlags at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard",
@@ -2999,7 +2999,7 @@
           "id": "reg-113",
           "description": "Ensure ConfigureKernelShadowStacksLaunch under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard equals 1. This keeps ConfigureKernelShadowStacksLaunch at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard",
@@ -3026,7 +3026,7 @@
           "id": "reg-114",
           "description": "Ensure DenyDeviceIDs under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceInstall\\Restrictions equals 1. This keeps DenyDeviceIDs at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceInstall\\Restrictions",
@@ -3053,7 +3053,7 @@
           "id": "reg-115",
           "description": "Ensure DenyDeviceIDsRetroactive under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceInstall\\Restrictions equals 1. This keeps DenyDeviceIDsRetroactive at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceInstall\\Restrictions",
@@ -3080,7 +3080,7 @@
           "id": "reg-116",
           "description": "Ensure DenyDeviceClasses under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceInstall\\Restrictions equals 1. This keeps DenyDeviceClasses at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceInstall\\Restrictions",
@@ -3107,7 +3107,7 @@
           "id": "reg-117",
           "description": "Ensure DenyDeviceClasses under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceInstall\\Restrictions equals @(\"{d48179be-ec20-11d1-b6b8-00c04fa372a7}\",. This keeps DenyDeviceClasses at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceInstall\\Restrictions",
@@ -3134,7 +3134,7 @@
           "id": "reg-118",
           "description": "Ensure PreventDeviceMetadataFromNetwork under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Device Metadata equals 1. This keeps PreventDeviceMetadataFromNetwork at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Device Metadata",
@@ -3161,7 +3161,7 @@
           "id": "reg-119",
           "description": "Ensure DriverLoadPolicy under HKLM:\\SYSTEM\\CurrentControlSet\\Policies\\EarlyLaunch equals 3. This keeps DriverLoadPolicy at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Policies\\EarlyLaunch",
@@ -3188,7 +3188,7 @@
           "id": "reg-120",
           "description": "Ensure NoBackgroundPolicy under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Group Policy\\{35378EAC-683F-11D2-A89A-00C04FBBCFA2} equals 0. This keeps NoBackgroundPolicy at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Group Policy\\{35378EAC-683F-11D2-A89A-00C04FBBCFA2}",
@@ -3215,7 +3215,7 @@
           "id": "reg-121",
           "description": "Ensure NoGPOListChanges under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Group Policy\\{35378EAC-683F-11D2-A89A-00C04FBBCFA2} equals 0. This keeps NoGPOListChanges at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Group Policy\\{35378EAC-683F-11D2-A89A-00C04FBBCFA2}",
@@ -3242,7 +3242,7 @@
           "id": "reg-122",
           "description": "Ensure NoBackgroundPolicy under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Group Policy\\{827D319E-6EAC-11D2-A4EA-00C04F79F83A} equals 0. This keeps NoBackgroundPolicy at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Group Policy\\{827D319E-6EAC-11D2-A4EA-00C04F79F83A}",
@@ -3269,7 +3269,7 @@
           "id": "reg-123",
           "description": "Ensure NoGPOListChanges under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Group Policy\\{827D319E-6EAC-11D2-A4EA-00C04F79F83A} equals 0. This keeps NoGPOListChanges at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Group Policy\\{827D319E-6EAC-11D2-A4EA-00C04F79F83A}",
@@ -3296,7 +3296,7 @@
           "id": "reg-124",
           "description": "Ensure NoUseStoreOpenWith under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer equals 1. This keeps NoUseStoreOpenWith at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer",
@@ -3323,7 +3323,7 @@
           "id": "reg-125",
           "description": "Ensure DisableWebPnPDownload under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Printers equals 1. This keeps DisableWebPnPDownload at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Printers",
@@ -3350,7 +3350,7 @@
           "id": "reg-126",
           "description": "Ensure PreventHandwritingDataSharing under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\TabletPC equals 1. This keeps PreventHandwritingDataSharing at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\TabletPC",
@@ -3377,7 +3377,7 @@
           "id": "reg-127",
           "description": "Ensure PreventHandwritingErrorReports under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\HandwritingErrorReports equals 1. This keeps PreventHandwritingErrorReports at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\HandwritingErrorReports",
@@ -3404,7 +3404,7 @@
           "id": "reg-128",
           "description": "Ensure ExitOnMSICW under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Internet Connection Wizard equals 1. This keeps ExitOnMSICW at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Internet Connection Wizard",
@@ -3431,7 +3431,7 @@
           "id": "reg-129",
           "description": "Ensure NoWebServices under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer equals 1. This keeps NoWebServices at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer",
@@ -3458,7 +3458,7 @@
           "id": "reg-130",
           "description": "Ensure DisableHTTPPrinting under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Printers equals 1. This keeps DisableHTTPPrinting at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Printers",
@@ -3485,7 +3485,7 @@
           "id": "reg-131",
           "description": "Ensure NoRegistration under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Registration Wizard Control equals 1. This keeps NoRegistration at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Registration Wizard Control",
@@ -3512,7 +3512,7 @@
           "id": "reg-132",
           "description": "Ensure DisableContentFileUpdates under HKLM:\\SOFTWARE\\Policies\\Microsoft\\SearchCompanion equals 1. This keeps DisableContentFileUpdates at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\SearchCompanion",
@@ -3539,7 +3539,7 @@
           "id": "reg-133",
           "description": "Ensure NoPublishingWizard under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer equals 1. This keeps NoPublishingWizard at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer",
@@ -3566,7 +3566,7 @@
           "id": "reg-134",
           "description": "Ensure CEIP under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Messenger\\Client equals 2. This keeps CEIP at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Messenger\\Client",
@@ -3593,7 +3593,7 @@
           "id": "reg-135",
           "description": "Ensure CEIPEnable under HKLM:\\SOFTWARE\\Policies\\Microsoft\\SQMClient\\Windows equals 0. This keeps CEIPEnable at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\SQMClient\\Windows",
@@ -3620,7 +3620,7 @@
           "id": "reg-136",
           "description": "Ensure Disabled under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting equals 1. This keeps Disabled at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting",
@@ -3647,7 +3647,7 @@
           "id": "reg-137",
           "description": "Ensure DeviceEnumerationPolicy under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Kernel DMA Protection equals 0. This keeps DeviceEnumerationPolicy at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Kernel DMA Protection",
@@ -3674,7 +3674,7 @@
           "id": "reg-138",
           "description": "Ensure BackupDirectory under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS equals 1. This keeps BackupDirectory at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS",
@@ -3701,7 +3701,7 @@
           "id": "reg-139",
           "description": "Ensure PwdExpirationProtectionEnabled under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS equals 1. This keeps PwdExpirationProtectionEnabled at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS",
@@ -3728,7 +3728,7 @@
           "id": "reg-140",
           "description": "Ensure ADPasswordEncryptionEnabled under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS equals 1. This keeps ADPasswordEncryptionEnabled at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS",
@@ -3755,7 +3755,7 @@
           "id": "reg-141",
           "description": "Ensure PasswordComplexity under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS equals 4. This keeps PasswordComplexity at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS",
@@ -3782,7 +3782,7 @@
           "id": "reg-142",
           "description": "Ensure PasswordLength under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS equals 15. This keeps PasswordLength at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS",
@@ -3809,7 +3809,7 @@
           "id": "reg-143",
           "description": "Ensure PasswordAgeDays under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS equals 30. This keeps PasswordAgeDays at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS",
@@ -3836,7 +3836,7 @@
           "id": "reg-144",
           "description": "Ensure PostAuthenticationResetDelay under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS equals 8. This keeps PostAuthenticationResetDelay at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS",
@@ -3863,7 +3863,7 @@
           "id": "reg-145",
           "description": "Ensure PostAuthenticationActions under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS equals 3. This keeps PostAuthenticationActions at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\LAPS",
@@ -3890,7 +3890,7 @@
           "id": "reg-146",
           "description": "Ensure AllowCustomSSPsAPs under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System equals 0. This keeps AllowCustomSSPsAPs at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System",
@@ -3917,7 +3917,7 @@
           "id": "reg-147",
           "description": "Ensure RunAsPPL under HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa equals 1. This keeps RunAsPPL at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa",
@@ -3944,7 +3944,7 @@
           "id": "reg-148",
           "description": "Ensure BlockUserInputMethodsForSignIn under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Control Panel\\International equals 1. This keeps BlockUserInputMethodsForSignIn at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Control Panel\\International",
@@ -3971,7 +3971,7 @@
           "id": "reg-149",
           "description": "Ensure BlockUserFromShowingAccountDetailsOnSignin under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System equals 1. This keeps BlockUserFromShowingAccountDetailsOnSignin at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System",
@@ -3998,7 +3998,7 @@
           "id": "reg-150",
           "description": "Ensure DontDisplayNetworkSelectionUI under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System equals 1. This keeps DontDisplayNetworkSelectionUI at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System",
@@ -4025,7 +4025,7 @@
           "id": "reg-151",
           "description": "Ensure DontEnumerateConnectedUsers under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System equals 1. This keeps DontEnumerateConnectedUsers at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System",
@@ -4052,7 +4052,7 @@
           "id": "reg-152",
           "description": "Ensure DisableLockScreenAppNotifications under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System equals 1. This keeps DisableLockScreenAppNotifications at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System",
@@ -4079,7 +4079,7 @@
           "id": "reg-153",
           "description": "Ensure BlockDomainPicturePassword under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System equals 1. This keeps BlockDomainPicturePassword at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System",
@@ -4106,7 +4106,7 @@
           "id": "reg-154",
           "description": "Ensure AllowCrossDeviceClipboard under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System equals 0. This keeps AllowCrossDeviceClipboard at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System",
@@ -4133,7 +4133,7 @@
           "id": "reg-155",
           "description": "Ensure UploadUserActivities under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System equals 0. This keeps UploadUserActivities at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System",
@@ -4160,7 +4160,7 @@
           "id": "reg-156",
           "description": "Ensure DCSettingIndex under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Power\\PowerSettings\\f15576e8-98b7-4186-b944-eafa664402d9 equals 0. This keeps DCSettingIndex at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Power\\PowerSettings\\f15576e8-98b7-4186-b944-eafa664402d9",
@@ -4187,7 +4187,7 @@
           "id": "reg-157",
           "description": "Ensure ACSettingIndex under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Power\\PowerSettings\\f15576e8-98b7-4186-b944-eafa664402d9 equals 0. This keeps ACSettingIndex at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Power\\PowerSettings\\f15576e8-98b7-4186-b944-eafa664402d9",
@@ -4214,7 +4214,7 @@
           "id": "reg-158",
           "description": "Ensure DCSettingIndex under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Power\\PowerSettings\\abfc2519-3608-4c2a-94ea-171b0ed546ab equals 0. This keeps DCSettingIndex at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Power\\PowerSettings\\abfc2519-3608-4c2a-94ea-171b0ed546ab",
@@ -4241,7 +4241,7 @@
           "id": "reg-159",
           "description": "Ensure ACSettingIndex under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Power\\PowerSettings\\abfc2519-3608-4c2a-94ea-171b0ed546ab equals 0. This keeps ACSettingIndex at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Power\\PowerSettings\\abfc2519-3608-4c2a-94ea-171b0ed546ab",
@@ -4268,7 +4268,7 @@
           "id": "reg-160",
           "description": "Ensure fAllowToGetHelp under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services equals 0. This keeps fAllowToGetHelp at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services",
@@ -4295,7 +4295,7 @@
           "id": "reg-161",
           "description": "Ensure EnableAuthEpResolution under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Rpc equals 1. This keeps EnableAuthEpResolution at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Rpc",
@@ -4322,7 +4322,7 @@
           "id": "reg-162",
           "description": "Ensure DisableQueryRemoteServer under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\ScriptedDiagnosticsProvider\\Policy equals 1. This keeps DisableQueryRemoteServer at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\ScriptedDiagnosticsProvider\\Policy",
@@ -4349,7 +4349,7 @@
           "id": "reg-163",
           "description": "Ensure ScenarioExecutionEnabled under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WDI\\{9c5a40da-b965-4fc3-8781-88dd50a6299d} equals 0. This keeps ScenarioExecutionEnabled at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WDI\\{9c5a40da-b965-4fc3-8781-88dd50a6299d}",
@@ -4376,7 +4376,7 @@
           "id": "reg-164",
           "description": "Ensure DisabledByGroupPolicy under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\AdvertisingInfo equals 1. This keeps DisabledByGroupPolicy at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\AdvertisingInfo",
@@ -4403,7 +4403,7 @@
           "id": "reg-165",
           "description": "Ensure Enabled under HKLM:\\SOFTWARE\\Policies\\Microsoft\\W32Time\\TimeProviders\\NtpClient equals 1. This keeps Enabled at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\W32Time\\TimeProviders\\NtpClient",
@@ -4430,7 +4430,7 @@
           "id": "reg-166",
           "description": "Ensure BlockNonAdminUserInstall under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Appx equals 1. This keeps BlockNonAdminUserInstall at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Appx",
@@ -4457,7 +4457,7 @@
           "id": "reg-167",
           "description": "Ensure LetAppsActivateWithVoiceAboveLock under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\AppPrivacy equals 2. This keeps LetAppsActivateWithVoiceAboveLock at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\AppPrivacy",
@@ -4484,7 +4484,7 @@
           "id": "reg-168",
           "description": "Ensure MSAOptional under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System equals 1. This keeps MSAOptional at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
@@ -4511,7 +4511,7 @@
           "id": "reg-169",
           "description": "Ensure BlockHostedAppAccessWinRT under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System equals 1. This keeps BlockHostedAppAccessWinRT at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
@@ -4538,7 +4538,7 @@
           "id": "reg-170",
           "description": "Ensure NoAutoplayfornonVolume under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer equals 1. This keeps NoAutoplayfornonVolume at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer",
@@ -4565,7 +4565,7 @@
           "id": "reg-171",
           "description": "Ensure NoAutorun under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer equals 1. This keeps NoAutorun at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer",
@@ -4592,7 +4592,7 @@
           "id": "reg-172",
           "description": "Ensure NoDriveTypeAutoRun under HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer equals 255. This keeps NoDriveTypeAutoRun at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer",
@@ -4619,7 +4619,7 @@
           "id": "reg-173",
           "description": "Ensure EnhancedAntiSpoofing under HKLM:\\SOFTWARE\\Policies\\Microsoft\\Biometrics\\FacialFeatures equals 1. This keeps EnhancedAntiSpoofing at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Biometrics\\FacialFeatures",
@@ -4646,7 +4646,7 @@
           "id": "reg-174",
           "description": "Ensure FDVRecovery under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps FDVRecovery at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4673,7 +4673,7 @@
           "id": "reg-175",
           "description": "Ensure FDVManageDRA under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps FDVManageDRA at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4700,7 +4700,7 @@
           "id": "reg-176",
           "description": "Ensure FDVRecoveryPassword under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 2. This keeps FDVRecoveryPassword at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4727,7 +4727,7 @@
           "id": "reg-177",
           "description": "Ensure FDVRecoveryKey under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 2. This keeps FDVRecoveryKey at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4754,7 +4754,7 @@
           "id": "reg-178",
           "description": "Ensure FDVHideRecoveryPage under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps FDVHideRecoveryPage at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4781,7 +4781,7 @@
           "id": "reg-179",
           "description": "Ensure FDVActiveDirectoryBackup under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 0. This keeps FDVActiveDirectoryBackup at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4808,7 +4808,7 @@
           "id": "reg-180",
           "description": "Ensure FDVRequireActiveDirectoryBackup under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 0. This keeps FDVRequireActiveDirectoryBackup at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4835,7 +4835,7 @@
           "id": "reg-181",
           "description": "Ensure FDVHardwareEncryption under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 0. This keeps FDVHardwareEncryption at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4862,7 +4862,7 @@
           "id": "reg-182",
           "description": "Ensure FDVPassphrase under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 0. This keeps FDVPassphrase at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4889,7 +4889,7 @@
           "id": "reg-183",
           "description": "Ensure FDVAllowUserCert under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps FDVAllowUserCert at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4916,7 +4916,7 @@
           "id": "reg-184",
           "description": "Ensure FDVEnforceUserCert under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps FDVEnforceUserCert at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4943,7 +4943,7 @@
           "id": "reg-185",
           "description": "Ensure UseEnhancedPin under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps UseEnhancedPin at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4970,7 +4970,7 @@
           "id": "reg-186",
           "description": "Ensure OSAllowSecureBootForIntegrity under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps OSAllowSecureBootForIntegrity at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -4997,7 +4997,7 @@
           "id": "reg-187",
           "description": "Ensure OSRecoveryPassword under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps OSRecoveryPassword at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5024,7 +5024,7 @@
           "id": "reg-188",
           "description": "Ensure OSRecoveryKey under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 0. This keeps OSRecoveryKey at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5051,7 +5051,7 @@
           "id": "reg-189",
           "description": "Ensure OSHideRecoveryPage under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps OSHideRecoveryPage at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5078,7 +5078,7 @@
           "id": "reg-190",
           "description": "Ensure OSHardwareEncryption under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 0. This keeps OSHardwareEncryption at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5105,7 +5105,7 @@
           "id": "reg-191",
           "description": "Ensure OSPassphrase under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 0. This keeps OSPassphrase at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5132,7 +5132,7 @@
           "id": "reg-192",
           "description": "Ensure UseTPM under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 0. This keeps UseTPM at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5159,7 +5159,7 @@
           "id": "reg-193",
           "description": "Ensure UseTPMPIN under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps UseTPMPIN at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5186,7 +5186,7 @@
           "id": "reg-194",
           "description": "Ensure RDVRecovery under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps RDVRecovery at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5213,7 +5213,7 @@
           "id": "reg-195",
           "description": "Ensure RDVManageDRA under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps RDVManageDRA at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5240,7 +5240,7 @@
           "id": "reg-196",
           "description": "Ensure RDVRecoveryPassword under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 0. This keeps RDVRecoveryPassword at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5267,7 +5267,7 @@
           "id": "reg-197",
           "description": "Ensure RDVRecoveryKey under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 0. This keeps RDVRecoveryKey at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5294,7 +5294,7 @@
           "id": "reg-198",
           "description": "Ensure RDVHideRecoveryPage under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps RDVHideRecoveryPage at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5321,7 +5321,7 @@
           "id": "reg-199",
           "description": "Ensure RDVPassphrase under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 0. This keeps RDVPassphrase at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",
@@ -5348,7 +5348,7 @@
           "id": "reg-200",
           "description": "Ensure RDVAllowUserCert under HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE equals 1. This keeps RDVAllowUserCert at the recommended value so the associated control stays enforced.",
           "type": "registry",
-          "weight": 1.0,
+          "weight": 1,
           "operation": "equals",
           "subject": {
             "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\FVE",

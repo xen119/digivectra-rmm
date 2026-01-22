@@ -1,0 +1,86 @@
+[
+  {
+    "requestId": "ca572fb3-1979-4dc6-a637-21a43ffb916d",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "complete",
+    "startedAt": "2026-01-22T07:42:40.332Z",
+    "completedAt": "2026-01-22T07:43:31.040Z",
+    "scanned": 253,
+    "found": 2,
+    "durationMs": 50277,
+    "message": null,
+    "devices": [
+      {
+        "ip": "172.16.10.5",
+        "sysDescr": "HP ETHERNET MULTI-ENVIRONMENT",
+        "sysName": "HPI49980C",
+        "sysObjectId": "0.0",
+        "discoveredAt": "2026-01-22T07:42:40.825Z"
+      },
+      {
+        "ip": "172.16.10.192",
+        "sysDescr": "GS108Tv2",
+        "sysName": "",
+        "sysObjectId": "1.3.6.1.4.1.4526.100.4.18",
+        "discoveredAt": "2026-01-22T07:43:14.971Z"
+      }
+    ]
+  },
+  {
+    "requestId": "336c56b3-a62f-465c-976e-81e3bb963e99",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "complete",
+    "startedAt": "2026-01-22T07:29:08.629Z",
+    "completedAt": "2026-01-22T07:29:43.284Z",
+    "scanned": 253,
+    "found": 2,
+    "durationMs": 33877,
+    "message": null,
+    "devices": [
+      {
+        "ip": "172.16.10.5",
+        "sysDescr": "HP ETHERNET MULTI-ENVIRONMENT",
+        "sysName": "HPI49980C",
+        "sysObjectId": "0.0",
+        "discoveredAt": "2026-01-22T07:29:09.452Z"
+      },
+      {
+        "ip": "172.16.10.192",
+        "sysDescr": "GS108Tv2",
+        "sysName": "",
+        "sysObjectId": "1.3.6.1.4.1.4526.100.4.18",
+        "discoveredAt": "2026-01-22T07:29:35.268Z"
+      }
+    ]
+  },
+  {
+    "requestId": "4e68983c-65f9-403c-bfce-16e154de6325",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "complete",
+    "startedAt": "2026-01-22T07:23:02.778Z",
+    "completedAt": "2026-01-22T07:23:51.977Z",
+    "scanned": 253,
+    "found": 2,
+    "durationMs": 48782,
+    "message": null,
+    "devices": [
+      {
+        "ip": "172.16.10.5",
+        "sysDescr": "HP ETHERNET MULTI-ENVIRONMENT",
+        "sysName": "HPI49980C",
+        "sysObjectId": "0.0",
+        "discoveredAt": "2026-01-22T07:23:03.260Z"
+      },
+      {
+        "ip": "172.16.10.192",
+        "sysDescr": "GS108Tv2",
+        "sysName": "",
+        "sysObjectId": "1.3.6.1.4.1.4526.100.4.18",
+        "discoveredAt": "2026-01-22T07:23:37.390Z"
+      }
+    ]
+  }
+]

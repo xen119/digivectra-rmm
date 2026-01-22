@@ -15,8 +15,38 @@ const techDirectApiKeyInput = document.getElementById('techDirectApiKey');
 const techDirectApiSecretInput = document.getElementById('techDirectApiSecret');
 const techDirectSaveButton = document.getElementById('techDirectSaveButton');
 const techDirectClearButton = document.getElementById('techDirectClearButton');
+const snmpStatusEl = document.getElementById('snmpStatusMessage');
+const snmpV1PortInput = document.getElementById('snmpV1Port');
+const snmpV1CommunityInput = document.getElementById('snmpV1Community');
+const snmpV1ResolveInput = document.getElementById('snmpV1Resolve');
+const snmpV2PortInput = document.getElementById('snmpV2Port');
+const snmpV2CommunityInput = document.getElementById('snmpV2Community');
+const snmpV2ResolveInput = document.getElementById('snmpV2Resolve');
+const snmpV3PortInput = document.getElementById('snmpV3Port');
+const snmpV3UsernameInput = document.getElementById('snmpV3Username');
+const snmpV3AuthProtocolInput = document.getElementById('snmpV3AuthProtocol');
+const snmpV3AuthPasswordInput = document.getElementById('snmpV3AuthPassword');
+const snmpV3PrivProtocolInput = document.getElementById('snmpV3PrivProtocol');
+const snmpV3PrivPasswordInput = document.getElementById('snmpV3PrivPassword');
+const snmpV3ResolveInput = document.getElementById('snmpV3Resolve');
+const snmpSaveButton = document.getElementById('snmpSaveButton');
+const snmpDefaultVersionSelect = document.getElementById('snmpDefaultVersion');
+const snmpV3ModeSelect = document.getElementById('snmpV3Mode');
+const snmpV3AuthFields = document.getElementById('snmpV3AuthFields');
+const snmpV3PrivFields = document.getElementById('snmpV3PrivFields');
 const TAB_STORAGE_KEY = 'settings.activeTab';
+const MIN_SNMP_PORT = 1;
+const MAX_SNMP_PORT = 65535;
 const authFetch = (input, init = {}) => fetch(input, { credentials: 'same-origin', ...init });
+
+function parseSnmpPort(value, fallback) {
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed >= MIN_SNMP_PORT && parsed <= MAX_SNMP_PORT) {
+    return parsed;
+  }
+
+  return fallback;
+}
 
 if (screenConsentToggle) {
   screenConsentToggle.addEventListener('change', () => {
@@ -44,6 +74,17 @@ if (techDirectSaveButton) {
 
 if (techDirectClearButton) {
   techDirectClearButton.addEventListener('click', handleTechDirectClear);
+}
+
+if (snmpSaveButton) {
+  snmpSaveButton.addEventListener('click', handleSnmpSave);
+}
+
+if (snmpV3ModeSelect) {
+  snmpV3ModeSelect.addEventListener('change', () => {
+    updateSnmpV3FieldVisibility(snmpV3ModeSelect.value);
+  });
+  updateSnmpV3FieldVisibility(snmpV3ModeSelect.value);
 }
 
 function showStatus(message, variant = 'info') {
@@ -155,6 +196,180 @@ function showTechDirectStatus(message, variant = 'info') {
     techDirectStatusEl.classList.add('error');
   } else if (variant === 'success') {
     techDirectStatusEl.classList.add('success');
+  }
+}
+
+function showSnmpStatus(message, variant = 'info') {
+  if (!snmpStatusEl) {
+    return;
+  }
+
+  snmpStatusEl.textContent = message;
+  snmpStatusEl.classList.remove('error', 'success');
+  if (variant === 'error') {
+    snmpStatusEl.classList.add('error');
+  } else if (variant === 'success') {
+    snmpStatusEl.classList.add('success');
+  }
+}
+
+function populateSnmpFields(snmp, defaultVersion = 'v3') {
+  const v1 = (snmp && typeof snmp.v1 === 'object' && snmp.v1 !== null) ? snmp.v1 : {};
+  const v2 = (snmp && typeof snmp.v2c === 'object' && snmp.v2c !== null) ? snmp.v2c : {};
+  const v3 = (snmp && typeof snmp.v3 === 'object' && snmp.v3 !== null) ? snmp.v3 : {};
+
+  if (snmpV1PortInput) {
+    snmpV1PortInput.value = (v1.port ?? 161).toString();
+  }
+  if (snmpV1CommunityInput) {
+    snmpV1CommunityInput.value = v1.community ?? 'public';
+  }
+  if (snmpV1ResolveInput) {
+    snmpV1ResolveInput.checked = Boolean(v1.resolveNamesOnly);
+  }
+
+  if (snmpV2PortInput) {
+    snmpV2PortInput.value = (v2.port ?? 161).toString();
+  }
+  if (snmpV2CommunityInput) {
+    snmpV2CommunityInput.value = v2.community ?? 'public';
+  }
+  if (snmpV2ResolveInput) {
+    snmpV2ResolveInput.checked = Boolean(v2.resolveNamesOnly);
+  }
+
+  if (snmpV3PortInput) {
+    snmpV3PortInput.value = (v3.port ?? 161).toString();
+  }
+  if (snmpV3UsernameInput) {
+    snmpV3UsernameInput.value = v3.username ?? '';
+  }
+  if (snmpV3AuthProtocolInput) {
+    snmpV3AuthProtocolInput.value = v3.authProtocol ?? 'SHA1';
+  }
+  if (snmpV3AuthPasswordInput) {
+    snmpV3AuthPasswordInput.value = v3.authPassword ?? '';
+  }
+  if (snmpV3PrivProtocolInput) {
+    snmpV3PrivProtocolInput.value = v3.privProtocol ?? 'AES';
+  }
+  if (snmpV3PrivPasswordInput) {
+    snmpV3PrivPasswordInput.value = v3.privPassword ?? '';
+  }
+  if (snmpV3ResolveInput) {
+    snmpV3ResolveInput.checked = Boolean(v3.resolveNamesOnly);
+  }
+
+  if (snmpDefaultVersionSelect) {
+    snmpDefaultVersionSelect.value = typeof defaultVersion === 'string' ? defaultVersion : 'v3';
+  }
+
+  const v3Mode = determineSnmpV3Mode(v3);
+  if (snmpV3ModeSelect) {
+    snmpV3ModeSelect.value = v3Mode;
+  }
+  updateSnmpV3FieldVisibility(v3Mode);
+}
+
+function determineSnmpV3Mode(v3 = {}) {
+  if (!v3 || typeof v3 !== 'object') {
+    return 'no-auth';
+  }
+
+  const authPassword = typeof v3.authPassword === 'string' ? v3.authPassword.trim() : '';
+  const privPassword = typeof v3.privPassword === 'string' ? v3.privPassword.trim() : '';
+  const hasAuth = authPassword.length > 0;
+  const hasPriv = privPassword.length > 0;
+
+  if (hasPriv) {
+    return 'auth-priv';
+  }
+
+  if (hasAuth) {
+    return 'auth';
+  }
+
+  return 'no-auth';
+}
+
+function updateSnmpV3FieldVisibility(mode) {
+  const showAuth = mode === 'auth' || mode === 'auth-priv';
+  const showPriv = mode === 'auth-priv';
+
+  if (snmpV3AuthFields) {
+    snmpV3AuthFields.style.display = showAuth ? 'flex' : 'none';
+  }
+
+  if (snmpV3PrivFields) {
+    snmpV3PrivFields.style.display = showPriv ? 'flex' : 'none';
+  }
+}
+
+function collectSnmpPayload() {
+  return {
+    v1: {
+      port: parseSnmpPort(snmpV1PortInput?.value, 161),
+      community: (snmpV1CommunityInput?.value ?? '').trim(),
+      resolveNamesOnly: Boolean(snmpV1ResolveInput?.checked),
+    },
+    v2c: {
+      port: parseSnmpPort(snmpV2PortInput?.value, 161),
+      community: (snmpV2CommunityInput?.value ?? '').trim(),
+      resolveNamesOnly: Boolean(snmpV2ResolveInput?.checked),
+    },
+    v3: {
+      port: parseSnmpPort(snmpV3PortInput?.value, 161),
+      username: (snmpV3UsernameInput?.value ?? '').trim(),
+      authProtocol: snmpV3AuthProtocolInput?.value ?? 'SHA1',
+      authPassword: snmpV3AuthPasswordInput?.value ?? '',
+      privProtocol: snmpV3PrivProtocolInput?.value ?? 'AES',
+      privPassword: snmpV3PrivPasswordInput?.value ?? '',
+      resolveNamesOnly: Boolean(snmpV3ResolveInput?.checked),
+    },
+  };
+}
+
+async function handleSnmpSave() {
+  if (!snmpSaveButton) {
+    return;
+  }
+
+  snmpSaveButton.disabled = true;
+  showSnmpStatus('Saving SNMP defaults...');
+
+  try {
+    const payload = {
+      snmp: collectSnmpPayload(),
+      snmpVersion: (snmpDefaultVersionSelect?.value ?? 'v3').toLowerCase(),
+    };
+    const response = await authFetch('/settings/general', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (response.status === 401) {
+      window.location.href = '/login.html';
+      return;
+    }
+
+    if (response.status === 403) {
+      showSnmpStatus('Access denied. Contact an administrator.', 'error');
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    populateSnmpFields(data.snmp ?? {}, data.snmpVersion);
+    showSnmpStatus('SNMP defaults saved.', 'success');
+  } catch (error) {
+    console.error('Unable to save SNMP settings', error);
+    showSnmpStatus('Unable to save SNMP settings.', 'error');
+  } finally {
+    snmpSaveButton.disabled = false;
   }
 }
 
@@ -379,11 +594,14 @@ async function loadGeneralSettings() {
       autoAiChatToggle.checked = Boolean(data.autoRespondToAgentChat);
     }
     updateTechDirectStatus(Boolean(data.techDirectConfigured));
+    populateSnmpFields(data.snmp ?? {}, data.snmpVersion);
+    showSnmpStatus('SNMP defaults loaded.', 'success');
     showGeneralStatus('General settings loaded.', 'success');
   } catch (error) {
     console.error('Unable to load general settings', error);
     showGeneralStatus('Unable to load general settings.', 'error');
     showTechDirectStatus('Unable to load TechDirect settings.', 'error');
+    showSnmpStatus('Unable to load SNMP settings.', 'error');
   } finally {
     toggles.forEach((toggle) => {
       toggle.disabled = false;

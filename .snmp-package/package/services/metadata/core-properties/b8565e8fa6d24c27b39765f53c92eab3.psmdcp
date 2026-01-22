@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">
+  <dc:creator>msinadinovic</dc:creator>
+  <dc:description>Simple Network Management Protocol Open Source library written in c# with support for SNMP version 1, 2c and 3.
+
+Support for Get, Get-Next, Get-Bulk and Set requests, Response and Report replies and Trap, V2Trap and Inform Notifications is implemented. SNMP version 1 Traps have a dedicated packet class SnmpV1TrapPacket because they are substantially different from other SNMP version 1 packets. SNMP version 2 and 3 V2Trap parsing is included in the general request/response parsing class for each protocol. Inform handling for both SNMP version 2 and 3 is included and tested. In version 3, V2Trap and Inform support for authentication and privacy is included.
+
+SNMP version 3 currently support noAuthNoPriv (no privacy and no authentication) security model, authNoPriv using MD5 and SHA-1 authentication and authPriv using, again, MD5 and SHA-1 authentication with DES, AES-128, AES-192, AES-256 and TripleDES privacy encryption.</dc:description>
+  <dc:identifier>SnmpSharpNet</dc:identifier>
+  <version>0.9.7</version>
+  <keywords>snmp</keywords>
+  <lastModifiedBy>NuGet.Packaging, Version=5.9.0.7051, Culture=neutral, PublicKeyToken=31bf3856ad364e35;</lastModifiedBy>
+</coreProperties>

@@ -8,6 +8,7 @@
     ".NETCoreApp,Version=v8.0": {
       "Agent/1.0.0": {
         "dependencies": {
+          "Lextm.SharpSnmpLib": "12.5.7",
           "Microsoft.MixedReality.WebRTC": "2.0.2",
           "System.Drawing.Common": "8.0.0",
           "System.Management": "8.0.0",
@@ -15,6 +16,14 @@
         },
         "runtime": {
           "Agent.dll": {}
+        }
+      },
+      "Lextm.SharpSnmpLib/12.5.7": {
+        "runtime": {
+          "lib/net8.0/SharpSnmpLib.dll": {
+            "assemblyVersion": "12.5.7.0",
+            "fileVersion": "12.5.7.0"
+          }
         }
       },
       "Microsoft.MixedReality.WebRTC/2.0.2": {
@@ -90,6 +99,13 @@
       "type": "project",
       "serviceable": false,
       "sha512": ""
+    },
+    "Lextm.SharpSnmpLib/12.5.7": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-k631wRQNnFOpKxsYyziPp1UR4v+IBFS81nnmQyQa+RxSlmYjoLViNXINV43Aa49kQO1ulSUmGTI9DD94z0HAHg==",
+      "path": "lextm.sharpsnmplib/12.5.7",
+      "hashPath": "lextm.sharpsnmplib.12.5.7.nupkg.sha512"
     },
     "Microsoft.MixedReality.WebRTC/2.0.2": {
       "type": "package",

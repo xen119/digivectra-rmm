@@ -324,6 +324,11 @@ function createAgentCard(agent, groups) {
   warrantyLine.textContent = formatWarrantyInfo(agent.warranty);
   card.appendChild(warrantyLine);
 
+  const snmpToggle = createSnmpToggle(agent);
+  if (snmpToggle) {
+    card.appendChild(snmpToggle);
+  }
+
   const actions = document.createElement('div');
   actions.className = 'actions';
   const streamButton = document.createElement('button');
@@ -493,6 +498,46 @@ function createRebootPill(agent) {
   return pill;
 }
 
+function createSnmpToggle(agent) {
+  if (!agent?.id) {
+    return null;
+  }
+
+  const enabled = typeof agent.snmpDiscoveryEnabled === 'boolean' ? agent.snmpDiscoveryEnabled : true;
+  const container = document.createElement('div');
+  container.className = 'agent-snmp';
+
+  const label = document.createElement('label');
+  label.className = 'agent-snmp-toggle';
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = enabled;
+
+  const statusText = document.createElement('span');
+  statusText.textContent = enabled ? 'SNMP discovery enabled' : 'SNMP discovery disabled';
+
+  checkbox.addEventListener('change', async () => {
+    const targetState = checkbox.checked;
+    checkbox.disabled = true;
+    try {
+      await setAgentSnmpDiscovery(agent.id, targetState);
+      statusText.textContent = targetState ? 'SNMP discovery enabled' : 'SNMP discovery disabled';
+    } catch (error) {
+      console.error('Unable to update SNMP discovery setting', error);
+      checkbox.checked = !targetState;
+      statusText.textContent = checkbox.checked ? 'SNMP discovery enabled' : 'SNMP discovery disabled';
+    } finally {
+      checkbox.disabled = false;
+    }
+  });
+
+  label.appendChild(checkbox);
+  label.appendChild(statusText);
+  container.appendChild(label);
+  return container;
+}
+
 async function handleRebootPillClick(agentId) {
   if (!agentId) {
     return;
@@ -530,6 +575,23 @@ async function assignAgentGroup(agentId, groupName) {
     await refreshAgents();
   } catch (error) {
     console.error(error);
+  }
+}
+
+async function setAgentSnmpDiscovery(agentId, enabled) {
+  if (!agentId) {
+    throw new Error('Agent ID is required');
+  }
+
+  const response = await authFetch(`/clients/${encodeURIComponent(agentId)}/snmp/discovery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(body || `HTTP ${response.status}`);
   }
 }
 

@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SNMP Discovery</title>
+    <link rel="stylesheet" href="compact.css" />
+    <style>
+      body {
+        background: #0d1117;
+        color: #cdd9e5;
+      }
+
+      main {
+        padding: 2rem;
+      }
+
+      h1 {
+        margin-bottom: 0.25rem;
+      }
+
+      .status {
+        margin-bottom: 1rem;
+        color: #9aa5b0;
+      }
+
+      .controls {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+      }
+
+      .records-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .records-table th,
+      .records-table td {
+        padding: 0.5rem;
+        border-bottom: 1px solid #1f2937;
+        text-align: left;
+        font-size: 0.9rem;
+      }
+
+      .records-table th {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #8b949e;
+      }
+
+      .record-details {
+        margin: 0;
+        padding: 0.25rem 0;
+      }
+
+      .record-details summary {
+        cursor: pointer;
+      }
+
+      .device-list {
+        list-style: none;
+        padding-left: 0;
+        margin: 0.25rem 0 0;
+      }
+
+      .device-list li {
+        padding: 0.25rem 0;
+        border-bottom: 1px solid #1f2937;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        border: 1px solid transparent;
+      }
+
+      .pill.complete {
+        background: #047857;
+        border-color: #047857;
+        color: #dcfce7;
+      }
+
+      .pill.error {
+        background: #b91c1c;
+        border-color: #b91c1c;
+        color: #fee2e2;
+      }
+
+      .scan-form {
+        margin-bottom: 1.5rem;
+        border: 1px solid #1f2937;
+        padding: 1rem;
+        border-radius: 0.75rem;
+        background: #0f141a;
+      }
+
+      .scan-form h2 {
+        margin: 0 0 0.5rem;
+        font-size: 1.1rem;
+      }
+
+      .scan-form form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.75rem;
+      }
+
+      .scan-form label {
+        font-size: 0.85rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+
+      .scan-form input,
+      .scan-form select {
+        background: #0d1117;
+        border: 1px solid #2f3640;
+        border-radius: 0.4rem;
+        padding: 0.35rem 0.5rem;
+        color: #cdd9e5;
+        font-size: 0.9rem;
+      }
+
+      .snmp-v3-fields {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.75rem;
+      }
+
+      .scan-form button {
+        grid-column: 1 / -1;
+        padding: 0.5rem 1rem;
+        background: #0ea5e9;
+        border: none;
+        border-radius: 0.5rem;
+        color: #fff;
+        font-size: 0.95rem;
+        cursor: pointer;
+      }
+      .scan-live {
+        margin-top: 1rem;
+        border: 1px solid #1f2937;
+        border-radius: 0.75rem;
+        padding: 0.75rem 1rem;
+        background: #101623;
+      }
+      .scan-live-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 0.5rem;
+      }
+      .scan-live-header h3 {
+        margin: 0;
+        font-size: 1rem;
+      }
+      .scan-live-header span {
+        font-size: 0.85rem;
+        color: #9aa5b0;
+      }
+      .scan-live ul {
+        list-style: none;
+        padding-left: 0;
+        margin: 0;
+        max-height: 180px;
+        overflow-y: auto;
+      }
+      .scan-live li {
+        padding: 0.4rem 0;
+        border-bottom: 1px solid #1f2937;
+        font-size: 0.9rem;
+      }
+      .scan-live li.empty {
+        color: #6b7280;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>SNMP Discovery History</h1>
+        <p class="status" id="status">Loading...</p>
+      </header>
+      <div class="controls">
+        <button id="refreshButton" type="button">Refresh</button>
+        <label>
+          Limit
+          <input id="limitInput" type="number" min="1" max="200" value="50" />
+        </label>
+        <label>
+          Agent
+          <input id="agentInput" type="text" placeholder="optional agent id" />
+        </label>
+      </div>
+      <section class="scan-form">
+        <h2>Start a new scan</h2>
+        <p class="status" id="scanStatus">
+          Select an agent to scan. SNMP credentials and the default protocol come from the
+          <a href="settings.html" target="_blank" rel="noopener">settings page</a>.
+        </p>
+        <form id="scanForm">
+          <label>
+            Agent
+            <select id="scanAgent">
+              <option value="">Loading agents...</option>
+            </select>
+          </label>
+          <button type="submit">Run scan</button>
+        </form>
+        <div class="scan-live">
+          <div class="scan-live-header">
+            <h3>Live discoveries</h3>
+            <span id="scanSummary">Awaiting scan.</span>
+          </div>
+          <ul id="liveDevicesList">
+            <li class="empty">No devices discovered yet.</li>
+          </ul>
+        </div>
+      </section>
+      <div class="table-wrapper">
+        <table class="records-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Agent</th>
+              <th>Status</th>
+              <th>Hosts</th>
+              <th>Scanned</th>
+              <th>Found</th>
+              <th>Duration (ms)</th>
+            </tr>
+          </thead>
+          <tbody id="recordsBody">
+            <tr><td colspan="7">No records yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+    <script src="snmp.js"></script>
+  </body>
+</html>

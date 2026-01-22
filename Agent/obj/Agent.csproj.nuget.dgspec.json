@@ -43,6 +43,10 @@
         "net8.0-windows7.0": {
           "targetAlias": "net8.0-windows",
           "dependencies": {
+            "Lextm.SharpSnmpLib": {
+              "target": "Package",
+              "version": "[12.5.7, )"
+            },
             "Microsoft.MixedReality.WebRTC": {
               "target": "Package",
               "version": "[2.0.2, )"

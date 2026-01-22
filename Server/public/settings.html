@@ -215,6 +215,103 @@
         background: rgba(148, 163, 184, 0.1);
       }
 
+      .snmp-section {
+        border: 1px solid #1f2937;
+        border-radius: 0.75rem;
+        padding: 1rem;
+        background: #0f141a;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .snmp-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.75rem;
+      }
+
+      .snmp-default-card {
+        border: 1px solid #1f2937;
+        border-radius: 0.75rem;
+        padding: 0.75rem;
+        background: #111827;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .snmp-default-card h3 {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .snmp-default-card label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.85rem;
+      }
+
+      .snmp-default-card select {
+        border-radius: 0.5rem;
+        border: 1px solid #1f2937;
+        background: #0b1220;
+        color: #cdd9e5;
+        padding: 0.45rem 0.6rem;
+        font-size: 0.9rem;
+      }
+
+      .snmp-note {
+        margin: 0;
+        font-size: 0.75rem;
+        color: #94a3b8;
+      }
+
+      .snmp-version-card {
+        border: 1px solid #1f2937;
+        border-radius: 0.75rem;
+        padding: 0.75rem;
+        background: #111827;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .snmp-version-card h3 {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .snmp-version-card label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.85rem;
+      }
+
+      .snmp-version-card input,
+      .snmp-version-card select {
+        border-radius: 0.5rem;
+        border: 1px solid #1f2937;
+        background: #0b1220;
+        padding: 0.45rem 0.6rem;
+        color: #cdd9e5;
+        font-size: 0.9rem;
+      }
+
+      #snmpV3AuthFields,
+      #snmpV3PrivFields {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+
+      .snmp-version-card input[type='checkbox'] {
+        width: auto;
+        accent-color: #38bdf8;
+      }
+
       .ai-action-buttons {
         display: flex;
         gap: 0.5rem;
@@ -316,12 +413,120 @@
               <input id="techDirectApiSecret" type="password" autocomplete="new-password" placeholder="Enter API secret" />
             </label>
           </div>
-          <div class="techdirect-actions">
-            <button id="techDirectSaveButton" type="button">Save credentials</button>
-            <button id="techDirectClearButton" type="button">Clear stored credentials</button>
+        <div class="techdirect-actions">
+          <button id="techDirectSaveButton" type="button">Save credentials</button>
+          <button id="techDirectClearButton" type="button">Clear stored credentials</button>
+        </div>
+      </div>
+      <div class="snmp-section">
+        <div class="techdirect-header">
+          <strong>SNMP discovery defaults</strong>
+          <small>Define the ports, communities, and credentials used by SNMP discovery per version and choose the default protocol for scans.</small>
+        </div>
+        <div id="snmpStatusMessage" class="status-message">Loading SNMP settings...</div>
+        <div class="snmp-grid">
+          <div class="snmp-default-card">
+            <h3>Scan defaults</h3>
+            <label for="snmpDefaultVersion">
+              Default SNMP version
+              <select id="snmpDefaultVersion">
+                <option value="v3">SNMPv3</option>
+                <option value="v2c">SNMPv2c</option>
+                <option value="v1">SNMPv1</option>
+              </select>
+            </label>
+            <p class="snmp-note">The selected version is used when you trigger a discovery from the history page.</p>
+          </div>
+          <div class="snmp-version-card">
+            <h3>SNMPv1</h3>
+            <label for="snmpV1Port">
+              Port
+              <input id="snmpV1Port" type="number" min="1" max="65535" />
+            </label>
+            <label for="snmpV1Community">
+              Community
+              <input id="snmpV1Community" type="text" />
+            </label>
+            <label for="snmpV1Resolve">
+              Resolve names only
+              <input id="snmpV1Resolve" type="checkbox" />
+            </label>
+          </div>
+          <div class="snmp-version-card">
+            <h3>SNMPv2c</h3>
+            <label for="snmpV2Port">
+              Port
+              <input id="snmpV2Port" type="number" min="1" max="65535" />
+            </label>
+            <label for="snmpV2Community">
+              Community
+              <input id="snmpV2Community" type="text" />
+            </label>
+            <label for="snmpV2Resolve">
+              Resolve names only
+              <input id="snmpV2Resolve" type="checkbox" />
+            </label>
+          </div>
+          <div class="snmp-version-card">
+            <h3>SNMPv3</h3>
+            <label for="snmpV3Port">
+              Port
+              <input id="snmpV3Port" type="number" min="1" max="65535" />
+            </label>
+            <label for="snmpV3Username">
+              User
+              <input id="snmpV3Username" type="text" />
+            </label>
+            <label for="snmpV3Mode">
+              Encryption mode
+              <select id="snmpV3Mode">
+                <option value="no-auth">User only</option>
+                <option value="auth">Auth</option>
+                <option value="auth-priv">Auth + Privacy</option>
+              </select>
+            </label>
+            <div id="snmpV3AuthFields">
+              <label for="snmpV3AuthProtocol">
+                Auth protocol
+                <select id="snmpV3AuthProtocol">
+                  <option value="SHA1">SHA1</option>
+                  <option value="SHA256">SHA256</option>
+                  <option value="SHA384">SHA384</option>
+                  <option value="SHA512">SHA512</option>
+                </select>
+              </label>
+              <label for="snmpV3AuthPassword">
+                Auth password
+                <input id="snmpV3AuthPassword" type="password" autocomplete="new-password" />
+              </label>
+            </div>
+            <div id="snmpV3PrivFields">
+              <label for="snmpV3PrivProtocol">
+                Privacy protocol
+                <select id="snmpV3PrivProtocol">
+                  <option value="AES">AES</option>
+                  <option value="AES192">AES192</option>
+                  <option value="AES256">AES256</option>
+                  <option value="DES">DES</option>
+                  <option value="3DES">3DES</option>
+                </select>
+              </label>
+              <label for="snmpV3PrivPassword">
+                Privacy password
+                <input id="snmpV3PrivPassword" type="password" autocomplete="new-password" />
+              </label>
+            </div>
+            <label for="snmpV3Resolve">
+              Resolve names only
+              <input id="snmpV3Resolve" type="checkbox" />
+            </label>
           </div>
         </div>
-      </section>
+        <div class="techdirect-actions">
+          <button id="snmpSaveButton" type="button">Save SNMP defaults</button>
+        </div>
+      </div>
+    </section>
       <section
         class="settings-card tab-panel"
         data-tab-panel="navigation"

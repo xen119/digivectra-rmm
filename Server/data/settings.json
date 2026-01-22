@@ -8,5 +8,27 @@
   "techDirect": {
     "apiKey": "l7810c965d2cb6455b8331ac06575d8477",
     "apiSecret": "2683708f484846209fa10fb3d2146f6d"
-  }
+  },
+  "snmp": {
+    "v1": {
+      "port": 161,
+      "community": "public",
+      "resolveNamesOnly": false
+    },
+    "v2c": {
+      "port": 161,
+      "community": "public",
+      "resolveNamesOnly": false
+    },
+    "v3": {
+      "port": 161,
+      "username": "",
+      "authProtocol": "SHA1",
+      "authPassword": "",
+      "privProtocol": "AES",
+      "privPassword": "",
+      "resolveNamesOnly": false
+    }
+  },
+  "snmpVersion": "v2c"
 }

@@ -13,7 +13,7 @@
   },
   {
     "id": "vulnerabilities",
-    "visible": false
+    "visible": true
   },
   {
     "id": "patches",
@@ -22,6 +22,10 @@
   {
     "id": "software-management",
     "visible": false
+  },
+  {
+    "id": "snmp",
+    "visible": true
   },
   {
     "id": "scripts",
@@ -41,11 +45,11 @@
   },
   {
     "id": "compliance",
-    "visible": false
+    "visible": true
   },
   {
     "id": "compliance-admin",
-    "visible": false
+    "visible": true
   },
   {
     "id": "gpo",

@@ -1,9 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "G3GaCfQ2alI=",
+  "dgSpecHash": "YjcAXD7t2EY=",
   "success": true,
   "projectFilePath": "C:\\Users\\DavidNefdt\\Desktop\\Projects\\RMM\\Agent\\Agent.csproj",
   "expectedPackageFiles": [
+    "C:\\Users\\DavidNefdt\\.nuget\\packages\\lextm.sharpsnmplib\\12.5.7\\lextm.sharpsnmplib.12.5.7.nupkg.sha512",
     "C:\\Users\\DavidNefdt\\.nuget\\packages\\microsoft.mixedreality.webrtc\\2.0.2\\microsoft.mixedreality.webrtc.2.0.2.nupkg.sha512",
     "C:\\Users\\DavidNefdt\\.nuget\\packages\\microsoft.win32.systemevents\\8.0.0\\microsoft.win32.systemevents.8.0.0.nupkg.sha512",
     "C:\\Users\\DavidNefdt\\.nuget\\packages\\system.codedom\\8.0.0\\system.codedom.8.0.0.nupkg.sha512",

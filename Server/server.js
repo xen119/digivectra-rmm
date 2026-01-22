@@ -40,6 +40,9 @@ const GROUPS_CONFIG_PATH = path.join(DATA_DIR, 'groups.json');
 const AGENT_GROUP_ASSIGNMENTS_PATH = path.join(DATA_DIR, 'agent-groups.json');
 const LICENSES_PATH = path.join(DATA_DIR, 'licenses.json');
 const GENERAL_SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
+const SNMP_SETTINGS_PATH = path.join(DATA_DIR, 'snmp-settings.json');
+const SNMP_DISCOVERY_LOG_PATH = path.join(DATA_DIR, 'snmp-discoveries.json');
+const SNMP_DISCOVERY_LOG_LIMIT = 200;
 const VULNERABILITY_CONFIG_PATH = path.join(__dirname, 'config', 'vulnerability.json');
 const VULNERABILITY_STORE_PATH = path.join(DATA_DIR, 'vulnerabilities.json');
 const vulnerabilityIngestionJobs = new Map(); // sourceId -> { timer }
@@ -82,6 +85,7 @@ const SHELL_HISTORY_LIMIT = 200;
 const screenSessions = new Map(); // sessionId -> session data
 const groups = loadGroups();
 const agentGroupAssignments = loadAgentGroupAssignments(groups);
+const snmpDiscoverySettings = loadSnmpDiscoverySettings();
 const licenseRecords = loadLicenses();
 const licenseIndex = new Map(licenseRecords.map((entry) => [entry.code, entry]));
 const screenLists = new Map(); // agentId -> { screens, updatedAt }
@@ -118,6 +122,29 @@ const chatHistories = new Map(); // agentId -> [{ sessionId, text, direction, ag
 const chatNotificationCounts = new Map();
 const CHAT_HISTORY_LIMIT = 200;
 const agentChatLastTimestamp = new Map();
+const snmpScanStreams = new Map(); // requestId -> { agentId, clients: Set<ServerResponse> }
+const pendingSnmpScans = new Map(); // requestId -> { agentId, agentName, requestId, startedAt, devices: [] }
+const snmpDiscoveryHistory = loadSnmpDiscoveryHistory();
+
+function dispatchSnmpEvent(agentId, requestId, eventName, payload) {
+  captureSnmpEvent(agentId, requestId, eventName, payload);
+
+  const entry = snmpScanStreams.get(requestId);
+  if (!entry || entry.agentId !== agentId) {
+    return;
+  }
+
+  const data = JSON.stringify(payload);
+  for (const client of entry.clients) {
+    client.write(`event: ${eventName}\n`);
+    client.write(`data: ${data}\n\n`);
+  }
+
+  if (eventName === 'snmp-complete' || eventName === 'snmp-error') {
+    snmpScanStreams.delete(requestId);
+  }
+}
+
 const SCREEN_LIST_TTL_MS = 60_000;
 const SCREEN_LIST_TIMEOUT_MS = 5_000;
 const NAVIGATION_ITEMS = [
@@ -156,6 +183,12 @@ const NAVIGATION_ITEMS = [
     label: 'Software Inventory',
     href: 'software-management.html',
     description: 'Inspect software inventory, approvals, and actions.',
+  },
+  {
+    id: 'snmp',
+    label: 'SNMP Discovery',
+    href: 'snmp.html',
+    description: 'View recorded SNMP discovery results per agent.',
   },
   {
     id: 'scripts',
@@ -503,6 +536,164 @@ const AI_AGENT_RESPONSE_OPTIONS = {
   temperature: 0.3,
   max_tokens: 500,
 };
+const SNMP_AUTH_PROTOCOLS = ['SHA1', 'SHA256', 'SHA384', 'SHA512'];
+const SNMP_PRIV_PROTOCOLS = ['DES', '3DES', 'AES', 'AES192', 'AES256'];
+const SNMP_VERSION_KEYS = ['v1', 'v2c', 'v3'];
+const DEFAULT_SNMP_VERSION = 'v3';
+
+function createDefaultSnmpSettings() {
+  return {
+    v1: {
+      port: 161,
+      community: 'public',
+      resolveNamesOnly: false,
+    },
+    v2c: {
+      port: 161,
+      community: 'public',
+      resolveNamesOnly: false,
+    },
+    v3: {
+      port: 161,
+      username: '',
+      authProtocol: 'SHA1',
+      authPassword: '',
+      privProtocol: 'AES',
+      privPassword: '',
+      resolveNamesOnly: false,
+    },
+  };
+}
+
+function sanitizeSnmpPort(value, fallback) {
+  const candidate = Number(value);
+  if (Number.isInteger(candidate) && candidate >= 1 && candidate <= 65535) {
+    return candidate;
+  }
+
+  return fallback;
+}
+
+function pickSnmpProtocol(value, allowed, fallback) {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const normalized = value.trim().toUpperCase();
+  return allowed.includes(normalized) ? normalized : fallback;
+}
+
+function normalizeSnmpVersionSettings(version, base, overrides) {
+  const defaults = createDefaultSnmpSettings();
+  const template = defaults[version] ?? {};
+  const baseValues = (typeof base === 'object' && base !== null) ? base : {};
+  const result = { ...template, ...baseValues };
+
+  if (!overrides || typeof overrides !== 'object') {
+    return result;
+  }
+
+  if ('port' in overrides) {
+    result.port = sanitizeSnmpPort(overrides.port, result.port);
+  }
+
+  if (version === 'v1' || version === 'v2c') {
+    if ('community' in overrides && typeof overrides.community === 'string') {
+      result.community = overrides.community.trim();
+    }
+    if ('resolveNamesOnly' in overrides) {
+      result.resolveNamesOnly = Boolean(overrides.resolveNamesOnly);
+    }
+  } else if (version === 'v3') {
+    if ('username' in overrides && typeof overrides.username === 'string') {
+      result.username = overrides.username.trim();
+    }
+    if ('authProtocol' in overrides) {
+      result.authProtocol = pickSnmpProtocol(overrides.authProtocol, SNMP_AUTH_PROTOCOLS, result.authProtocol);
+    }
+    if ('authPassword' in overrides && typeof overrides.authPassword === 'string') {
+      result.authPassword = overrides.authPassword;
+    }
+    if ('privProtocol' in overrides) {
+      result.privProtocol = pickSnmpProtocol(overrides.privProtocol, SNMP_PRIV_PROTOCOLS, result.privProtocol);
+    }
+    if ('privPassword' in overrides && typeof overrides.privPassword === 'string') {
+      result.privPassword = overrides.privPassword;
+    }
+    if ('resolveNamesOnly' in overrides) {
+      result.resolveNamesOnly = Boolean(overrides.resolveNamesOnly);
+    }
+  }
+
+  return result;
+}
+
+function mergeSnmpSettings(base = {}, overrides = {}) {
+  const merged = {};
+  let mutated = false;
+
+  for (const version of SNMP_VERSION_KEYS) {
+    const baseVersion = base[version];
+    if (Object.prototype.hasOwnProperty.call(overrides, version)) {
+      merged[version] = normalizeSnmpVersionSettings(version, baseVersion, overrides[version] ?? {});
+      mutated = true;
+    } else {
+      merged[version] = normalizeSnmpVersionSettings(version, baseVersion, null);
+    }
+  }
+
+  return mutated ? merged : null;
+}
+
+function buildSnmpResponse(snmp) {
+  const source = (typeof snmp === 'object' && snmp !== null) ? snmp : createDefaultSnmpSettings();
+  const defaults = createDefaultSnmpSettings();
+  const payload = {};
+  for (const version of SNMP_VERSION_KEYS) {
+    payload[version] = {
+      ...defaults[version],
+      ...(source[version] ?? {}),
+    };
+  }
+  return payload;
+}
+
+function getSnmpConfigForVersion(version) {
+  const normalized = typeof version === 'string' && version.trim()
+    ? version.trim().toLowerCase()
+    : 'v3';
+  if (!SNMP_VERSION_KEYS.includes(normalized)) {
+    return null;
+  }
+
+  const entry = (generalSettings?.snmp?.[normalized] ?? createDefaultSnmpSettings()[normalized]) ?? null;
+  if (!entry) {
+    return null;
+  }
+
+  if (normalized === 'v3') {
+    if (!entry.username) {
+      return null;
+    }
+
+    return {
+      username: entry.username,
+      authProtocol: entry.authProtocol ?? 'SHA1',
+      authPassword: entry.authPassword || null,
+      privProtocol: entry.privProtocol ?? 'AES',
+      privPassword: entry.privPassword || null,
+      resolveNamesOnly: Boolean(entry.resolveNamesOnly),
+      port: entry.port,
+    };
+  }
+
+  return {
+    community: entry.community ?? 'public',
+    resolveNamesOnly: Boolean(entry.resolveNamesOnly),
+    port: entry.port,
+  };
+}
+
 const DEFAULT_GENERAL_SETTINGS = {
   screenConsentRequired: true,
   autoRespondToAgentChat: false,
@@ -512,6 +703,8 @@ const DEFAULT_GENERAL_SETTINGS = {
   techDirect: {
     ...DEFAULT_TECH_DIRECT_SETTINGS,
   },
+  snmp: createDefaultSnmpSettings(),
+  snmpVersion: DEFAULT_SNMP_VERSION,
 };
 const TECH_DIRECT_WARRANTY_ENDPOINT = 'https://apigtwb2c.us.dell.com/PROD/sbil/eapi/v5/asset-entitlements';
 const TECH_DIRECT_WARRANTY_TTL_MS = 6 * 60 * 60 * 1000;
@@ -636,12 +829,41 @@ server.on('request', async (req, res) => {
       monitoringProfiles: getAgentMonitoringProfiles(info),
       softwareSummary: info.softwareSummary ?? null,
       features: Array.isArray(info.features) ? info.features : [],
+      snmpDiscoveryEnabled: isSnmpDiscoveryEnabled(info.id),
       bitlockerStatus: info.bitlockerStatus ?? null,
       avStatus: info.avStatus ?? null,
       warranty: info.warranty ?? null,
       chatNotifications: chatNotificationCounts.get(info.id) ?? 0,
     }));
     return res.end(JSON.stringify(payload));
+  }
+
+  if (pathname === '/snmp/discoveries' && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const limitParam = Number(requestedUrl.searchParams.get('limit'));
+    const agentFilter = requestedUrl.searchParams.get('agent')?.trim();
+    const limit = Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(limitParam, SNMP_DISCOVERY_LOG_LIMIT)
+      : 50;
+
+  const records = agentFilter
+    ? snmpDiscoveryHistory.filter((record) => record.agentId === agentFilter)
+    : snmpDiscoveryHistory;
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  return res.end(JSON.stringify({ records: records.slice(0, limit) }));
+}
+
+  if (pathname === '/snmp/defaults' && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ snmp: buildSnmpResponse(generalSettings.snmp) }));
   }
 
   if (pathname === '/groups' && req.method === 'GET') {
@@ -981,6 +1203,8 @@ server.on('request', async (req, res) => {
       techDirectConfigured: Boolean(
         generalSettings?.techDirect?.apiKey && generalSettings?.techDirect?.apiSecret,
       ),
+      snmp: buildSnmpResponse(generalSettings?.snmp),
+      snmpVersion: generalSettings?.snmpVersion ?? DEFAULT_SNMP_VERSION,
     }));
     return;
   }
@@ -1028,6 +1252,25 @@ server.on('request', async (req, res) => {
             ...techDirectUpdates,
           };
         }
+        if (Object.prototype.hasOwnProperty.call(payload, 'snmp')) {
+          const snmpPayload = payload.snmp;
+          if (snmpPayload && typeof snmpPayload === 'object') {
+            const snmpUpdate = mergeSnmpSettings(generalSettings.snmp, snmpPayload);
+            if (snmpUpdate) {
+              updates.snmp = snmpUpdate;
+            }
+          }
+        }
+        if (Object.prototype.hasOwnProperty.call(payload, 'snmpVersion')) {
+          const versionValue = typeof payload.snmpVersion === 'string'
+            ? payload.snmpVersion.trim().toLowerCase()
+            : '';
+          if (!versionValue || !SNMP_VERSION_KEYS.includes(versionValue)) {
+            res.writeHead(400);
+            return res.end('Invalid SNMP version');
+          }
+          updates.snmpVersion = versionValue;
+        }
         if (!Object.keys(updates).length) {
           res.writeHead(400);
           return res.end('No valid settings to update.');
@@ -1046,6 +1289,8 @@ server.on('request', async (req, res) => {
           techDirectConfigured: Boolean(
             generalSettings?.techDirect?.apiKey && generalSettings?.techDirect?.apiSecret,
           ),
+          snmp: buildSnmpResponse(generalSettings.snmp),
+          snmpVersion: generalSettings?.snmpVersion ?? DEFAULT_SNMP_VERSION,
         }));
         if (techDirectChanged) {
           clearTechDirectTokenCache();
@@ -1710,6 +1955,46 @@ server.on('request', async (req, res) => {
     return;
   }
 
+  const snmpEventsMatch = pathname.match(/^\/clients\/([^/]+)\/snmp\/([^/]+)\/events$/);
+  if (snmpEventsMatch && req.method === 'GET') {
+    const agentId = snmpEventsMatch[1];
+    const requestId = snmpEventsMatch[2];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    let stream = snmpScanStreams.get(requestId);
+    if (stream && stream.agentId !== agentId) {
+      res.writeHead(409);
+      res.end('Request ID already bound to a different agent');
+      return;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write(': connected\n\n');
+
+    if (!stream) {
+      stream = { agentId, clients: new Set() };
+      snmpScanStreams.set(requestId, stream);
+    }
+
+    stream.clients.add(res);
+    res.on('close', () => {
+      stream.clients.delete(res);
+      if (stream.clients.size === 0) {
+        snmpScanStreams.delete(requestId);
+      }
+    });
+
+    return;
+  }
+
   const screenRequestMatch = pathname === '/screen/request' && req.method === 'POST';
   if (screenRequestMatch) {
     collectBody(req, (body) => {
@@ -2047,6 +2332,105 @@ server.on('request', async (req, res) => {
       } catch (error) {
         res.writeHead(400);
         res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const snmpDiscoveryMatch = pathname.match(/^\/clients\/([^/]+)\/snmp\/discovery$/);
+  if (snmpDiscoveryMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = snmpDiscoveryMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const enabled = typeof payload.enabled === 'boolean' ? payload.enabled : null;
+        if (enabled === null) {
+          res.writeHead(400);
+          return res.end('Enabled must be true or false');
+        }
+
+        if (!setSnmpDiscoveryEnabled(agentId, enabled)) {
+          res.writeHead(500);
+          return res.end('Failed to persist SNMP discovery setting');
+        }
+
+        entry.info.snmpDiscoveryEnabled = enabled;
+        agents.set(agentId, entry.info);
+        res.writeHead(204);
+        res.end();
+      } catch (error) {
+        console.error('Failed to update SNMP discovery setting', error);
+        res.writeHead(400);
+        res.end('Invalid SNMP discovery request');
+      }
+    });
+
+    return;
+  }
+
+  const snmpScanMatch = pathname.match(/^\/clients\/([^/]+)\/snmp\/scan$/);
+  if (snmpScanMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = snmpScanMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    if (!isSnmpDiscoveryEnabled(agentId)) {
+      res.writeHead(403);
+      return res.end('SNMP discovery disabled for this agent');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const versionValue = typeof payload.version === 'string' && payload.version.trim()
+          ? payload.version.trim().toLowerCase()
+          : (generalSettings?.snmpVersion ?? DEFAULT_SNMP_VERSION);
+
+        const snmpConfig = getSnmpConfigForVersion(versionValue);
+        if (!snmpConfig) {
+          res.writeHead(400);
+          return res.end('SNMP defaults are not configured for the selected version');
+        }
+
+        const requestId = typeof payload.requestId === 'string' && payload.requestId.trim()
+          ? payload.requestId.trim()
+          : uuidv4();
+
+        const message = {
+          requestId,
+          snmp: snmpConfig,
+          version: versionValue,
+          timeoutMs: typeof payload.timeoutMs === 'number' ? payload.timeoutMs : undefined,
+          maxConcurrency: typeof payload.maxConcurrency === 'number' ? payload.maxConcurrency : undefined,
+          hostsPerSubnet: typeof payload.hostsPerSubnet === 'number' ? payload.hostsPerSubnet : undefined,
+        };
+
+        beginSnmpDiscoveryRecord(agentId, entry.info.name ?? 'unknown', requestId);
+
+        sendControl(entry.socket, 'start-snmp-scan', message);
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ requestId }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid SNMP scan payload');
       }
     });
 
@@ -3945,6 +4329,7 @@ wss.on('connection', (socket, request) => {
     pendingReboot: false,
     softwareSummary: null,
     features: [],
+    snmpDiscoveryEnabled: isSnmpDiscoveryEnabled(id),
     bitlockerStatus: null,
     avStatus: null,
     license: null,
@@ -4062,6 +4447,7 @@ wss.on('connection', (socket, request) => {
         }
         info.license = licenseCode;
         info.identified = true;
+        info.snmpDiscoveryEnabled = isSnmpDiscoveryEnabled(info.id);
         markLicenseUsed(licenseCode);
         sendControl(socket, 'license-result', { success: true });
         if (parsed.specs != null) {
@@ -4283,6 +4669,14 @@ wss.on('connection', (socket, request) => {
         fulfillScreenListRequest(info.id, normalized);
       } else if (parsed?.type === 'monitoring-metrics') {
         handleMonitoringMetrics(info, socket, parsed);
+      } else if ((parsed?.type === 'snmp-scan-result' || parsed?.type === 'snmp-scan-complete' || parsed?.type === 'snmp-scan-error') && typeof parsed.requestId === 'string') {
+        const agentId = typeof parsed.agentId === 'string' ? parsed.agentId : info.id;
+        const eventType = parsed.type === 'snmp-scan-result'
+          ? 'snmp-result'
+          : parsed.type === 'snmp-scan-complete'
+            ? 'snmp-complete'
+            : 'snmp-error';
+        dispatchSnmpEvent(agentId, parsed.requestId, eventType, parsed);
       } else if (parsed?.type === 'remediation-result') {
         sendMonitoringEvent('remediation-result', {
           type: 'remediation-result',
@@ -6081,6 +6475,200 @@ function persistAgentGroupAssignments(map = agentGroupAssignments) {
   }
 }
 
+function loadSnmpDiscoverySettings() {
+  ensureDataDirectory();
+  let stored = {};
+  try {
+    if (fs.existsSync(SNMP_SETTINGS_PATH)) {
+      let raw = fs.readFileSync(SNMP_SETTINGS_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      stored = JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load SNMP discovery settings', error);
+  }
+
+  const map = new Map();
+  if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+    for (const [agentId, value] of Object.entries(stored)) {
+      if (!agentId) {
+        continue;
+      }
+      map.set(agentId, Boolean(value));
+    }
+  }
+
+  persistSnmpDiscoverySettings(map);
+  return map;
+}
+
+function persistSnmpDiscoverySettings(map = snmpDiscoverySettings) {
+  try {
+    ensureDataDirectory();
+    const payload = {};
+    for (const [agentId, enabled] of map) {
+      if (!agentId) {
+        continue;
+      }
+      payload[agentId] = Boolean(enabled);
+    }
+    fs.writeFileSync(SNMP_SETTINGS_PATH, JSON.stringify(payload, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to persist SNMP discovery settings', error);
+    return false;
+  }
+}
+
+function isSnmpDiscoveryEnabled(agentId) {
+  if (!agentId) {
+    return true;
+  }
+
+  if (!snmpDiscoverySettings.has(agentId)) {
+    return true;
+  }
+
+  return Boolean(snmpDiscoverySettings.get(agentId));
+}
+
+function setSnmpDiscoveryEnabled(agentId, enabled) {
+  if (!agentId) {
+    return false;
+  }
+
+  snmpDiscoverySettings.set(agentId, Boolean(enabled));
+  return persistSnmpDiscoverySettings();
+}
+
+function captureSnmpEvent(agentId, requestId, eventName, payload) {
+  if (!requestId || !eventName) {
+    return;
+  }
+
+  if (eventName === 'snmp-result' && Array.isArray(payload?.devices)) {
+    for (const device of payload.devices) {
+      appendSnmpDeviceToRecord(requestId, device);
+    }
+    return;
+  }
+
+  if (eventName === 'snmp-complete') {
+    finalizeSnmpDiscoveryRecord(requestId, {
+      status: 'complete',
+      scanned: Number.isFinite(payload?.scanned) ? payload.scanned : null,
+      found: Number.isFinite(payload?.found) ? payload.found : null,
+      durationMs: Number.isFinite(payload?.durationMs) ? payload.durationMs : null,
+    });
+    return;
+  }
+
+  if (eventName === 'snmp-error') {
+    finalizeSnmpDiscoveryRecord(requestId, {
+      status: 'error',
+      scanned: Number.isFinite(payload?.scanned) ? payload.scanned : null,
+      found: Number.isFinite(payload?.found) ? payload.found : null,
+      durationMs: Number.isFinite(payload?.durationMs) ? payload.durationMs : null,
+      message: typeof payload?.message === 'string' ? payload.message : null,
+    });
+    return;
+  }
+}
+
+function appendSnmpDeviceToRecord(requestId, device) {
+  const pending = pendingSnmpScans.get(requestId);
+  if (!pending) {
+    return;
+  }
+
+  if (!device || typeof device !== 'object') {
+    return;
+  }
+
+  pending.devices.push({
+    ip: typeof device.ip === 'string' ? device.ip : '',
+    sysDescr: typeof device.sysDescr === 'string' ? device.sysDescr : '',
+    sysName: typeof device.sysName === 'string' ? device.sysName : '',
+    sysObjectId: typeof device.sysObjectId === 'string' ? device.sysObjectId : '',
+    discoveredAt: new Date().toISOString(),
+  });
+}
+
+function finalizeSnmpDiscoveryRecord(requestId, summary) {
+  const pending = pendingSnmpScans.get(requestId);
+  if (!pending) {
+    return;
+  }
+
+  pendingSnmpScans.delete(requestId);
+
+  const record = {
+    requestId,
+    agentId: pending.agentId,
+    agentName: pending.agentName,
+    status: summary.status ?? 'unknown',
+    startedAt: pending.startedAt,
+    completedAt: new Date().toISOString(),
+    scanned: typeof summary.scanned === 'number' ? summary.scanned : null,
+    found: typeof summary.found === 'number' ? summary.found : null,
+    durationMs: typeof summary.durationMs === 'number' ? summary.durationMs : null,
+    message: typeof summary.message === 'string' ? summary.message : null,
+    devices: pending.devices,
+  };
+
+  snmpDiscoveryHistory.unshift(record);
+  if (snmpDiscoveryHistory.length > SNMP_DISCOVERY_LOG_LIMIT) {
+    snmpDiscoveryHistory.length = SNMP_DISCOVERY_LOG_LIMIT;
+  }
+
+  persistSnmpDiscoveryHistory();
+}
+
+function beginSnmpDiscoveryRecord(agentId, agentName, requestId) {
+  if (!agentId || !requestId) {
+    return;
+  }
+
+  pendingSnmpScans.set(requestId, {
+    agentId,
+    agentName: agentName ?? 'unknown',
+    requestId,
+    startedAt: new Date().toISOString(),
+    devices: [],
+  });
+}
+
+function loadSnmpDiscoveryHistory() {
+  ensureDataDirectory();
+  let stored = [];
+  try {
+    if (fs.existsSync(SNMP_DISCOVERY_LOG_PATH)) {
+      let raw = fs.readFileSync(SNMP_DISCOVERY_LOG_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      stored = JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load SNMP discovery history', error);
+  }
+
+  return Array.isArray(stored) ? stored.slice(0, SNMP_DISCOVERY_LOG_LIMIT) : [];
+}
+
+function persistSnmpDiscoveryHistory() {
+  try {
+    ensureDataDirectory();
+    fs.writeFileSync(SNMP_DISCOVERY_LOG_PATH, JSON.stringify(snmpDiscoveryHistory, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to persist SNMP discovery history', error);
+    return false;
+  }
+}
+
 function ensureRemediationDirectory() {
   if (!fs.existsSync(REMEDIATION_DIR)) {
     fs.mkdirSync(REMEDIATION_DIR, { recursive: true });
@@ -6198,13 +6786,15 @@ function loadGeneralSettings() {
   const settings = {
     screenConsentRequired: true,
     autoRespondToAgentChat: DEFAULT_GENERAL_SETTINGS.autoRespondToAgentChat ?? false,
-    aiAgent: {
-      ...DEFAULT_AI_AGENT_SETTINGS,
-    },
-    techDirect: {
-      ...DEFAULT_TECH_DIRECT_SETTINGS,
-    },
-  };
+  aiAgent: {
+    ...DEFAULT_AI_AGENT_SETTINGS,
+  },
+  techDirect: {
+    ...DEFAULT_TECH_DIRECT_SETTINGS,
+  },
+  snmp: createDefaultSnmpSettings(),
+  snmpVersion: DEFAULT_SNMP_VERSION,
+};
   if (stored && typeof stored === 'object') {
     if (typeof stored.screenConsentRequired === 'boolean') {
       settings.screenConsentRequired = stored.screenConsentRequired;
@@ -6236,6 +6826,18 @@ function loadGeneralSettings() {
         settings.techDirect.apiSecret = trimmedSecret ? trimmedSecret : null;
       } else if (techDirect.apiSecret === null) {
         settings.techDirect.apiSecret = null;
+      }
+    }
+    if (typeof stored.snmpVersion === 'string') {
+      const normalizedVersion = stored.snmpVersion.trim().toLowerCase();
+      if (SNMP_VERSION_KEYS.includes(normalizedVersion)) {
+        settings.snmpVersion = normalizedVersion;
+      }
+    }
+    if (stored.snmp && typeof stored.snmp === 'object') {
+      const mergedSnmp = mergeSnmpSettings(settings.snmp, stored.snmp);
+      if (mergedSnmp) {
+        settings.snmp = mergedSnmp;
       }
     }
   }

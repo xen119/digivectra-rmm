@@ -2,6 +2,19 @@
   "version": 3,
   "targets": {
     "net8.0-windows7.0": {
+      "Lextm.SharpSnmpLib/12.5.7": {
+        "type": "package",
+        "compile": {
+          "lib/net8.0/SharpSnmpLib.dll": {
+            "related": ".pdb;.xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/SharpSnmpLib.dll": {
+            "related": ".pdb;.xml"
+          }
+        }
+      },
       "Microsoft.MixedReality.WebRTC/2.0.2": {
         "type": "package",
         "compile": {
@@ -161,6 +174,24 @@
     }
   },
   "libraries": {
+    "Lextm.SharpSnmpLib/12.5.7": {
+      "sha512": "k631wRQNnFOpKxsYyziPp1UR4v+IBFS81nnmQyQa+RxSlmYjoLViNXINV43Aa49kQO1ulSUmGTI9DD94z0HAHg==",
+      "type": "package",
+      "path": "lextm.sharpsnmplib/12.5.7",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lextm.sharpsnmplib.12.5.7.nupkg.sha512",
+        "lextm.sharpsnmplib.nuspec",
+        "lib/net471/SharpSnmpLib.dll",
+        "lib/net471/SharpSnmpLib.pdb",
+        "lib/net471/SharpSnmpLib.xml",
+        "lib/net8.0/SharpSnmpLib.dll",
+        "lib/net8.0/SharpSnmpLib.pdb",
+        "lib/net8.0/SharpSnmpLib.xml",
+        "readme.md"
+      ]
+    },
     "Microsoft.MixedReality.WebRTC/2.0.2": {
       "sha512": "0InRdeWcRaGc+MkwdhaX/6vIh+Fbjdncl0AsXHjZVFKzxV6eg2zKgt6Kx5eb5ilX9OhQJ0poAG1NqvkngdCPUg==",
       "type": "package",
@@ -392,6 +423,7 @@
   },
   "projectFileDependencyGroups": {
     "net8.0-windows7.0": [
+      "Lextm.SharpSnmpLib >= 12.5.7",
       "Microsoft.MixedReality.WebRTC >= 2.0.2",
       "System.Drawing.Common >= 8.0.0",
       "System.Management >= 8.0.0",
@@ -440,6 +472,10 @@
       "net8.0-windows7.0": {
         "targetAlias": "net8.0-windows",
         "dependencies": {
+          "Lextm.SharpSnmpLib": {
+            "target": "Package",
+            "version": "[12.5.7, )"
+          },
           "Microsoft.MixedReality.WebRTC": {
             "target": "Package",
             "version": "[2.0.2, )"

@@ -24,6 +24,9 @@ using Microsoft.MixedReality.WebRTC;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using Lextm.SharpSnmpLib;
+using Lextm.SharpSnmpLib.Messaging;
+using Lextm.SharpSnmpLib.Security;
 using Microsoft.Win32;
 using System.ServiceProcess;
 
@@ -123,6 +126,17 @@ internal static class Program
     private const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
     private const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
     private const uint MOUSEEVENTF_WHEEL = 0x0800;
+    private const int DefaultSnmpTimeoutMs = 2000;
+    private const int DefaultSnmpConcurrency = 20;
+    private const string DefaultSnmpCommunity = "public";
+    private const int SnmpMaxHostsPerSubnet = 256;
+    private static readonly ObjectIdentifier[] SnmpDeviceOids =
+    {
+        new("1.3.6.1.2.1.1.1.0"),
+        new("1.3.6.1.2.1.1.5.0"),
+        new("1.3.6.1.2.1.1.2.0")
+    };
+    private static readonly Dictionary<string, CancellationTokenSource> SnmpScanCancellations = new(StringComparer.OrdinalIgnoreCase);
 
     private static async Task Main(string[] args)
     {
@@ -3526,6 +3540,9 @@ internal static class Program
             case "run-remediation":
                 await RunRemediationScriptAsync(socket, document.RootElement, cancellationToken);
                 break;
+            case "start-snmp-scan":
+                await HandleStartSnmpScanAsync(socket, document.RootElement, cancellationToken);
+                break;
             case "monitoring-status":
             {
                 if (document.RootElement.TryGetProperty("enabled", out var enabledElement) &&
@@ -3974,6 +3991,138 @@ internal static class Program
                 // ignore cleanup failures
             }
         }
+    }
+
+    private static async Task HandleStartSnmpScanAsync(ClientWebSocket socket, JsonElement root, CancellationToken cancellationToken)
+    {
+        var requestId = ExtractRequestId(root);
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            return;
+        }
+
+        var snmpElement = root.TryGetProperty("snmp", out var snmpProps) && snmpProps.ValueKind == JsonValueKind.Object
+            ? snmpProps
+            : default;
+
+        static string? ReadString(JsonElement? parent, string name)
+        {
+            if (!parent.HasValue || parent.Value.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var element = parent.Value;
+            if (element.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String)
+            {
+                return property.GetString()?.Trim();
+            }
+
+            return null;
+        }
+
+        static SnmpVersion ParseSnmpVersion(string? version)
+        {
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                return SnmpVersion.V3;
+            }
+
+            return version.Trim().ToLowerInvariant() switch
+            {
+                "v1" => SnmpVersion.V1,
+                "v2" => SnmpVersion.V2C,
+                "v2c" => SnmpVersion.V2C,
+                _ => SnmpVersion.V3,
+            };
+        }
+
+        var username = ReadString(snmpElement, "username");
+        var versionSpec = ReadString(root, "version") ?? ReadString(snmpElement, "version");
+        var requestedVersion = ParseSnmpVersion(versionSpec);
+        if (requestedVersion == SnmpVersion.V3 && string.IsNullOrWhiteSpace(username))
+        {
+            await SendSnmpScanErrorAsync(socket, requestId, "SNMP username is required for SNMPv3 scans.", cancellationToken);
+            return;
+        }
+
+        var authPassword = ReadString(snmpElement, "authPassword");
+        var authProtocol = ReadString(snmpElement, "authProtocol") ?? "SHA1";
+        var privPassword = ReadString(snmpElement, "privPassword");
+        var privProtocol = ReadString(snmpElement, "privProtocol") ?? string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(privPassword) && string.IsNullOrWhiteSpace(authPassword))
+        {
+            await SendSnmpScanErrorAsync(socket, requestId, "Authentication password is required when privacy is enabled.", cancellationToken);
+            return;
+        }
+
+        var timeoutMs = root.TryGetProperty("timeoutMs", out var timeoutElement) && timeoutElement.TryGetInt32(out var parsedTimeout)
+            ? Math.Clamp(parsedTimeout, 500, 20000)
+            : DefaultSnmpTimeoutMs;
+        var concurrency = root.TryGetProperty("maxConcurrency", out var concurrencyElement) && concurrencyElement.TryGetInt32(out var parsedConcurrency)
+            ? Math.Clamp(parsedConcurrency, 1, 64)
+            : DefaultSnmpConcurrency;
+        var hostsPerSubnet = root.TryGetProperty("hostsPerSubnet", out var hostElement) && hostElement.TryGetInt32(out var parsedHosts)
+            ? Math.Clamp(parsedHosts, 16, 1024)
+            : SnmpMaxHostsPerSubnet;
+        var community = ReadString(root, "community") ?? ReadString(snmpElement, "community") ?? DefaultSnmpCommunity;
+
+        var options = new SnmpScanOptions
+        {
+            Username = username,
+            AuthPassword = authPassword,
+            AuthProtocol = authProtocol,
+            PrivPassword = privPassword,
+            PrivProtocol = privProtocol,
+            TimeoutMs = timeoutMs,
+            MaxConcurrency = concurrency,
+            HostsPerSubnet = hostsPerSubnet,
+            Version = ParseSnmpVersion(versionSpec),
+            Community = string.IsNullOrWhiteSpace(community) ? DefaultSnmpCommunity : community,
+        };
+
+        CancellationTokenSource linkedCts;
+        lock (SnmpScanCancellations)
+        {
+            if (SnmpScanCancellations.TryGetValue(requestId, out var existing))
+            {
+                existing.Cancel();
+                existing.Dispose();
+            }
+
+            linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            SnmpScanCancellations[requestId] = linkedCts;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RunSnmpScanAsync(socket, requestId, options, linkedCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                await SendSnmpScanErrorAsync(socket, requestId, "SNMP scan canceled.", CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"SNMP scan {requestId} failed: {ex.Message}");
+                await SendSnmpScanErrorAsync(socket, requestId, $"SNMP scan error: {ex.Message}", CancellationToken.None);
+            }
+            finally
+            {
+                lock (SnmpScanCancellations)
+                {
+                    if (SnmpScanCancellations.TryGetValue(requestId, out var token) && token == linkedCts)
+                    {
+                        SnmpScanCancellations.Remove(requestId);
+                    }
+                }
+
+                linkedCts.Dispose();
+            }
+        });
     }
 
     private static Task SendGpoResultAsync(ClientWebSocket socket, string? profileId, bool success, string message, CancellationToken cancellationToken)
@@ -5920,6 +6069,434 @@ internal static class Program
             }
         }
     }
+
+    private static async Task RunSnmpScanAsync(ClientWebSocket socket, string requestId, SnmpScanOptions options, CancellationToken cancellationToken)
+    {
+        var hosts = GetSnmpTargetHosts(options.HostsPerSubnet).ToList();
+        if (hosts.Count == 0)
+        {
+            await SendSnmpScanCompleteAsync(socket, requestId, 0, 0, 0, cancellationToken);
+            return;
+        }
+
+        using var concurrency = new SemaphoreSlim(Math.Max(1, options.MaxConcurrency));
+        var scanned = 0;
+        var found = 0;
+        var stopwatch = Stopwatch.StartNew();
+        var tasks = hosts.Select(async (ip) =>
+        {
+            await concurrency.WaitAsync(cancellationToken);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Interlocked.Increment(ref scanned);
+                var device = await ProbeHostAsync(ip, options, cancellationToken);
+                if (device is not null)
+                {
+                    Interlocked.Increment(ref found);
+                    await SendSnmpScanResultAsync(socket, requestId, device, cancellationToken);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"SNMP scan probe {ip} failed: {ex.Message}");
+            }
+            finally
+            {
+                concurrency.Release();
+            }
+        }).ToList();
+
+        try
+        {
+            await Task.WhenAll(tasks);
+            stopwatch.Stop();
+            await SendSnmpScanCompleteAsync(socket, requestId, scanned, found, stopwatch.ElapsedMilliseconds, cancellationToken);
+        }
+        finally
+        {
+            stopwatch.Stop();
+        }
+    }
+
+    private static Task<SnmpDeviceInfo?> ProbeHostAsync(string ip, SnmpScanOptions options, CancellationToken cancellationToken)
+    {
+        return Task.Run(() => ProbeHostSync(ip, options), cancellationToken);
+    }
+
+    private static SnmpDeviceInfo? ProbeHostSync(string ip, SnmpScanOptions options)
+    {
+        var endpoint = new IPEndPoint(IPAddress.Parse(ip), 161);
+        var variables = SnmpDeviceOids.Select((oid) => new Variable(oid)).ToList();
+        var versionCode = MapToVersionCode(options.Version);
+
+        ISnmpMessage? reply = null;
+        if (options.Version == SnmpVersion.V3)
+        {
+            var discovery = Messenger.GetNextDiscovery(SnmpType.GetRequestPdu);
+
+            ReportMessage? report;
+            try
+            {
+                report = discovery.GetResponse(options.TimeoutMs, endpoint);
+            }
+            catch
+            {
+                return null;
+            }
+
+            if (report is null)
+            {
+                return null;
+            }
+
+            var authProvider = CreateAuthenticationProvider(options.AuthProtocol, options.AuthPassword);
+            var privacyProvider = CreatePrivacyProvider(options.PrivProtocol, options.PrivPassword, authProvider);
+
+            var request = new GetRequestMessage(
+                VersionCode.V3,
+                Messenger.NextMessageId,
+                Messenger.NextRequestId,
+                new OctetString(options.Username),
+                variables,
+                privacyProvider,
+                Messenger.MaxMessageSize,
+                report);
+
+            try
+            {
+                reply = request.GetResponse(options.TimeoutMs, endpoint);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+        else
+        {
+            var community = new OctetString(string.IsNullOrWhiteSpace(options.Community) ? DefaultSnmpCommunity : options.Community);
+            IList<Variable>? result;
+            try
+            {
+                result = Messenger.Get(versionCode, endpoint, community, variables, options.TimeoutMs);
+            }
+            catch
+            {
+                return null;
+            }
+
+            if (result is null || result.Count == 0)
+            {
+                return null;
+            }
+
+            return ParseSnmpDevice(result, ip);
+        }
+
+        if (reply is null || reply.Pdu().ErrorStatus.ToInt32() != 0)
+        {
+            return null;
+        }
+
+        return ParseSnmpDevice(reply.Pdu().Variables, ip);
+    }
+
+    private static SnmpDeviceInfo? ParseSnmpDevice(IList<Variable> variables, string ip)
+    {
+        if (variables is null)
+        {
+            return null;
+        }
+
+        var values = variables.ToDictionary(v => v.Id.ToString(), v => v.Data?.ToString(), StringComparer.Ordinal);
+        var descr = values.TryGetValue(SnmpDeviceOids[0].ToString(), out var sysDescr) ? sysDescr : null;
+        var name = values.TryGetValue(SnmpDeviceOids[1].ToString(), out var sysName) ? sysName : null;
+        var objectId = values.TryGetValue(SnmpDeviceOids[2].ToString(), out var sysObjectId) ? sysObjectId : null;
+
+        return new SnmpDeviceInfo(
+            ip,
+            sysDescr ?? string.Empty,
+            name ?? string.Empty,
+            objectId ?? string.Empty);
+    }
+
+    private static IAuthenticationProvider CreateAuthenticationProvider(string? protocol, string? password)
+    {
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            return DefaultAuthenticationProvider.Instance;
+        }
+
+        var key = new OctetString(password);
+        return protocol?.ToUpperInvariant() switch
+        {
+            "MD5" => new MD5AuthenticationProvider(key),
+            "SHA256" => new SHA256AuthenticationProvider(key),
+            "SHA384" => new SHA384AuthenticationProvider(key),
+            "SHA512" => new SHA512AuthenticationProvider(key),
+            _ => new SHA1AuthenticationProvider(key),
+        };
+    }
+
+    private static IPrivacyProvider CreatePrivacyProvider(string? protocol, string? password, IAuthenticationProvider authentication)
+    {
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            return new DefaultPrivacyProvider(authentication);
+        }
+
+        var key = new OctetString(password);
+        return protocol?.ToUpperInvariant() switch
+        {
+            "3DES" => new TripleDESPrivacyProvider(key, authentication),
+            "AES192" => new AES192PrivacyProvider(key, authentication),
+            "AES256" => new AES256PrivacyProvider(key, authentication),
+            "AES" => new AESPrivacyProvider(key, authentication),
+            _ => new DESPrivacyProvider(key, authentication),
+        };
+    }
+
+    private static IReadOnlyList<string> GetSnmpTargetHosts(int hostsPerSubnet)
+    {
+        var hosts = new List<string>();
+        var seenHosts = new HashSet<uint>();
+        var localAddresses = GetLocalIpv4Addresses();
+
+        foreach (var range in GetLocalSubnets())
+        {
+            var start = range.Network + 1;
+            var end = range.Broadcast - 1;
+            if (start >= end)
+            {
+                continue;
+            }
+
+            var available = end - start + 1;
+            var requested = (uint)hostsPerSubnet;
+            var limit = requested < available ? requested : available;
+            for (uint offset = 0; offset < limit; offset++)
+            {
+                var candidate = start + offset;
+                if (candidate <= range.Network || candidate >= range.Broadcast)
+                {
+                    continue;
+                }
+
+                if (localAddresses.Contains(candidate))
+                {
+                    continue;
+                }
+
+                if (!seenHosts.Add(candidate))
+                {
+                    continue;
+                }
+
+                hosts.Add(UintToIp(candidate).ToString());
+            }
+        }
+
+        return hosts;
+    }
+
+    private static IEnumerable<SubnetRange> GetLocalSubnets()
+    {
+        var seenNetworks = new HashSet<uint>();
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up)
+            {
+                continue;
+            }
+
+            var properties = nic.GetIPProperties();
+            if (properties is null)
+            {
+                continue;
+            }
+
+            foreach (var unicast in properties.UnicastAddresses)
+            {
+                if (unicast.Address.AddressFamily != AddressFamily.InterNetwork)
+                {
+                    continue;
+                }
+
+                if (IPAddress.IsLoopback(unicast.Address) ||
+                    unicast.Address.Equals(IPAddress.Any) ||
+                    unicast.Address.Equals(IPAddress.None))
+                {
+                    continue;
+                }
+
+                var prefixLength = unicast.PrefixLength;
+                if (prefixLength <= 0 || prefixLength >= 31)
+                {
+                    continue;
+                }
+
+                var addressValue = IpToUint(unicast.Address);
+                var mask = PrefixLengthToMask(prefixLength);
+                var network = addressValue & mask;
+                if (!seenNetworks.Add(network))
+                {
+                    continue;
+                }
+
+                var broadcast = network | ~mask;
+                yield return new SubnetRange(network, broadcast);
+            }
+        }
+    }
+
+    private static HashSet<uint> GetLocalIpv4Addresses()
+    {
+        var addresses = new HashSet<uint>();
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up)
+            {
+                continue;
+            }
+
+            var properties = nic.GetIPProperties();
+            if (properties is null)
+            {
+                continue;
+            }
+
+            foreach (var unicast in properties.UnicastAddresses)
+            {
+                if (unicast.Address.AddressFamily != AddressFamily.InterNetwork)
+                {
+                    continue;
+                }
+
+                var value = IpToUint(unicast.Address);
+                addresses.Add(value);
+            }
+        }
+
+        return addresses;
+    }
+
+    private static uint IpToUint(IPAddress ip)
+    {
+        var bytes = ip.MapToIPv4().GetAddressBytes();
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(bytes);
+        }
+
+        return BitConverter.ToUInt32(bytes, 0);
+    }
+
+    private static IPAddress UintToIp(uint value)
+    {
+        var bytes = BitConverter.GetBytes(value);
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(bytes);
+        }
+
+        return new IPAddress(bytes);
+    }
+
+    private static uint PrefixLengthToMask(int prefixLength)
+    {
+        if (prefixLength <= 0)
+        {
+            return 0u;
+        }
+
+        return prefixLength >= 32 ? 0xFFFFFFFFu : 0xFFFFFFFFu << (32 - prefixLength);
+    }
+
+    private static Task SendSnmpScanResultAsync(ClientWebSocket socket, string requestId, SnmpDeviceInfo device, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+        {
+            type = "snmp-scan-result",
+            requestId,
+            agentId = GetAgentId(),
+            timestamp = DateTime.UtcNow.ToString("o"),
+            devices = new[]
+            {
+                new
+                {
+                    ip = device.Ip,
+                    sysDescr = device.SysDescr,
+                    sysName = device.SysName,
+                    sysObjectId = device.SysObjectId
+                }
+            }
+        }, cancellationToken);
+    }
+
+    private static Task SendSnmpScanCompleteAsync(ClientWebSocket socket, string requestId, int scanned, int found, long durationMs, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+        {
+            type = "snmp-scan-complete",
+            requestId,
+            agentId = GetAgentId(),
+            timestamp = DateTime.UtcNow.ToString("o"),
+            scanned,
+            found,
+            durationMs
+        }, cancellationToken);
+    }
+
+    private static Task SendSnmpScanErrorAsync(ClientWebSocket socket, string requestId, string message, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+        {
+            type = "snmp-scan-error",
+            requestId,
+            agentId = GetAgentId(),
+            timestamp = DateTime.UtcNow.ToString("o"),
+            message
+        }, cancellationToken);
+    }
+
+    private sealed class SnmpScanOptions
+    {
+        public string Username { get; init; } = string.Empty;
+        public string? AuthPassword { get; init; }
+        public string AuthProtocol { get; init; } = "SHA1";
+        public string? PrivPassword { get; init; }
+        public string PrivProtocol { get; init; } = string.Empty;
+        public SnmpVersion Version { get; init; } = SnmpVersion.V3;
+        public string Community { get; init; } = DefaultSnmpCommunity;
+        public int TimeoutMs { get; init; } = DefaultSnmpTimeoutMs;
+        public int MaxConcurrency { get; init; } = DefaultSnmpConcurrency;
+        public int HostsPerSubnet { get; init; } = SnmpMaxHostsPerSubnet;
+    }
+
+    private sealed record SnmpDeviceInfo(string Ip, string SysDescr, string SysName, string SysObjectId);
+
+    private enum SnmpVersion
+    {
+        V1,
+        V2C,
+        V3
+    }
+
+    private static VersionCode MapToVersionCode(SnmpVersion version)
+    {
+        return version switch
+        {
+            SnmpVersion.V1 => VersionCode.V1,
+            SnmpVersion.V2C => VersionCode.V2,
+            _ => VersionCode.V3,
+        };
+    }
+
+    private sealed record SubnetRange(uint Network, uint Broadcast);
 
     private sealed class ProcessSnapshot
     {

@@ -13,7 +13,7 @@
   },
   {
     "id": "vulnerabilities",
-    "visible": true
+    "visible": false
   },
   {
     "id": "patches",
@@ -25,6 +25,10 @@
   },
   {
     "id": "snmp",
+    "visible": false
+  },
+  {
+    "id": "network-scanner",
     "visible": true
   },
   {

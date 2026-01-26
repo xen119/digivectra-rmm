@@ -137,6 +137,26 @@ internal static class Program
         new("1.3.6.1.2.1.1.2.0")
     };
     private static readonly Dictionary<string, CancellationTokenSource> SnmpScanCancellations = new(StringComparer.OrdinalIgnoreCase);
+    private const int DefaultNetworkScannerTimeoutMs = 1500;
+    private const int DefaultNetworkScannerConcurrency = 64;
+    private const int DefaultNetworkScannerHostsPerSubnet = 256;
+    private static readonly int[] DefaultNetworkScannerTcpPorts = { 22, 80, 443 };
+    private static readonly int[] DefaultNetworkScannerUdpPorts = { 53, 123, 161 };
+    private static readonly Dictionary<int, string> KnownServiceNames = new()
+    {
+        [22] = "SSH",
+        [25] = "SMTP",
+        [53] = "DNS",
+        [123] = "NTP",
+        [161] = "SNMP",
+        [80] = "HTTP",
+        [135] = "RPC",
+        [139] = "NetBIOS",
+        [443] = "HTTPS",
+        [445] = "SMB",
+        [3389] = "RDP"
+    };
+    private static readonly Dictionary<string, CancellationTokenSource> NetworkScannerCancellations = new(StringComparer.OrdinalIgnoreCase);
 
     private static async Task Main(string[] args)
     {
@@ -3543,6 +3563,12 @@ internal static class Program
             case "start-snmp-scan":
                 await HandleStartSnmpScanAsync(socket, document.RootElement, cancellationToken);
                 break;
+            case "start-network-scanner":
+                await HandleStartNetworkScannerAsync(socket, document.RootElement, cancellationToken);
+                break;
+            case "wake-on-lan":
+                await HandleWakeOnLanAsync(socket, document.RootElement, cancellationToken);
+                break;
             case "monitoring-status":
             {
                 if (document.RootElement.TryGetProperty("enabled", out var enabledElement) &&
@@ -4119,10 +4145,157 @@ internal static class Program
                         SnmpScanCancellations.Remove(requestId);
                     }
                 }
+            }
+        });
+
+    }
+
+    private static async Task HandleStartNetworkScannerAsync(ClientWebSocket socket, JsonElement root, CancellationToken cancellationToken)
+    {
+        var requestId = ExtractRequestId(root);
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            return;
+        }
+
+        var timeoutMs = root.TryGetProperty("timeoutMs", out var timeoutElement) && timeoutElement.TryGetInt32(out var parsedTimeout)
+            ? Math.Clamp(parsedTimeout, 200, 5000)
+            : DefaultNetworkScannerTimeoutMs;
+        var concurrency = root.TryGetProperty("maxConcurrency", out var concurrencyElement) && concurrencyElement.TryGetInt32(out var parsedConcurrency)
+            ? Math.Clamp(parsedConcurrency, 1, 128)
+            : DefaultNetworkScannerConcurrency;
+        var hostsPerSubnet = root.TryGetProperty("hostsPerSubnet", out var hostsElement) && hostsElement.TryGetInt32(out var parsedHosts)
+            ? Math.Clamp(parsedHosts, 16, 1024)
+            : DefaultNetworkScannerHostsPerSubnet;
+        var tcpPorts = ExtractPortList(root.TryGetProperty("tcpPorts", out var tcpElement) ? tcpElement : default, DefaultNetworkScannerTcpPorts);
+        if (tcpPorts.SequenceEqual(DefaultNetworkScannerTcpPorts) && root.TryGetProperty("servicePorts", out var portsElement))
+        {
+            tcpPorts = ExtractPortList(portsElement, DefaultNetworkScannerTcpPorts);
+        }
+        var udpPorts = ExtractPortList(root.TryGetProperty("udpPorts", out var udpElement) ? udpElement : default, DefaultNetworkScannerUdpPorts);
+
+        var options = new NetworkScannerOptions
+        {
+            TimeoutMs = timeoutMs,
+            MaxConcurrency = concurrency,
+            HostsPerSubnet = hostsPerSubnet,
+            TcpPorts = tcpPorts.Length > 0 ? tcpPorts : DefaultNetworkScannerTcpPorts,
+            UdpPorts = udpPorts.Length > 0 ? udpPorts : DefaultNetworkScannerUdpPorts
+        };
+
+        CancellationTokenSource linkedCts;
+        lock (NetworkScannerCancellations)
+        {
+            if (NetworkScannerCancellations.TryGetValue(requestId, out var existing))
+            {
+                existing.Cancel();
+                existing.Dispose();
+            }
+
+            linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            NetworkScannerCancellations[requestId] = linkedCts;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RunNetworkScannerScanAsync(socket, requestId, options, linkedCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                await SendNetworkScannerErrorAsync(socket, requestId, "Network scanner scan canceled.", CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Network scanner scan {requestId} failed: {ex.Message}");
+                await SendNetworkScannerErrorAsync(socket, requestId, $"Network scanner error: {ex.Message}", CancellationToken.None);
+            }
+            finally
+            {
+                lock (NetworkScannerCancellations)
+                {
+                    if (NetworkScannerCancellations.TryGetValue(requestId, out var token) && token == linkedCts)
+                    {
+                        NetworkScannerCancellations.Remove(requestId);
+                    }
+                }
 
                 linkedCts.Dispose();
             }
         });
+    }
+
+    private static int[] ExtractPortList(JsonElement? element, int[] fallback)
+    {
+        if (element is not { ValueKind: JsonValueKind.Array })
+        {
+            return fallback;
+        }
+
+        var ports = new List<int>();
+        foreach (var entry in element.Value.EnumerateArray())
+        {
+            if (entry.ValueKind != JsonValueKind.Number || !entry.TryGetInt32(out var port))
+            {
+                continue;
+            }
+
+            if (port < 1 || port > 65535)
+            {
+                continue;
+            }
+
+            ports.Add(port);
+        }
+
+        return ports.Count > 0 ? ports.ToArray() : fallback;
+    }
+
+    private static async Task HandleWakeOnLanAsync(ClientWebSocket socket, JsonElement root, CancellationToken cancellationToken)
+    {
+        var requestId = ExtractRequestId(root) ?? Guid.NewGuid().ToString("D");
+
+        static string? ReadStringProperty(JsonElement parent, string name)
+        {
+            if (!parent.TryGetProperty(name, out var element) || element.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            var value = element.GetString();
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+
+        var macInput = ReadStringProperty(root, "macAddress");
+        var targetIp = ReadStringProperty(root, "targetIp");
+
+        if (string.IsNullOrWhiteSpace(macInput))
+        {
+            await SendNetworkScannerWakeResultAsync(socket, requestId, string.Empty, targetIp, false, "MAC address is required.", cancellationToken);
+            return;
+        }
+
+        var macBytes = ParseMacAddress(macInput);
+        if (macBytes is null)
+        {
+            await SendNetworkScannerWakeResultAsync(socket, requestId, macInput, targetIp, false, "Invalid MAC address.", cancellationToken);
+            return;
+        }
+
+        var success = false;
+        try
+        {
+            success = await SendWakeOnLanPacketsAsync(macBytes);
+        }
+        catch (Exception ex)
+        {
+            await SendNetworkScannerWakeResultAsync(socket, requestId, FormatMacAddress(macBytes), targetIp, false, $"Wake-on-LAN error: {ex.Message}", cancellationToken);
+            return;
+        }
+
+        var message = success ? "Magic packet broadcasted." : "Unable to send magic packet.";
+        await SendNetworkScannerWakeResultAsync(socket, requestId, FormatMacAddress(macBytes), targetIp, success, message, cancellationToken);
     }
 
     private static Task SendGpoResultAsync(ClientWebSocket socket, string? profileId, bool success, string message, CancellationToken cancellationToken)
@@ -6416,6 +6589,9 @@ internal static class Program
         return prefixLength >= 32 ? 0xFFFFFFFFu : 0xFFFFFFFFu << (32 - prefixLength);
     }
 
+    [DllImport("iphlpapi.dll", ExactSpelling = true)]
+    private static extern int SendARP(uint destIp, uint srcIp, byte[] macAddr, ref uint physicalAddrLen);
+
     private static Task SendSnmpScanResultAsync(ClientWebSocket socket, string requestId, SnmpDeviceInfo device, CancellationToken cancellationToken)
     {
         return SendJsonAsync(socket, new
@@ -6462,6 +6638,355 @@ internal static class Program
             message
         }, cancellationToken);
     }
+
+    private static async Task RunNetworkScannerScanAsync(ClientWebSocket socket, string requestId, NetworkScannerOptions options, CancellationToken cancellationToken)
+    {
+        var hosts = GetSnmpTargetHosts(options.HostsPerSubnet).ToList();
+        if (hosts.Count == 0)
+        {
+            await SendNetworkScannerCompleteAsync(socket, requestId, 0, 0, 0, cancellationToken);
+            return;
+        }
+
+        using var concurrency = new SemaphoreSlim(Math.Max(1, options.MaxConcurrency));
+        var scanned = 0;
+        var found = 0;
+        var stopwatch = Stopwatch.StartNew();
+        var tasks = hosts.Select(async (ip) =>
+        {
+            await concurrency.WaitAsync(cancellationToken);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Interlocked.Increment(ref scanned);
+                var host = await ProbeNetworkHostAsync(ip, options, cancellationToken);
+                if (host is not null)
+                {
+                    Interlocked.Increment(ref found);
+                    await SendNetworkScannerResultAsync(socket, requestId, host, cancellationToken);
+                }
+            }
+            finally
+            {
+                concurrency.Release();
+            }
+        }).ToList();
+
+        try
+        {
+            await Task.WhenAll(tasks);
+            stopwatch.Stop();
+            await SendNetworkScannerCompleteAsync(socket, requestId, scanned, found, stopwatch.ElapsedMilliseconds, cancellationToken);
+        }
+        finally
+        {
+            stopwatch.Stop();
+        }
+    }
+
+    private static async Task<NetworkHostInfo?> ProbeNetworkHostAsync(string ip, NetworkScannerOptions options, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var mac = ResolveMacAddress(ip);
+        var alive = !string.IsNullOrEmpty(mac);
+
+        if (!alive)
+        {
+            alive = await TryIcmpProbeAsync(ip, options.TimeoutMs, cancellationToken);
+        }
+
+        var tcpServices = await ProbeTcpPortsAsync(ip, options.TcpPorts, options.TimeoutMs, cancellationToken);
+        if (tcpServices.Count > 0)
+        {
+            alive = true;
+        }
+
+        var udpServices = await ProbeUdpPortsAsync(ip, options.UdpPorts, options.TimeoutMs, cancellationToken);
+        if (udpServices.Count > 0)
+        {
+            alive = true;
+        }
+
+        if (!alive)
+        {
+            return null;
+        }
+
+        mac ??= ResolveMacAddress(ip);
+        var hostName = await ResolveHostNameAsync(ip);
+        var services = tcpServices.Concat(udpServices).ToArray();
+        return new NetworkHostInfo(ip, hostName ?? string.Empty, mac ?? string.Empty, services);
+    }
+
+    private static async Task<bool> TryIcmpProbeAsync(string ip, int timeoutMs, CancellationToken cancellationToken)
+    {
+        using var ping = new Ping();
+        try
+        {
+            var reply = await ping.SendPingAsync(ip, timeoutMs);
+            return reply.Status == IPStatus.Success;
+        }
+        catch (PingException)
+        {
+            return false;
+        }
+    }
+
+    private static async Task<List<string>> ProbeTcpPortsAsync(string ip, int[] ports, int timeoutMs, CancellationToken cancellationToken)
+    {
+        var services = new List<string>();
+        foreach (var port in ports)
+        {
+            if (port < 1 || port > 65535)
+            {
+                continue;
+            }
+
+            using var client = new TcpClient();
+            try
+            {
+                var connectTask = client.ConnectAsync(ip, port);
+                var completedTask = await Task.WhenAny(connectTask, Task.Delay(timeoutMs, cancellationToken));
+                if (completedTask != connectTask)
+                {
+                    continue;
+                }
+
+                await connectTask;
+                var label = KnownServiceNames.TryGetValue(port, out var name) ? name : $"Port {port}";
+                services.Add($"{label} ({port})");
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                continue;
+            }
+        }
+
+        return services;
+    }
+
+    private static async Task<List<string>> ProbeUdpPortsAsync(string ip, int[] ports, int timeoutMs, CancellationToken cancellationToken)
+    {
+        var services = new List<string>();
+        foreach (var port in ports)
+        {
+            if (port < 1 || port > 65535)
+            {
+                continue;
+            }
+
+            using var client = new UdpClient();
+            try
+            {
+                client.Connect(ip, port);
+                await client.SendAsync(Array.Empty<byte>(), 0);
+
+                var receiveTask = client.ReceiveAsync();
+                var timeoutTask = Task.Delay(timeoutMs, cancellationToken);
+                var completed = await Task.WhenAny(receiveTask, timeoutTask);
+                if (completed == receiveTask && receiveTask.IsCompletedSuccessfully)
+                {
+                    var label = KnownServiceNames.TryGetValue(port, out var name) ? name : $"Port {port}";
+                    services.Add($"{label} ({port})");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                continue;
+            }
+        }
+
+        return services;
+    }
+
+    private static async Task<string?> ResolveHostNameAsync(string ip)
+    {
+        try
+        {
+            var entry = await Dns.GetHostEntryAsync(ip);
+            return string.IsNullOrWhiteSpace(entry.HostName) ? null : entry.HostName;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? ResolveMacAddress(string ip)
+    {
+        if (!IPAddress.TryParse(ip, out var address))
+        {
+            return null;
+        }
+
+        var dest = IpToUint(address);
+        var macAddr = new byte[6];
+        var len = (uint)macAddr.Length;
+        var result = SendARP(dest, 0, macAddr, ref len);
+        if (result != 0 || len == 0)
+        {
+            return null;
+        }
+
+        return FormatMacAddress(macAddr);
+    }
+
+    private static string FormatMacAddress(byte[] macBytes)
+    {
+        return string.Join(':', macBytes.Select(b => b.ToString("X2")));
+    }
+
+    private static byte[]? ParseMacAddress(string value)
+    {
+        var cleaned = new string(value.Where(char.IsLetterOrDigit).ToArray());
+        if (cleaned.Length != 12)
+        {
+            return null;
+        }
+
+        var bytes = new byte[6];
+        for (var i = 0; i < 6; i++)
+        {
+            if (!byte.TryParse(cleaned.Substring(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var octet))
+            {
+                return null;
+            }
+
+            bytes[i] = octet;
+        }
+
+        return bytes;
+    }
+
+    private static byte[] BuildMagicPacket(byte[] mac)
+    {
+        var packet = new byte[6 + 16 * mac.Length];
+        for (var i = 0; i < 6; i++)
+        {
+            packet[i] = 0xFF;
+        }
+
+        for (var i = 6; i < packet.Length; i++)
+        {
+            packet[i] = mac[(i - 6) % mac.Length];
+        }
+
+        return packet;
+    }
+
+    private static async Task<bool> SendWakeOnLanPacketsAsync(byte[] macBytes)
+    {
+        if (macBytes.Length == 0)
+        {
+            return false;
+        }
+
+        var packet = BuildMagicPacket(macBytes);
+        var destinations = new HashSet<IPAddress> { IPAddress.Broadcast };
+        foreach (var range in GetLocalSubnets())
+        {
+            destinations.Add(UintToIp(range.Broadcast));
+        }
+
+        var success = false;
+        using var client = new UdpClient();
+        client.EnableBroadcast = true;
+        foreach (var target in destinations)
+        {
+            try
+            {
+                await client.SendAsync(packet, packet.Length, new IPEndPoint(target, 9));
+                success = true;
+            }
+            catch
+            {
+                // ignore individual failures
+            }
+        }
+
+        return success;
+    }
+
+    private static Task SendNetworkScannerResultAsync(ClientWebSocket socket, string requestId, NetworkHostInfo host, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+            {
+                type = "network-scanner-result",
+            requestId,
+            agentId = GetAgentId(),
+            timestamp = DateTime.UtcNow.ToString("o"),
+            devices = new[]
+            {
+                new
+                {
+                    ip = host.Ip,
+                    hostName = host.HostName,
+                    macAddress = host.MacAddress,
+                    services = host.Services
+                }
+            }
+        }, cancellationToken);
+    }
+
+    private static Task SendNetworkScannerCompleteAsync(ClientWebSocket socket, string requestId, int scanned, int found, long durationMs, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+            {
+                type = "network-scanner-complete",
+            requestId,
+            agentId = GetAgentId(),
+            timestamp = DateTime.UtcNow.ToString("o"),
+            scanned,
+            found,
+            durationMs
+        }, cancellationToken);
+    }
+
+    private static Task SendNetworkScannerErrorAsync(ClientWebSocket socket, string requestId, string message, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+            {
+                type = "network-scanner-error",
+            requestId,
+            agentId = GetAgentId(),
+            timestamp = DateTime.UtcNow.ToString("o"),
+            message
+        }, cancellationToken);
+    }
+
+    private static Task SendNetworkScannerWakeResultAsync(ClientWebSocket socket, string requestId, string macAddress, string? targetIp, bool success, string message, CancellationToken cancellationToken)
+    {
+        return SendJsonAsync(socket, new
+            {
+                type = "network-scanner-wake-result",
+            requestId,
+            agentId = GetAgentId(),
+            timestamp = DateTime.UtcNow.ToString("o"),
+            macAddress,
+            targetIp,
+            success,
+            message
+        }, cancellationToken);
+    }
+
+    private sealed record NetworkScannerOptions
+    {
+        public int TimeoutMs { get; init; } = DefaultNetworkScannerTimeoutMs;
+        public int MaxConcurrency { get; init; } = DefaultNetworkScannerConcurrency;
+        public int HostsPerSubnet { get; init; } = DefaultNetworkScannerHostsPerSubnet;
+        public int[] TcpPorts { get; init; } = DefaultNetworkScannerTcpPorts;
+        public int[] UdpPorts { get; init; } = DefaultNetworkScannerUdpPorts;
+    }
+
+    private sealed record NetworkHostInfo(string Ip, string HostName, string MacAddress, string[] Services);
 
     private sealed class SnmpScanOptions
     {

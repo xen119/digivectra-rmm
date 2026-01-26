@@ -1,0 +1,72 @@
+[
+  {
+    "requestId": "46b0be39-5add-4253-a000-c3e3abb8388a",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "complete",
+    "startedAt": "2026-01-23T11:27:33.630Z",
+    "completedAt": "2026-01-23T11:39:13.675Z",
+    "scanned": 253,
+    "found": 2,
+    "durationMs": 699051,
+    "message": null,
+    "devices": [
+      {
+        "ip": "192.168.8.1",
+        "hostName": "",
+        "macAddress": "",
+        "services": [
+          "SSH (22)",
+          "HTTP (80)"
+        ],
+        "discoveredAt": "2026-01-23T11:27:51.854Z"
+      },
+      {
+        "ip": "192.168.8.104",
+        "hostName": "",
+        "macAddress": "",
+        "services": [],
+        "discoveredAt": "2026-01-23T11:33:13.045Z"
+      }
+    ]
+  },
+  {
+    "requestId": "0789c84a-6fd1-4eae-9c7e-4d2e93259386",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "complete",
+    "startedAt": "2026-01-23T11:03:13.681Z",
+    "completedAt": "2026-01-23T11:14:50.736Z",
+    "scanned": 253,
+    "found": 0,
+    "durationMs": 696868,
+    "message": null,
+    "devices": []
+  },
+  {
+    "requestId": "4e92237c-743c-4e62-87b1-8c1a55cf8241",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "complete",
+    "startedAt": "2026-01-23T10:56:54.951Z",
+    "completedAt": "2026-01-23T11:08:34.569Z",
+    "scanned": 253,
+    "found": 0,
+    "durationMs": 699418,
+    "message": null,
+    "devices": []
+  },
+  {
+    "requestId": "a6af45bd-df92-4907-be78-0efafb7c327f",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "complete",
+    "startedAt": "2026-01-23T10:39:29.489Z",
+    "completedAt": "2026-01-23T10:42:56.215Z",
+    "scanned": 253,
+    "found": 0,
+    "durationMs": 205902,
+    "message": null,
+    "devices": []
+  }
+]

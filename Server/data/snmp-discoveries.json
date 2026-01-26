@@ -1,5 +1,141 @@
 [
   {
+    "requestId": "1e8548c7-c1d4-4fc6-9575-f176a4a2525b",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "complete",
+    "startedAt": "2026-01-22T11:07:31.689Z",
+    "completedAt": "2026-01-22T11:08:04.122Z",
+    "scanned": 253,
+    "found": 2,
+    "durationMs": 32203,
+    "message": null,
+    "devices": [
+      {
+        "ip": "172.16.10.5",
+        "sysDescr": "HP ETHERNET MULTI-ENVIRONMENT",
+        "sysName": "HPI49980C",
+        "sysObjectId": "0.0",
+        "discoveredAt": "2026-01-22T11:07:31.955Z"
+      },
+      {
+        "ip": "172.16.10.192",
+        "sysDescr": "GS108Tv2",
+        "sysName": "",
+        "sysObjectId": "1.3.6.1.4.1.4526.100.4.18",
+        "discoveredAt": "2026-01-22T11:07:56.094Z"
+      }
+    ]
+  },
+  {
+    "requestId": "3e74096d-0041-49c3-b6c9-55e6ee426458",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "complete",
+    "startedAt": "2026-01-22T10:59:42.698Z",
+    "completedAt": "2026-01-22T11:00:29.311Z",
+    "scanned": 253,
+    "found": 2,
+    "durationMs": 46309,
+    "message": null,
+    "devices": [
+      {
+        "ip": "172.16.10.5",
+        "sysDescr": "HP ETHERNET MULTI-ENVIRONMENT",
+        "sysName": "HPI49980C",
+        "sysObjectId": "0.0",
+        "discoveredAt": "2026-01-22T10:59:43.054Z"
+      },
+      {
+        "ip": "172.16.10.192",
+        "sysDescr": "GS108Tv2",
+        "sysName": "",
+        "sysObjectId": "1.3.6.1.4.1.4526.100.4.18",
+        "discoveredAt": "2026-01-22T11:00:17.210Z"
+      }
+    ]
+  },
+  {
+    "requestId": "3dd93358-01fa-4a9f-a36e-860cdfad6288",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "error",
+    "startedAt": "2026-01-22T10:53:30.004Z",
+    "completedAt": "2026-01-22T10:53:30.014Z",
+    "scanned": null,
+    "found": null,
+    "durationMs": null,
+    "message": "SNMP scan error: The CancellationTokenSource has been disposed.",
+    "devices": []
+  },
+  {
+    "requestId": "35ee999e-010b-4b89-ba38-bc605065cc5c",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "error",
+    "startedAt": "2026-01-22T10:48:21.952Z",
+    "completedAt": "2026-01-22T10:48:21.955Z",
+    "scanned": null,
+    "found": null,
+    "durationMs": null,
+    "message": "SNMP scan error: The CancellationTokenSource has been disposed.",
+    "devices": []
+  },
+  {
+    "requestId": "6c9c3668-e65b-43e8-a339-4c9822748e70",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "error",
+    "startedAt": "2026-01-22T10:47:54.551Z",
+    "completedAt": "2026-01-22T10:47:54.554Z",
+    "scanned": null,
+    "found": null,
+    "durationMs": null,
+    "message": "SNMP scan error: The CancellationTokenSource has been disposed.",
+    "devices": []
+  },
+  {
+    "requestId": "fa17a623-a3f8-48c8-a39a-de57fb3c4b30",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "error",
+    "startedAt": "2026-01-22T10:47:40.888Z",
+    "completedAt": "2026-01-22T10:47:40.896Z",
+    "scanned": null,
+    "found": null,
+    "durationMs": null,
+    "message": "SNMP scan error: The CancellationTokenSource has been disposed.",
+    "devices": []
+  },
+  {
+    "requestId": "f1dd62fa-38ce-4b94-9904-be0a507c6a57",
+    "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
+    "agentName": "SLT-LPT-CPT013",
+    "status": "complete",
+    "startedAt": "2026-01-22T07:55:18.120Z",
+    "completedAt": "2026-01-22T07:55:46.262Z",
+    "scanned": 253,
+    "found": 2,
+    "durationMs": 27740,
+    "message": null,
+    "devices": [
+      {
+        "ip": "172.16.10.5",
+        "sysDescr": "HP ETHERNET MULTI-ENVIRONMENT",
+        "sysName": "HPI49980C",
+        "sysObjectId": "0.0",
+        "discoveredAt": "2026-01-22T07:55:18.554Z"
+      },
+      {
+        "ip": "172.16.10.192",
+        "sysDescr": "GS108Tv2",
+        "sysName": "",
+        "sysObjectId": "1.3.6.1.4.1.4526.100.4.18",
+        "discoveredAt": "2026-01-22T07:55:38.214Z"
+      }
+    ]
+  },
+  {
     "requestId": "ca572fb3-1979-4dc6-a637-21a43ffb916d",
     "agentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
     "agentName": "SLT-LPT-CPT013",

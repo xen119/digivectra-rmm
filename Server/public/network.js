@@ -8,12 +8,13 @@ const agentInput = document.getElementById('agentInput');
 const scanStatusEl = document.getElementById('scanStatus');
 const scanForm = document.getElementById('scanForm');
 const agentSelect = document.getElementById('scanAgent');
-const liveDevicesList = document.getElementById('liveDevicesList');
+const liveHostsList = document.getElementById('liveHostsList');
 const scanSummaryEl = document.getElementById('scanSummary');
 const clearHistoryButton = document.getElementById('clearHistoryButton');
+const wakeStatusEl = document.getElementById('wakeStatus');
 
-const MAX_LIVE_DEVICES = 120;
-let liveDeviceCount = 0;
+const MAX_LIVE_HOSTS = 120;
+let liveHostCount = 0;
 let activeScanRequestId = null;
 let activeScanAgentId = null;
 let scanEventSource = null;
@@ -23,33 +24,63 @@ function sanitizeNumber(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function resetLiveDevices() {
-  if (!liveDevicesList) {
+function resetLiveHosts() {
+  if (!liveHostsList) {
     return;
   }
-  liveDeviceCount = 0;
-  liveDevicesList.innerHTML = '<li class="empty">No devices discovered yet.</li>';
+  liveHostCount = 0;
+  liveHostsList.innerHTML = '<li class="empty">No hosts discovered yet.</li>';
 }
 
-function appendLiveDevice(device) {
-  if (!liveDevicesList || !device) {
+function appendLiveHost(host) {
+  if (!liveHostsList || !host) {
     return;
   }
 
-  const placeholder = liveDevicesList.querySelector('li.empty');
+  const placeholder = liveHostsList.querySelector('li.empty');
   if (placeholder) {
     placeholder.remove();
   }
 
-  const entry = document.createElement('li');
-  const name = device.sysName || device.sysDescr || device.sysObjectId || 'unknown';
-  entry.textContent = `${device.ip || 'unknown'} — ${name}`;
-  liveDevicesList.appendChild(entry);
-  liveDeviceCount += 1;
+  const entry = createHostListItem(host, activeScanAgentId);
+  liveHostsList.appendChild(entry);
+  liveHostCount += 1;
 
-  while (liveDevicesList.childElementCount > MAX_LIVE_DEVICES) {
-    liveDevicesList.removeChild(liveDevicesList.firstElementChild);
+  while (liveHostsList.childElementCount > MAX_LIVE_HOSTS) {
+    liveHostsList.removeChild(liveHostsList.firstElementChild);
   }
+}
+
+function createHostListItem(host, agentId) {
+  const entry = document.createElement('li');
+
+  const meta = document.createElement('div');
+  meta.className = 'host-meta';
+  const shortName = host.hostName || 'unknown';
+  const macPart = host.macAddress ? ` (${host.macAddress})` : '';
+  const title = document.createElement('span');
+  title.textContent = `${host.ip || 'unknown'}: ${shortName}${macPart}`;
+  meta.appendChild(title);
+  const services = document.createElement('span');
+  services.className = 'host-services';
+  const serviceText = Array.isArray(host.services) && host.services.length
+    ? ` - Services: ${host.services.join(', ')}`
+    : ' - Services: none detected';
+  services.textContent = serviceText;
+  meta.appendChild(services);
+  entry.appendChild(meta);
+
+  const actions = document.createElement('div');
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = 'Wake';
+  button.className = 'wake-button';
+  button.disabled = !host.macAddress || !agentId;
+  button.addEventListener('click', () => sendWakeOnLan(agentId, host.macAddress, host.ip, button));
+  actions.appendChild(button);
+  entry.appendChild(actions);
+
+  return entry;
 }
 
 function updateScanSummary(message) {
@@ -68,48 +99,43 @@ function closeScanStream() {
   activeScanAgentId = null;
 }
 
-function handleSnmpResult(event) {
+function handleNetworkResult(event) {
   if (!event?.data) {
     return;
   }
   try {
     const payload = JSON.parse(event.data);
     const devices = Array.isArray(payload.devices) ? payload.devices : [];
-    if (!devices.length) {
-      return;
+    for (const host of devices) {
+      appendLiveHost(host);
     }
-
-    for (const device of devices) {
-      appendLiveDevice(device);
-    }
-
-    updateScanSummary(`Live discoveries: ${liveDeviceCount} device${liveDeviceCount === 1 ? '' : 's'}`);
+    updateScanSummary(`Live discoveries: ${liveHostCount} host${liveHostCount === 1 ? '' : 's'}`);
   } catch (error) {
-    console.error('Unable to parse SNMP result event', error);
+    console.error('Unable to parse network scanner result event', error);
   }
 }
 
-function handleSnmpComplete(event) {
+function handleNetworkComplete(event) {
   if (!event?.data) {
     return;
   }
   try {
     const payload = JSON.parse(event.data);
     const scanned = Number.isFinite(payload.scanned) ? payload.scanned : null;
-    const found = Number.isFinite(payload.found) ? payload.found : liveDeviceCount;
+    const found = Number.isFinite(payload.found) ? payload.found : liveHostCount;
     const duration = Number.isFinite(payload.durationMs) ? payload.durationMs : null;
     updateScanSummary(`Scan complete: ${found ?? 0} found${scanned !== null ? ` / ${scanned} scanned` : ''}${duration !== null ? ` (${duration} ms)` : ''}`);
     scanStatusEl.textContent = 'Scan completed.';
-    loadSnmpRecords();
+    loadNetworkRecords();
   } catch (error) {
-    console.error('Unable to parse SNMP completion event', error);
+    console.error('Unable to parse network scanner completion event', error);
     scanStatusEl.textContent = 'Scan completed.';
   } finally {
     closeScanStream();
   }
 }
 
-function handleSnmpError(event) {
+function handleNetworkError(event) {
   if (!event?.data) {
     scanStatusEl.textContent = 'Scan failed.';
     closeScanStream();
@@ -119,68 +145,65 @@ function handleSnmpError(event) {
     const payload = JSON.parse(event.data);
     const message = typeof payload.message === 'string' ? payload.message : 'Scan error.';
     scanStatusEl.textContent = `Scan failed: ${message}`;
+    updateScanSummary('Scan not running.');
   } catch (error) {
-    console.error('Unable to parse SNMP error event', error);
+    console.error('Unable to parse network scanner error event', error);
     scanStatusEl.textContent = 'Scan failed.';
   } finally {
     closeScanStream();
   }
 }
 
-async function clearSnmpHistory() {
-  if (!clearHistoryButton || !statusEl) {
+function handleWakeResult(event) {
+  if (!wakeStatusEl || !event?.data) {
     return;
   }
-
-  clearHistoryButton.setAttribute('disabled', 'true');
-  statusEl.textContent = 'Clearing SNMP discovery history...';
-
   try {
-    const response = await authFetch('/snmp/discoveries/clear', { method: 'POST' });
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(text || `HTTP ${response.status}`);
-    }
-
-    statusEl.textContent = 'History cleared.';
-    loadSnmpRecords();
+    const payload = JSON.parse(event.data);
+    const target = payload.macAddress ? `MAC ${payload.macAddress}` : 'Wake-on-LAN';
+    const message = payload.message ?? 'Result received.';
+    const success = payload.success === true;
+    wakeStatusEl.textContent = `${target}: ${message}`;
+    wakeStatusEl.classList.toggle('success', success);
+    wakeStatusEl.classList.toggle('error', !success);
   } catch (error) {
-    console.error('Unable to clear SNMP history', error);
-    statusEl.textContent = `Unable to clear history: ${error.message}`;
-  } finally {
-    clearHistoryButton.removeAttribute('disabled');
+    console.error('Unable to parse Wake-on-LAN event', error);
+    wakeStatusEl.textContent = 'Wake-on-LAN result received.';
+    wakeStatusEl.classList.remove('success', 'error');
   }
 }
 
-function startSnmpStream(agentId, requestId) {
+function startNetworkStream(agentId, requestId) {
   if (!agentId || !requestId || typeof EventSource === 'undefined') {
     updateScanSummary('Live updates not available in this browser.');
     return;
   }
 
   closeScanStream();
-  if (liveDevicesList) {
-    resetLiveDevices();
-  }
-  updateScanSummary('Listening for live discoveries...');
+  resetLiveHosts();
+  updateScanSummary('Listening for live hosts...');
 
-  const url = `/clients/${encodeURIComponent(agentId)}/snmp/${encodeURIComponent(requestId)}/events`;
+  const url = `/clients/${encodeURIComponent(agentId)}/network-scanner/${encodeURIComponent(requestId)}/events`;
   const source = new EventSource(url, { withCredentials: true });
   scanEventSource = source;
-  scanEventSource.addEventListener('snmp-result', handleSnmpResult);
-  scanEventSource.addEventListener('snmp-complete', handleSnmpComplete);
-  scanEventSource.addEventListener('snmp-error', handleSnmpError);
+  scanEventSource.addEventListener('network-scanner-result', handleNetworkResult);
+  scanEventSource.addEventListener('network-scanner-complete', handleNetworkComplete);
+  scanEventSource.addEventListener('network-scanner-error', handleNetworkError);
+  scanEventSource.addEventListener('network-scanner-wake-result', handleWakeResult);
   scanEventSource.addEventListener('error', () => {
     updateScanSummary('Waiting for scan updates...');
   });
+
+  activeScanAgentId = agentId;
+  activeScanRequestId = requestId;
 }
 
-async function loadSnmpRecords() {
+ async function loadNetworkRecords() {
   if (!recordsBody || !statusEl) {
     return;
   }
 
-  statusEl.textContent = 'Loading SNMP discovery history...';
+  statusEl.textContent = 'Loading network scanner history...';
   recordsBody.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
 
   try {
@@ -191,7 +214,7 @@ async function loadSnmpRecords() {
       params.set('agent', agentFilter);
     }
 
-    const response = await authFetch(`/snmp/discoveries?${params.toString()}`);
+    const response = await authFetch(`/network-scanner/discoveries?${params.toString()}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -201,9 +224,9 @@ async function loadSnmpRecords() {
     renderRecords(records);
     statusEl.textContent = `Showing ${records.length} record${records.length === 1 ? '' : 's'}`;
   } catch (error) {
-    console.error('Failed to load SNMP discovery history', error);
+    console.error('Failed to load network scanner history', error);
     recordsBody.innerHTML = '<tr><td colspan="7">Unable to load records.</td></tr>';
-    statusEl.textContent = 'Unable to load SNMP discovery history.';
+    statusEl.textContent = 'Unable to load network scanner history.';
   }
 }
 
@@ -243,11 +266,11 @@ function renderRecords(records) {
     }
     row.appendChild(statusCell);
 
-    const devicesCell = document.createElement('td');
+    const hostsCell = document.createElement('td');
     const details = document.createElement('details');
     const summary = document.createElement('summary');
     const deviceCount = Array.isArray(record.devices) ? record.devices.length : 0;
-    summary.textContent = `${deviceCount} device${deviceCount === 1 ? '' : 's'}`;
+    summary.textContent = `${deviceCount} host${deviceCount === 1 ? '' : 's'}`;
     details.appendChild(summary);
     details.className = 'record-details';
 
@@ -255,21 +278,19 @@ function renderRecords(records) {
       const list = document.createElement('ul');
       list.className = 'device-list';
       for (const device of record.devices) {
-        const item = document.createElement('li');
-        const name = device.sysName || device.sysDescr || device.sysObjectId || 'unknown';
-        item.textContent = `${device.ip || 'unknown'} – ${name}`;
+        const item = createHostListItem(device, record.agentId);
         list.appendChild(item);
       }
       details.appendChild(list);
     } else {
       const empty = document.createElement('div');
-      empty.textContent = 'No devices discovered';
+      empty.textContent = 'No hosts discovered';
       empty.style.fontSize = '0.75rem';
       empty.style.color = '#6b7280';
       details.appendChild(empty);
     }
-    devicesCell.appendChild(details);
-    row.appendChild(devicesCell);
+    hostsCell.appendChild(details);
+    row.appendChild(hostsCell);
 
     const scannedCell = document.createElement('td');
     scannedCell.textContent = typeof record.scanned === 'number' ? record.scanned.toString() : '—';
@@ -308,16 +329,13 @@ async function loadAgentOptions() {
         const option = document.createElement('option');
         option.value = agent.id ?? '';
         option.textContent = `${agent.name ?? agent.id ?? 'unnamed'} (${agent.remoteAddress ?? 'unknown'})`;
-        if (agent.snmpDiscoveryEnabled === false) {
-          option.textContent += ' (SNMP disabled)';
-        }
         agentSelect.appendChild(option);
       }
     } else {
       agentSelect.innerHTML = '<option value="">No agents available</option>';
     }
   } catch (error) {
-    console.error('Unable to load agents for SNMP scan', error);
+    console.error('Unable to load agents for network scanner', error);
     agentSelect.innerHTML = '<option value="">Failed to load agents</option>';
   } finally {
     agentSelect.disabled = false;
@@ -338,13 +356,13 @@ async function handleScanSubmit(event) {
 
   const submitButton = scanForm.querySelector('button');
   submitButton?.setAttribute('disabled', 'true');
-  scanStatusEl.textContent = 'Starting SNMP scan…';
+  scanStatusEl.textContent = 'Starting network scanner scan.';
   updateScanSummary('Awaiting live results…');
-  resetLiveDevices();
+  resetLiveHosts();
   closeScanStream();
 
   try {
-    const response = await authFetch(`/clients/${encodeURIComponent(agentId)}/snmp/scan`, {
+  const response = await authFetch(`/clients/${encodeURIComponent(agentId)}/network-scanner/scan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -360,13 +378,11 @@ async function handleScanSubmit(event) {
     activeScanAgentId = agentId;
     scanStatusEl.textContent = `Scan started (request: ${activeScanRequestId ?? 'unknown'}).`;
     if (activeScanRequestId) {
-      startSnmpStream(agentId, activeScanRequestId);
-    } else {
-      updateScanSummary('Awaiting live results…');
+      startNetworkStream(agentId, activeScanRequestId);
     }
-    loadSnmpRecords();
+    loadNetworkRecords();
   } catch (error) {
-    console.error('Unable to start SNMP scan', error);
+    console.error('Unable to start network scanner scan', error);
     scanStatusEl.textContent = `Scan failed: ${error.message}`;
     updateScanSummary('Scan not running.');
   } finally {
@@ -374,16 +390,87 @@ async function handleScanSubmit(event) {
   }
 }
 
+async function sendWakeOnLan(agentId, macAddress, targetIp, button) {
+  if (!agentId || !macAddress || !button) {
+    return;
+  }
+
+  button.disabled = true;
+  if (wakeStatusEl) {
+    wakeStatusEl.textContent = `Sending Wake-on-LAN to ${macAddress}…`;
+    wakeStatusEl.classList.remove('success', 'error');
+  }
+
+  try {
+    const payload = { macAddress };
+    if (targetIp) {
+      payload.targetIp = targetIp;
+    }
+
+    const response = await authFetch(`/clients/${encodeURIComponent(agentId)}/network-scanner/wake`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(text || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (wakeStatusEl) {
+      wakeStatusEl.textContent = `Wake-on-LAN queued (request: ${data.requestId ?? 'unknown'}).`;
+      wakeStatusEl.classList.add('success');
+      wakeStatusEl.classList.remove('error');
+    }
+  } catch (error) {
+    console.error('Unable to send Wake-on-LAN', error);
+    if (wakeStatusEl) {
+      wakeStatusEl.textContent = `Wake failed: ${error.message}`;
+      wakeStatusEl.classList.add('error');
+      wakeStatusEl.classList.remove('success');
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function clearNetworkHistory() {
+  if (!clearHistoryButton || !statusEl) {
+    return;
+  }
+
+  clearHistoryButton.setAttribute('disabled', 'true');
+  statusEl.textContent = 'Clearing network scanner history...';
+
+  try {
+    const response = await authFetch('/network-scanner/discoveries/clear', { method: 'POST' });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(text || `HTTP ${response.status}`);
+    }
+
+    statusEl.textContent = 'History cleared.';
+    loadNetworkRecords();
+  } catch (error) {
+    console.error('Unable to clear network scanner history', error);
+    statusEl.textContent = `Unable to clear history: ${error.message}`;
+  } finally {
+    clearHistoryButton.removeAttribute('disabled');
+  }
+}
+
 refreshButton?.addEventListener('click', () => {
-  loadSnmpRecords();
+  loadNetworkRecords();
   loadAgentOptions();
 });
 
-clearHistoryButton?.addEventListener('click', clearSnmpHistory);
+clearHistoryButton?.addEventListener('click', clearNetworkHistory);
 
 scanForm?.addEventListener('submit', handleScanSubmit);
 window.addEventListener('beforeunload', closeScanStream);
 
-setInterval(loadSnmpRecords, 60_000);
-loadSnmpRecords();
+setInterval(loadNetworkRecords, 60_000);
+loadNetworkRecords();
 loadAgentOptions();

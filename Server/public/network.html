@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>SNMP Discovery</title>
+    <title>Network Scanner</title>
     <link rel="stylesheet" href="compact.css" />
     <style>
       body {
@@ -66,8 +66,22 @@
       }
 
       .device-list li {
-        padding: 0.25rem 0;
+        padding: 0.35rem 0;
         border-bottom: 1px solid #1f2937;
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+        font-size: 0.85rem;
+        align-items: center;
+      }
+      .device-list .host-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+      }
+      .device-list .host-services {
+        font-size: 0.75rem;
+        color: #94a3b8;
       }
 
       .pill {
@@ -108,6 +122,7 @@
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: 0.75rem;
+        align-items: end;
       }
 
       .scan-form label {
@@ -127,13 +142,6 @@
         font-size: 0.9rem;
       }
 
-      .snmp-v3-fields {
-        grid-column: 1 / -1;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 0.75rem;
-      }
-
       .scan-form button {
         grid-column: 1 / -1;
         padding: 0.5rem 1rem;
@@ -144,6 +152,7 @@
         font-size: 0.95rem;
         cursor: pointer;
       }
+
       .scan-live {
         margin-top: 1rem;
         border: 1px solid #1f2937;
@@ -151,6 +160,7 @@
         padding: 0.75rem 1rem;
         background: #101623;
       }
+
       .scan-live-header {
         display: flex;
         justify-content: space-between;
@@ -158,14 +168,17 @@
         gap: 1rem;
         margin-bottom: 0.5rem;
       }
+
       .scan-live-header h3 {
         margin: 0;
         font-size: 1rem;
       }
+
       .scan-live-header span {
         font-size: 0.85rem;
         color: #9aa5b0;
       }
+
       .scan-live ul {
         list-style: none;
         padding-left: 0;
@@ -173,21 +186,55 @@
         max-height: 180px;
         overflow-y: auto;
       }
+
       .scan-live li {
         padding: 0.4rem 0;
         border-bottom: 1px solid #1f2937;
         font-size: 0.9rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
       }
+
       .scan-live li.empty {
         color: #6b7280;
+      }
+
+      .wake-status {
+        margin-top: 0.75rem;
+        font-size: 0.85rem;
+        color: #9aa5b0;
+      }
+
+      .wake-status.success {
+        color: #34d399;
+      }
+
+      .wake-status.error {
+        color: #f87171;
+      }
+
+      .wake-button {
+        border: 1px solid #1f2937;
+        background: transparent;
+        color: #cdd9e5;
+        border-radius: 0.4rem;
+        padding: 0.2rem 0.6rem;
+        font-size: 0.8rem;
+        cursor: pointer;
+      }
+
+      .wake-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
     </style>
   </head>
   <body>
     <main>
       <header>
-        <h1>SNMP Discovery History</h1>
-        <p class="status" id="status">Loading...</p>
+      <h1>Network Scanner</h1>
+        <p class="status" id="status">Loading history...</p>
       </header>
       <div class="controls">
         <button id="refreshButton" type="button">Refresh</button>
@@ -203,10 +250,7 @@
       </div>
       <section class="scan-form">
         <h2>Start a new scan</h2>
-        <p class="status" id="scanStatus">
-          Select an agent to scan. SNMP credentials and the default protocol come from the
-          <a href="settings.html" target="_blank" rel="noopener">settings page</a>.
-        </p>
+        <p class="status" id="scanStatus">Select an agent to begin.</p>
         <form id="scanForm">
           <label>
             Agent
@@ -221,9 +265,10 @@
             <h3>Live discoveries</h3>
             <span id="scanSummary">Awaiting scan.</span>
           </div>
-          <ul id="liveDevicesList">
-            <li class="empty">No devices discovered yet.</li>
+          <ul id="liveHostsList">
+            <li class="empty">No hosts discovered yet.</li>
           </ul>
+          <div id="wakeStatus" class="wake-status">Wake-on-LAN status will appear here.</div>
         </div>
       </section>
       <div class="table-wrapper">
@@ -245,6 +290,6 @@
         </table>
       </div>
     </main>
-    <script src="snmp.js"></script>
+    <script src="network.js"></script>
   </body>
 </html>

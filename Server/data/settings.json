@@ -6,8 +6,8 @@
     "apiKey": null
   },
   "techDirect": {
-    "apiKey": "l7810c965d2cb6455b8331ac06575d8477",
-    "apiSecret": "2683708f484846209fa10fb3d2146f6d"
+    "apiKey": null,
+    "apiSecret": null
   },
   "snmp": {
     "v1": {

@@ -43,6 +43,8 @@ const GENERAL_SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 const SNMP_SETTINGS_PATH = path.join(DATA_DIR, 'snmp-settings.json');
 const SNMP_DISCOVERY_LOG_PATH = path.join(DATA_DIR, 'snmp-discoveries.json');
 const SNMP_DISCOVERY_LOG_LIMIT = 200;
+const NETWORK_SCANNER_LOG_PATH = path.join(DATA_DIR, 'network-scans.json');
+const NETWORK_SCANNER_LOG_LIMIT = 200;
 const VULNERABILITY_CONFIG_PATH = path.join(__dirname, 'config', 'vulnerability.json');
 const VULNERABILITY_STORE_PATH = path.join(DATA_DIR, 'vulnerabilities.json');
 const vulnerabilityIngestionJobs = new Map(); // sourceId -> { timer }
@@ -125,6 +127,9 @@ const agentChatLastTimestamp = new Map();
 const snmpScanStreams = new Map(); // requestId -> { agentId, clients: Set<ServerResponse> }
 const pendingSnmpScans = new Map(); // requestId -> { agentId, agentName, requestId, startedAt, devices: [] }
 const snmpDiscoveryHistory = loadSnmpDiscoveryHistory();
+const networkScannerStreams = new Map(); // requestId -> { agentId, clients: Set<ServerResponse> }
+const pendingNetworkScannerScans = new Map(); // requestId -> { agentId, agentName, requestId, startedAt, devices: [] }
+const networkScannerHistory = loadNetworkScannerHistory();
 
 function dispatchSnmpEvent(agentId, requestId, eventName, payload) {
   captureSnmpEvent(agentId, requestId, eventName, payload);
@@ -142,6 +147,44 @@ function dispatchSnmpEvent(agentId, requestId, eventName, payload) {
 
   if (eventName === 'snmp-complete' || eventName === 'snmp-error') {
     snmpScanStreams.delete(requestId);
+  }
+}
+
+function dispatchNetworkEvent(agentId, requestId, eventName, payload) {
+  captureNetworkScannerEvent(agentId, requestId, eventName, payload);
+
+  const entry = networkScannerStreams.get(requestId);
+  if (!entry || entry.agentId !== agentId) {
+    return;
+  }
+
+  const data = JSON.stringify(payload);
+  for (const client of entry.clients) {
+    client.write(`event: ${eventName}\n`);
+    client.write(`data: ${data}\n\n`);
+  }
+
+  if (eventName === 'network-scanner-complete' || eventName === 'network-scanner-error') {
+    networkScannerStreams.delete(requestId);
+  }
+}
+
+function dispatchNetworkEvent(agentId, requestId, eventName, payload) {
+  captureNetworkScannerEvent(agentId, requestId, eventName, payload);
+
+  const entry = networkScannerStreams.get(requestId);
+  if (!entry || entry.agentId !== agentId) {
+    return;
+  }
+
+  const data = JSON.stringify(payload);
+  for (const client of entry.clients) {
+    client.write(`event: ${eventName}\n`);
+    client.write(`data: ${data}\n\n`);
+  }
+
+  if (eventName === 'network-scanner-complete' || eventName === 'network-scanner-error') {
+    networkScannerStreams.delete(requestId);
   }
 }
 
@@ -189,6 +232,12 @@ const NAVIGATION_ITEMS = [
     label: 'SNMP Discovery',
     href: 'snmp.html',
     description: 'View recorded SNMP discovery results per agent.',
+  },
+  {
+    id: 'network-scanner',
+    label: 'Network Scanner',
+    href: 'network.html',
+    description: 'Scan the local subnets, resolve MAC addresses, and trigger Wake-on-LAN.',
   },
   {
     id: 'scripts',
@@ -849,13 +898,79 @@ server.on('request', async (req, res) => {
       ? Math.min(limitParam, SNMP_DISCOVERY_LOG_LIMIT)
       : 50;
 
-  const records = agentFilter
-    ? snmpDiscoveryHistory.filter((record) => record.agentId === agentFilter)
-    : snmpDiscoveryHistory;
+    const records = agentFilter
+      ? snmpDiscoveryHistory.filter((record) => record.agentId === agentFilter)
+      : snmpDiscoveryHistory;
 
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  return res.end(JSON.stringify({ records: records.slice(0, limit) }));
-}
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ records: records.slice(0, limit) }));
+  }
+
+  if (pathname === '/snmp/discoveries/clear' && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    if (!clearSnmpDiscoveryHistory()) {
+      res.writeHead(500);
+      return res.end('Unable to clear SNMP discovery history');
+    }
+
+    res.writeHead(204);
+    return res.end();
+  }
+
+  if (pathname === '/network-scanner/discoveries' && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const limitParam = Number(requestedUrl.searchParams.get('limit'));
+    const agentFilter = requestedUrl.searchParams.get('agent')?.trim();
+    const limit = Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(limitParam, NETWORK_SCANNER_LOG_LIMIT)
+      : 50;
+
+    const records = agentFilter
+      ? networkScannerHistory.filter((record) => record.agentId === agentFilter)
+      : networkScannerHistory;
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ records: records.slice(0, limit) }));
+  }
+
+  if (pathname === '/network-scanner/discoveries/clear' && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    if (!clearNetworkScannerHistory()) {
+      res.writeHead(500);
+      return res.end('Unable to clear network scanner history');
+    }
+
+    res.writeHead(204);
+    return res.end();
+  }
+
+  if (pathname === '/network-scanner/discoveries' && req.method === 'GET') {
+    if (!ensureRole(req, res, 'viewer')) {
+      return;
+    }
+
+    const limitParam = Number(requestedUrl.searchParams.get('limit'));
+    const agentFilter = requestedUrl.searchParams.get('agent')?.trim();
+    const limit = Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(limitParam, NETWORK_SCANNER_LOG_LIMIT)
+      : 50;
+
+    const records = agentFilter
+      ? networkScannerHistory.filter((record) => record.agentId === agentFilter)
+      : networkScannerHistory;
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ records: records.slice(0, limit) }));
+  }
 
   if (pathname === '/snmp/defaults' && req.method === 'GET') {
     if (!ensureRole(req, res, 'viewer')) {
@@ -1995,6 +2110,46 @@ server.on('request', async (req, res) => {
     return;
   }
 
+  const networkScannerEventsMatch = pathname.match(/^\/clients\/([^/]+)\/network-scanner\/([^/]+)\/events$/);
+  if (networkScannerEventsMatch && req.method === 'GET') {
+    const agentId = networkScannerEventsMatch[1];
+    const requestId = networkScannerEventsMatch[2];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    let stream = networkScannerStreams.get(requestId);
+    if (stream && stream.agentId !== agentId) {
+      res.writeHead(409);
+      res.end('Request ID already bound to a different agent');
+      return;
+    }
+
+    if (!stream) {
+      stream = { agentId, clients: new Set() };
+      networkScannerStreams.set(requestId, stream);
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write('\n');
+
+    stream.clients.add(res);
+      res.on('close', () => {
+        stream.clients.delete(res);
+        if (stream.clients.size === 0) {
+          networkScannerStreams.delete(requestId);
+        }
+      });
+
+    return;
+  }
+
   const screenRequestMatch = pathname === '/screen/request' && req.method === 'POST';
   if (screenRequestMatch) {
     collectBody(req, (body) => {
@@ -2431,6 +2586,108 @@ server.on('request', async (req, res) => {
       } catch (error) {
         res.writeHead(400);
         res.end('Invalid SNMP scan payload');
+      }
+    });
+
+    return;
+  }
+
+  const networkScannerScanMatch = pathname.match(/^\/clients\/([^/]+)\/network-scanner\/scan$/);
+  if (networkScannerScanMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = networkScannerScanMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const requestId = typeof payload.requestId === 'string' && payload.requestId.trim()
+          ? payload.requestId.trim()
+          : uuidv4();
+
+        const servicePorts = Array.isArray(payload?.servicePorts)
+          ? payload.servicePorts
+            .filter((value) => Number.isInteger(value) && value >= 1 && value <= 65535)
+          : undefined;
+        const tcpPorts = Array.isArray(payload?.tcpPorts)
+          ? payload.tcpPorts
+            .filter((value) => Number.isInteger(value) && value >= 1 && value <= 65535)
+          : servicePorts;
+        const udpPorts = Array.isArray(payload?.udpPorts)
+          ? payload.udpPorts
+            .filter((value) => Number.isInteger(value) && value >= 1 && value <= 65535)
+          : undefined;
+
+        const message = {
+          requestId,
+          timeoutMs: typeof payload.timeoutMs === 'number' ? payload.timeoutMs : undefined,
+          maxConcurrency: typeof payload.maxConcurrency === 'number' ? payload.maxConcurrency : undefined,
+          hostsPerSubnet: typeof payload.hostsPerSubnet === 'number' ? payload.hostsPerSubnet : undefined,
+          tcpPorts,
+          udpPorts,
+        };
+
+        beginNetworkScannerRecord(agentId, entry.info.name ?? 'unknown', requestId);
+
+        sendControl(entry.socket, 'start-network-scanner', message);
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ requestId }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid network scanner payload');
+      }
+    });
+
+    return;
+  }
+
+  const networkScannerWakeMatch = pathname.match(/^\/clients\/([^/]+)\/network-scanner\/wake$/);
+  if (networkScannerWakeMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = networkScannerWakeMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const macAddress = typeof payload.macAddress === 'string' && payload.macAddress.trim()
+          ? payload.macAddress.trim()
+          : '';
+        if (!macAddress) {
+          res.writeHead(400);
+          return res.end('MAC address is required');
+        }
+
+        const targetIp = typeof payload.targetIp === 'string' && payload.targetIp.trim()
+          ? payload.targetIp.trim()
+          : undefined;
+
+        const requestId = uuidv4();
+        sendControl(entry.socket, 'wake-on-lan', {
+          requestId,
+          macAddress,
+          targetIp,
+        });
+
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ requestId }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid Wake-on-LAN payload');
       }
     });
 
@@ -4677,6 +4934,14 @@ wss.on('connection', (socket, request) => {
             ? 'snmp-complete'
             : 'snmp-error';
         dispatchSnmpEvent(agentId, parsed.requestId, eventType, parsed);
+      } else if ((parsed?.type === 'network-scanner-result' || parsed?.type === 'network-scanner-complete' || parsed?.type === 'network-scanner-error') && typeof parsed.requestId === 'string') {
+        const agentId = typeof parsed.agentId === 'string' ? parsed.agentId : info.id;
+        const eventType = parsed.type;
+        dispatchNetworkEvent(agentId, parsed.requestId, eventType, parsed);
+      } else if (parsed?.type === 'network-scanner-wake-result') {
+        const agentId = typeof parsed.agentId === 'string' ? parsed.agentId : info.id;
+        const requestId = typeof parsed.requestId === 'string' ? parsed.requestId : uuidv4();
+        dispatchNetworkEvent(agentId, requestId, 'network-scanner-wake-result', parsed);
       } else if (parsed?.type === 'remediation-result') {
         sendMonitoringEvent('remediation-result', {
           type: 'remediation-result',
@@ -6640,6 +6905,103 @@ function beginSnmpDiscoveryRecord(agentId, agentName, requestId) {
   });
 }
 
+function captureNetworkScannerEvent(agentId, requestId, eventName, payload) {
+  if (!requestId || !eventName) {
+    return;
+  }
+
+  if (eventName === 'network-scanner-result' && Array.isArray(payload?.devices)) {
+    for (const device of payload.devices) {
+      appendNetworkHostToRecord(requestId, device);
+    }
+    return;
+  }
+
+  if (eventName === 'network-scanner-complete') {
+    finalizeNetworkScannerRecord(requestId, {
+      status: 'complete',
+      scanned: Number.isFinite(payload?.scanned) ? payload.scanned : null,
+      found: Number.isFinite(payload?.found) ? payload.found : null,
+      durationMs: Number.isFinite(payload?.durationMs) ? payload.durationMs : null,
+    });
+    return;
+  }
+
+  if (eventName === 'network-scanner-error') {
+    finalizeNetworkScannerRecord(requestId, {
+      status: 'error',
+      scanned: Number.isFinite(payload?.scanned) ? payload.scanned : null,
+      found: Number.isFinite(payload?.found) ? payload.found : null,
+      durationMs: Number.isFinite(payload?.durationMs) ? payload.durationMs : null,
+      message: typeof payload?.message === 'string' ? payload.message : null,
+    });
+    return;
+  }
+}
+
+function appendNetworkHostToRecord(requestId, device) {
+  const pending = pendingNetworkScannerScans.get(requestId);
+  if (!pending) {
+    return;
+  }
+
+  if (!device || typeof device !== 'object') {
+    return;
+  }
+
+  pending.devices.push({
+    ip: typeof device.ip === 'string' ? device.ip : '',
+    hostName: typeof device.hostName === 'string' ? device.hostName : '',
+    macAddress: typeof device.macAddress === 'string' ? device.macAddress : '',
+    services: Array.isArray(device.services) ? device.services.filter((entry) => typeof entry === 'string') : [],
+    discoveredAt: new Date().toISOString(),
+  });
+}
+
+function finalizeNetworkScannerRecord(requestId, summary) {
+  const pending = pendingNetworkScannerScans.get(requestId);
+  if (!pending) {
+    return;
+  }
+
+  pendingNetworkScannerScans.delete(requestId);
+
+  const record = {
+    requestId,
+    agentId: pending.agentId,
+    agentName: pending.agentName,
+    status: summary.status ?? 'unknown',
+    startedAt: pending.startedAt,
+    completedAt: new Date().toISOString(),
+    scanned: typeof summary.scanned === 'number' ? summary.scanned : null,
+    found: typeof summary.found === 'number' ? summary.found : null,
+    durationMs: typeof summary.durationMs === 'number' ? summary.durationMs : null,
+    message: typeof summary.message === 'string' ? summary.message : null,
+    devices: pending.devices,
+  };
+
+  networkScannerHistory.unshift(record);
+  if (networkScannerHistory.length > NETWORK_SCANNER_LOG_LIMIT) {
+    networkScannerHistory.length = NETWORK_SCANNER_LOG_LIMIT;
+  }
+
+  persistNetworkScannerHistory();
+}
+
+function beginNetworkScannerRecord(agentId, agentName, requestId) {
+  if (!agentId || !requestId) {
+    return;
+  }
+
+  pendingNetworkScannerScans.set(requestId, {
+    agentId,
+    agentName: agentName ?? 'unknown',
+    requestId,
+    startedAt: new Date().toISOString(),
+    devices: [],
+  });
+}
+
 function loadSnmpDiscoveryHistory() {
   ensureDataDirectory();
   let stored = [];
@@ -6667,6 +7029,45 @@ function persistSnmpDiscoveryHistory() {
     console.error('Failed to persist SNMP discovery history', error);
     return false;
   }
+}
+
+function clearSnmpDiscoveryHistory() {
+  snmpDiscoveryHistory.length = 0;
+  return persistSnmpDiscoveryHistory();
+}
+
+function loadNetworkScannerHistory() {
+  ensureDataDirectory();
+  let stored = [];
+  try {
+    if (fs.existsSync(NETWORK_SCANNER_LOG_PATH)) {
+      let raw = fs.readFileSync(NETWORK_SCANNER_LOG_PATH, 'utf-8');
+      if (raw.charCodeAt(0) === 0xfeff) {
+        raw = raw.slice(1);
+      }
+      stored = JSON.parse(raw);
+    }
+  } catch (error) {
+    console.error('Failed to load network scanner history', error);
+  }
+
+  return Array.isArray(stored) ? stored.slice(0, NETWORK_SCANNER_LOG_LIMIT) : [];
+}
+
+function persistNetworkScannerHistory() {
+  try {
+    ensureDataDirectory();
+    fs.writeFileSync(NETWORK_SCANNER_LOG_PATH, JSON.stringify(networkScannerHistory, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to persist network scanner history', error);
+    return false;
+  }
+}
+
+function clearNetworkScannerHistory() {
+  networkScannerHistory.length = 0;
+  return persistNetworkScannerHistory();
 }
 
 function ensureRemediationDirectory() {

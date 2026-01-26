@@ -3,18 +3,40 @@
     "username": "admin",
     "passwordHash": "$2b$10$DRCRY43tZ91K3AI4rWs1su2cpWkgvNpcfcvjirjAfOW7O3RY6fUae",
     "role": "admin",
-    "totpSecret": "FF6TA63XLBDFQE2C"
+    "totpSecret": "FF6TA63XLBDFQE2C",
+    "tenantId": "global",
+    "createdAt": 1672531200000
   },
   {
     "username": "operator",
     "passwordHash": "$2b$10$TcVTPNDN5a8U/fhwO8r4JOicf/SeShFJ7L1KP.IXVSXTIXkqgYhC.",
     "role": "operator",
-    "totpSecret": "OFWF6AA5EYSU65Q4"
+    "totpSecret": "OFWF6AA5EYSU65Q4",
+    "tenantId": "default",
+    "createdAt": 1672531205000
   },
   {
     "username": "viewer",
     "passwordHash": "$2b$10$59D3SkL3GII24ztHK.iNHuEITzV9.WHzgGCPQMyzAXGXb1BrjAoLy",
     "role": "viewer",
-    "totpSecret": "CRUVMZJLNBCE6YCX"
+    "totpSecret": "CRUVMZJLNBCE6YCX",
+    "tenantId": "default",
+    "createdAt": 1672531210000
+  },
+  {
+    "username": "salt-admin",
+    "passwordHash": "$2b$10$Byzc4vbAxk4ikN82srhBnOeWw1zb6OAHZiF/eD4EMEJHHmXBBHYXq",
+    "role": "admin",
+    "totpSecret": "DZAECZ23DUQEEY2U",
+    "tenantId": "salt",
+    "createdAt": 1769458958108
+  },
+  {
+    "username": "default-admin",
+    "passwordHash": "$2b$10$zAFjGLbekYRM8xGcS4wtJuD3sPAtcEK.57nMTF3zBrVB1oSPmEYlO",
+    "role": "admin",
+    "totpSecret": "BZ3ECAYWNRDAENBX",
+    "tenantId": "default",
+    "createdAt": 1769459282001
   }
 ]

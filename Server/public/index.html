@@ -102,6 +102,12 @@
         color: #5c6b7c;
       }
 
+      .tenant-badge {
+        margin-top: 0.35rem;
+        font-size: 0.85rem;
+        color: #38bdf8;
+      }
+
       .groups {
         display: flex;
         flex-direction: column;
@@ -415,6 +421,7 @@
           <a data-nav-id="scripts" href="scripts.html" target="_blank" rel="noopener" class="sidebar-link">Scripts</a>
           <a data-nav-id="scheduler" href="scheduler.html" target="_blank" rel="noopener" class="sidebar-link">Scheduler</a>
           <a data-nav-id="ai-agent" href="ai-agent.html" target="_blank" rel="noopener" class="sidebar-link">AI Agent</a>
+          <a data-nav-id="tenants" href="tenants.html" target="_blank" rel="noopener" class="sidebar-link">Tenants</a>
           <a data-nav-id="users" href="users.html" target="_blank" rel="noopener" class="sidebar-link">Users</a>
           <a data-nav-id="compliance" href="compliance.html" target="_blank" rel="noopener" class="sidebar-link">Compliance</a>
           <a data-nav-id="compliance-admin" href="compliance-admin.html" target="_blank" rel="noopener" class="sidebar-link">Compliance Admin</a>
@@ -429,6 +436,7 @@
           <div>
             <h1>Connected Agents</h1>
             <p id="downloadHint" style="margin: 0; color: #8b949e; font-size: 0.9rem;">Download the agent pre-configured for this domain.</p>
+            <p id="tenantBadge" class="tenant-badge"></p>
           </div>
           <a id="downloadAgentLink" href="/agent/download" class="download-button" download>Download agent</a>
         </div>

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Tenant Management</title>
+    <link rel="stylesheet" href="compact.css" />
+    <style>
+      :root {
+        background: #0d1117;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #0d1117;
+        color: #cdd9e5;
+        font-family: system-ui, sans-serif;
+      }
+
+      main.content {
+        padding: 2rem;
+      }
+
+      .card {
+        background: #0f141a;
+        border: 1px solid #1e293b;
+        border-radius: 1rem;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .card h1,
+      .card h2 {
+        margin-top: 0;
+      }
+
+      .status-message {
+        color: #f8bd0a;
+        margin-bottom: 1rem;
+        min-height: 1rem;
+      }
+
+      .tenants-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .tenants-table th,
+      .tenants-table td {
+        border: 1px solid #1f2937;
+        padding: 0.65rem;
+      }
+
+      .tenants-table th {
+        background: #111827;
+        text-align: left;
+      }
+
+      .tenant-actions {
+        display: flex;
+        gap: 0.5rem;
+        justify-content: flex-end;
+      }
+
+      .nav-button {
+        border-radius: 0.35rem;
+        border: 1px solid #1e40af;
+        padding: 0.4rem 0.85rem;
+        background: transparent;
+        color: #cdd9e5;
+        cursor: pointer;
+      }
+
+      .nav-button.primary {
+        background: linear-gradient(90deg, #2563eb, #7c3aed);
+        border-color: transparent;
+        color: #fff;
+      }
+
+      .input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      .input-group input,
+      .input-group textarea {
+        background: #0c1117;
+        border: 1px solid #30363d;
+        border-radius: 0.4rem;
+        padding: 0.5rem;
+        color: #fff;
+      }
+
+      .input-group textarea {
+        resize: vertical;
+      }
+
+      .row {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="content">
+      <section class="card">
+        <header class="settings-header">
+          <h1>Tenant Management</h1>
+          <p>Manage tenant metadata, domains, and descriptions.</p>
+        </header>
+        <div id="tenantStatus" class="status-message"></div>
+        <div id="tenantListWrapper">
+          <p>Loading tenants...</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Add a tenant</h2>
+        <form id="tenantForm">
+          <div class="row">
+            <div class="input-group" style="flex:1">
+              <label for="tenantIdInput">ID</label>
+              <input id="tenantIdInput" type="text" autocomplete="off" placeholder="tenant1" required />
+            </div>
+            <div class="input-group" style="flex:2">
+              <label for="tenantNameInput">Name</label>
+              <input id="tenantNameInput" type="text" autocomplete="off" placeholder="Tenant One" />
+            </div>
+          </div>
+          <div class="input-group">
+            <label for="tenantDescriptionInput">Description</label>
+            <textarea id="tenantDescriptionInput" rows="2" placeholder="Describe this tenant"></textarea>
+          </div>
+          <div class="input-group">
+            <label for="tenantDomainsInput">Domains (comma/space separated)</label>
+            <input id="tenantDomainsInput" type="text" placeholder="tenant1.example.com, *.tenant1.example.com" />
+          </div>
+          <button type="submit" class="nav-button primary">Create tenant</button>
+        </form>
+      </section>
+    </main>
+    <script src="tenants.js"></script>
+  </body>
+</html>

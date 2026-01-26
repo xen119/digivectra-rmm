@@ -45,6 +45,18 @@ const SNMP_DISCOVERY_LOG_PATH = path.join(DATA_DIR, 'snmp-discoveries.json');
 const SNMP_DISCOVERY_LOG_LIMIT = 200;
 const NETWORK_SCANNER_LOG_PATH = path.join(DATA_DIR, 'network-scans.json');
 const NETWORK_SCANNER_LOG_LIMIT = 200;
+const SNMP_HISTORY_FILENAME = 'snmp-discoveries.json';
+const NETWORK_HISTORY_FILENAME = 'network-scans.json';
+const DEFAULT_TENANT_ID = 'default';
+const DEFAULT_TENANT = {
+  id: DEFAULT_TENANT_ID,
+  name: 'Default tenant',
+  description: 'Global default tenant',
+  domains: ['localhost', '127.0.0.1', '::1'],
+};
+const TENANTS_CONFIG_PATH = path.join(DATA_DIR, 'tenants.json');
+const TENANT_DATA_ROOT = path.join(DATA_DIR, 'tenants');
+const GLOBAL_TENANT_ID = 'global';
 const VULNERABILITY_CONFIG_PATH = path.join(__dirname, 'config', 'vulnerability.json');
 const VULNERABILITY_STORE_PATH = path.join(DATA_DIR, 'vulnerabilities.json');
 const vulnerabilityIngestionJobs = new Map(); // sourceId -> { timer }
@@ -78,6 +90,7 @@ const DEFAULT_VULNERABILITY_SOURCE_DEFINITIONS = [
     builtin: true,
   },
 ];
+const VALID_USER_ROLES = new Set(['viewer', 'operator', 'admin']);
 const clients = new Map(); // socket -> info
 const agents = new Map(); // id -> info (persist offline)
 const clientsById = new Map(); // id -> { socket, info }
@@ -88,6 +101,23 @@ const screenSessions = new Map(); // sessionId -> session data
 const groups = loadGroups();
 const agentGroupAssignments = loadAgentGroupAssignments(groups);
 const snmpDiscoverySettings = loadSnmpDiscoverySettings();
+let tenants = loadTenants();
+const tenantIndex = new Map();
+
+function refreshTenantIndex() {
+  tenantIndex.clear();
+  for (const entry of tenants) {
+    tenantIndex.set(entry.id, entry);
+  }
+  tenantIndex.set(GLOBAL_TENANT_ID, {
+    id: GLOBAL_TENANT_ID,
+    name: 'Global tenant',
+    description: 'Global administrators have access to all tenants.',
+    domains: [],
+  });
+}
+
+refreshTenantIndex();
 const licenseRecords = loadLicenses();
 const licenseIndex = new Map(licenseRecords.map((entry) => [entry.code, entry]));
 const screenLists = new Map(); // agentId -> { screens, updatedAt }
@@ -126,10 +156,12 @@ const CHAT_HISTORY_LIMIT = 200;
 const agentChatLastTimestamp = new Map();
 const snmpScanStreams = new Map(); // requestId -> { agentId, clients: Set<ServerResponse> }
 const pendingSnmpScans = new Map(); // requestId -> { agentId, agentName, requestId, startedAt, devices: [] }
-const snmpDiscoveryHistory = loadSnmpDiscoveryHistory();
+const snmpDiscoveryHistory = new Map();
 const networkScannerStreams = new Map(); // requestId -> { agentId, clients: Set<ServerResponse> }
 const pendingNetworkScannerScans = new Map(); // requestId -> { agentId, agentName, requestId, startedAt, devices: [] }
-const networkScannerHistory = loadNetworkScannerHistory();
+const networkScannerHistory = new Map();
+const generalSettingsCache = new Map();
+let generalSettings;
 
 function dispatchSnmpEvent(agentId, requestId, eventName, payload) {
   captureSnmpEvent(agentId, requestId, eventName, payload);
@@ -147,25 +179,6 @@ function dispatchSnmpEvent(agentId, requestId, eventName, payload) {
 
   if (eventName === 'snmp-complete' || eventName === 'snmp-error') {
     snmpScanStreams.delete(requestId);
-  }
-}
-
-function dispatchNetworkEvent(agentId, requestId, eventName, payload) {
-  captureNetworkScannerEvent(agentId, requestId, eventName, payload);
-
-  const entry = networkScannerStreams.get(requestId);
-  if (!entry || entry.agentId !== agentId) {
-    return;
-  }
-
-  const data = JSON.stringify(payload);
-  for (const client of entry.clients) {
-    client.write(`event: ${eventName}\n`);
-    client.write(`data: ${data}\n\n`);
-  }
-
-  if (eventName === 'network-scanner-complete' || eventName === 'network-scanner-error') {
-    networkScannerStreams.delete(requestId);
   }
 }
 
@@ -256,6 +269,12 @@ const NAVIGATION_ITEMS = [
     label: 'AI Agent',
     href: 'ai-agent.html',
     description: 'Talk to an assistant that can review agents and take guided actions.',
+  },
+  {
+    id: 'tenants',
+    label: 'Tenants',
+    href: 'tenants.html',
+    description: 'Manage tenants, their domains, and metadata.',
   },
   {
     id: 'users',
@@ -707,7 +726,7 @@ function buildSnmpResponse(snmp) {
   return payload;
 }
 
-function getSnmpConfigForVersion(version) {
+function getSnmpConfigForVersion(version, settings = generalSettings) {
   const normalized = typeof version === 'string' && version.trim()
     ? version.trim().toLowerCase()
     : 'v3';
@@ -715,7 +734,7 @@ function getSnmpConfigForVersion(version) {
     return null;
   }
 
-  const entry = (generalSettings?.snmp?.[normalized] ?? createDefaultSnmpSettings()[normalized]) ?? null;
+  const entry = (settings?.snmp?.[normalized] ?? createDefaultSnmpSettings()[normalized]) ?? null;
   if (!entry) {
     return null;
   }
@@ -759,9 +778,8 @@ const TECH_DIRECT_WARRANTY_ENDPOINT = 'https://apigtwb2c.us.dell.com/PROD/sbil/e
 const TECH_DIRECT_WARRANTY_TTL_MS = 6 * 60 * 60 * 1000;
 const TECH_DIRECT_TOKEN_ENDPOINT = 'https://apigtwb2c.us.dell.com/auth/oauth/v2/token';
 const TECH_DIRECT_TOKEN_MIN_TTL_MS = 60_000;
-let cachedTechDirectToken = null;
-let cachedTechDirectTokenExpiresAt = 0;
-let generalSettings = loadGeneralSettings();
+const techDirectTokenCache = new Map(); // tenantId -> { token, expiresAt }
+generalSettings = loadGeneralSettings();
 const aiHistory = loadAiHistory();
 const aiConversations = new Map();
 
@@ -855,7 +873,10 @@ server.on('request', async (req, res) => {
 
   if (pathname === '/clients' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    const payload = Array.from(agents.values()).map((info) => ({
+    const sessionUser = req.userSession?.user;
+    const accessibleAgents = Array.from(agents.values())
+      .filter((info) => sessionHasTenantAccess(sessionUser, info.tenantId ?? DEFAULT_TENANT_ID));
+    const payload = accessibleAgents.map((info) => ({
       id: info.id,
       name: info.name,
       os: info.os,
@@ -883,6 +904,7 @@ server.on('request', async (req, res) => {
       avStatus: info.avStatus ?? null,
       warranty: info.warranty ?? null,
       chatNotifications: chatNotificationCounts.get(info.id) ?? 0,
+      tenantId: info.tenantId ?? DEFAULT_TENANT_ID,
     }));
     return res.end(JSON.stringify(payload));
   }
@@ -898,9 +920,11 @@ server.on('request', async (req, res) => {
       ? Math.min(limitParam, SNMP_DISCOVERY_LOG_LIMIT)
       : 50;
 
+      const tenantId = getTenantIdForRequest(req);
+      const tenantRecords = getSnmpHistoryForTenant(tenantId);
     const records = agentFilter
-      ? snmpDiscoveryHistory.filter((record) => record.agentId === agentFilter)
-      : snmpDiscoveryHistory;
+      ? tenantRecords.filter((record) => record.agentId === agentFilter)
+      : tenantRecords;
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ records: records.slice(0, limit) }));
@@ -911,7 +935,8 @@ server.on('request', async (req, res) => {
       return;
     }
 
-    if (!clearSnmpDiscoveryHistory()) {
+    const tenantId = getTenantIdForRequest(req);
+    if (!clearSnmpDiscoveryHistory(tenantId)) {
       res.writeHead(500);
       return res.end('Unable to clear SNMP discovery history');
     }
@@ -931,9 +956,11 @@ server.on('request', async (req, res) => {
       ? Math.min(limitParam, NETWORK_SCANNER_LOG_LIMIT)
       : 50;
 
+      const tenantId = getTenantIdForRequest(req);
+      const tenantRecords = getNetworkHistoryForTenant(tenantId);
     const records = agentFilter
-      ? networkScannerHistory.filter((record) => record.agentId === agentFilter)
-      : networkScannerHistory;
+      ? tenantRecords.filter((record) => record.agentId === agentFilter)
+      : tenantRecords;
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ records: records.slice(0, limit) }));
@@ -944,7 +971,8 @@ server.on('request', async (req, res) => {
       return;
     }
 
-    if (!clearNetworkScannerHistory()) {
+    const tenantId = getTenantIdForRequest(req);
+    if (!clearNetworkScannerHistory(tenantId)) {
       res.writeHead(500);
       return res.end('Unable to clear network scanner history');
     }
@@ -953,33 +981,16 @@ server.on('request', async (req, res) => {
     return res.end();
   }
 
-  if (pathname === '/network-scanner/discoveries' && req.method === 'GET') {
-    if (!ensureRole(req, res, 'viewer')) {
-      return;
+    if (pathname === '/snmp/defaults' && req.method === 'GET') {
+      if (!ensureRole(req, res, 'viewer')) {
+        return;
+      }
+
+      const tenantId = getTenantIdForRequest(req);
+      const tenantSettings = getGeneralSettingsForTenant(tenantId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ snmp: buildSnmpResponse(tenantSettings.snmp) }));
     }
-
-    const limitParam = Number(requestedUrl.searchParams.get('limit'));
-    const agentFilter = requestedUrl.searchParams.get('agent')?.trim();
-    const limit = Number.isFinite(limitParam) && limitParam > 0
-      ? Math.min(limitParam, NETWORK_SCANNER_LOG_LIMIT)
-      : 50;
-
-    const records = agentFilter
-      ? networkScannerHistory.filter((record) => record.agentId === agentFilter)
-      : networkScannerHistory;
-
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ records: records.slice(0, limit) }));
-  }
-
-  if (pathname === '/snmp/defaults' && req.method === 'GET') {
-    if (!ensureRole(req, res, 'viewer')) {
-      return;
-    }
-
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ snmp: buildSnmpResponse(generalSettings.snmp) }));
-  }
 
   if (pathname === '/groups' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1087,14 +1098,29 @@ server.on('request', async (req, res) => {
       return;
     }
 
-    const payload = USERS_CONFIG.map((entry) => ({
+    const requester = req.userSession?.user;
+    const requestedTenant = requestedUrl.searchParams.get('tenantId')?.trim();
+    const tenantId = requester?.isGlobal
+      ? (requestedTenant || DEFAULT_TENANT_ID)
+      : getSessionTenantId(requester);
+
+    const payload = USERS_CONFIG.filter((entry) => {
+      const entryTenant = typeof entry.tenantId === 'string' && entry.tenantId.trim()
+        ? entry.tenantId.trim()
+        : DEFAULT_TENANT_ID;
+      if (requester?.isGlobal) {
+        return entryTenant === tenantId;
+      }
+      return entryTenant === tenantId;
+    }).map((entry) => ({
       username: entry.username,
       role: entry.role,
       totpSecret: entry.totpSecret,
       createdAt: entry.createdAt ?? null,
+      tenantId: entry.tenantId ?? DEFAULT_TENANT_ID,
     }));
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ users: payload }));
+    res.end(JSON.stringify({ users: payload, tenantId }));
     return;
   }
 
@@ -1122,12 +1148,14 @@ server.on('request', async (req, res) => {
         }
 
         const passwordHash = await bcrypt.hash(password, 10);
+        const tenantId = resolveTenantForNewUser(req, data.tenantId);
         const newUser = {
           username,
           role,
           passwordHash,
           totpSecret,
           createdAt: Date.now(),
+          tenantId,
         };
         USERS_CONFIG.push(newUser);
         persistUsersConfig();
@@ -1138,6 +1166,7 @@ server.on('request', async (req, res) => {
           role: newUser.role,
           totpSecret: newUser.totpSecret,
           createdAt: newUser.createdAt,
+          tenantId: newUser.tenantId,
         }));
       } catch (error) {
         console.error('Unable to create user', error);
@@ -1155,9 +1184,24 @@ server.on('request', async (req, res) => {
       return;
     }
 
+    const sessionUser = req.userSession?.user;
+    const requestedTenantId = requestedUrl.searchParams.get('tenantId')?.trim() || '';
+    const resolvedHostTenant = getTenantIdForRequest(req);
+    const sessionTenant = getSessionTenantId(sessionUser);
+    const tenantId = sessionUser?.isGlobal
+      ? (requestedTenantId || resolvedHostTenant || DEFAULT_TENANT_ID)
+      : sessionTenant;
+    const records = licenseRecords
+      .filter((entry) => {
+        const entryTenant = typeof entry.tenantId === 'string' && entry.tenantId.trim()
+          ? entry.tenantId.trim()
+          : DEFAULT_TENANT_ID;
+        return entryTenant === tenantId;
+      });
+
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      licenses: licenseRecords.map((entry) => ({
+      licenses: records.map((entry) => ({
         code: entry.code,
         assignedAgentId: entry.assignedAgentId ?? null,
         assignedAgentName: entry.assignedAgentId ? agents.get(entry.assignedAgentId)?.name ?? null : null,
@@ -1167,7 +1211,9 @@ server.on('request', async (req, res) => {
         revokedAt: entry.revokedAt,
         lastUsedAt: entry.lastUsedAt,
         active: !entry.revokedAt,
+        tenantId: entry.tenantId ?? DEFAULT_TENANT_ID,
       })),
+      tenantId,
     }));
     return;
   }
@@ -1178,18 +1224,31 @@ server.on('request', async (req, res) => {
       return;
     }
 
-    const record = {
-      code: generateLicenseCode(),
-      createdAt: new Date().toISOString(),
-      revokedAt: null,
-      lastUsedAt: null,
-    };
-    licenseRecords.push(record);
-    licenseIndex.set(record.code, record);
-    persistLicenses();
+    const tenantId = getTenantIdForRequest(req);
 
-    res.writeHead(201, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ license: record }));
+    collectBody(req, (body) => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const tenantId = resolveLicenseTenant(req, payload?.tenantId);
+        const record = {
+          code: generateLicenseCode(),
+          createdAt: new Date().toISOString(),
+          revokedAt: null,
+          lastUsedAt: null,
+          tenantId,
+        };
+        licenseRecords.push(record);
+        licenseIndex.set(record.code, record);
+        persistLicenses();
+
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ license: record }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid license request');
+      }
+    });
+
     return;
   }
 
@@ -1306,23 +1365,26 @@ server.on('request', async (req, res) => {
   }
 
   const generalSettingsMatch = pathname === '/settings/general';
-  if (generalSettingsMatch && req.method === 'GET') {
-    if (!ensureRole(req, res, 'admin')) {
+    if (generalSettingsMatch && req.method === 'GET') {
+      if (!ensureRole(req, res, 'admin')) {
+        return;
+      }
+
+      const tenantId = getTenantIdForRequest(req);
+      const tenantSettings = getGeneralSettingsForTenant(tenantId);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        screenConsentRequired: Boolean(tenantSettings?.screenConsentRequired !== false),
+        autoRespondToAgentChat: Boolean(tenantSettings?.autoRespondToAgentChat),
+        techDirectConfigured: Boolean(
+          tenantSettings?.techDirect?.apiKey && tenantSettings?.techDirect?.apiSecret,
+        ),
+        snmp: buildSnmpResponse(tenantSettings?.snmp),
+        snmpVersion: tenantSettings?.snmpVersion ?? DEFAULT_SNMP_VERSION,
+      }));
       return;
     }
-
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      screenConsentRequired: Boolean(generalSettings?.screenConsentRequired !== false),
-      autoRespondToAgentChat: Boolean(generalSettings?.autoRespondToAgentChat),
-      techDirectConfigured: Boolean(
-        generalSettings?.techDirect?.apiKey && generalSettings?.techDirect?.apiSecret,
-      ),
-      snmp: buildSnmpResponse(generalSettings?.snmp),
-      snmpVersion: generalSettings?.snmpVersion ?? DEFAULT_SNMP_VERSION,
-    }));
-    return;
-  }
 
   if (generalSettingsMatch && req.method === 'POST') {
     if (!ensureRole(req, res, 'admin')) {
@@ -1332,6 +1394,8 @@ server.on('request', async (req, res) => {
     collectBody(req, (body) => {
       try {
         const payload = JSON.parse(body);
+        const tenantId = getTenantIdForRequest(req);
+        const currentSettings = getGeneralSettingsForTenant(tenantId);
         const updates = {};
         if ('screenConsentRequired' in payload) {
           if (typeof payload.screenConsentRequired !== 'boolean') {
@@ -1360,7 +1424,7 @@ server.on('request', async (req, res) => {
         if (techDirectChanged) {
           const current = {
             ...DEFAULT_TECH_DIRECT_SETTINGS,
-            ...(generalSettings.techDirect ?? {}),
+            ...(currentSettings.techDirect ?? {}),
           };
           updates.techDirect = {
             ...current,
@@ -1370,7 +1434,7 @@ server.on('request', async (req, res) => {
         if (Object.prototype.hasOwnProperty.call(payload, 'snmp')) {
           const snmpPayload = payload.snmp;
           if (snmpPayload && typeof snmpPayload === 'object') {
-            const snmpUpdate = mergeSnmpSettings(generalSettings.snmp, snmpPayload);
+            const snmpUpdate = mergeSnmpSettings(currentSettings.snmp, snmpPayload);
             if (snmpUpdate) {
               updates.snmp = snmpUpdate;
             }
@@ -1391,24 +1455,24 @@ server.on('request', async (req, res) => {
           return res.end('No valid settings to update.');
         }
 
-        generalSettings = {
-          ...generalSettings,
+        const updatedSettings = {
+          ...currentSettings,
           ...updates,
         };
-        persistGeneralSettings();
+        persistGeneralSettings(tenantId, updatedSettings);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
-          screenConsentRequired: Boolean(generalSettings.screenConsentRequired !== false),
-          autoRespondToAgentChat: Boolean(generalSettings.autoRespondToAgentChat),
+          screenConsentRequired: Boolean(updatedSettings.screenConsentRequired !== false),
+          autoRespondToAgentChat: Boolean(updatedSettings.autoRespondToAgentChat),
           techDirectConfigured: Boolean(
-            generalSettings?.techDirect?.apiKey && generalSettings?.techDirect?.apiSecret,
+            updatedSettings?.techDirect?.apiKey && updatedSettings?.techDirect?.apiSecret,
           ),
-          snmp: buildSnmpResponse(generalSettings.snmp),
-          snmpVersion: generalSettings?.snmpVersion ?? DEFAULT_SNMP_VERSION,
+          snmp: buildSnmpResponse(updatedSettings.snmp),
+          snmpVersion: updatedSettings?.snmpVersion ?? DEFAULT_SNMP_VERSION,
         }));
         if (techDirectChanged) {
-          clearTechDirectTokenCache();
+          clearTechDirectTokenCache(tenantId);
           void refreshDellWarrantyForAllAgents({ force: true });
         }
       } catch (error) {
@@ -1420,20 +1484,167 @@ server.on('request', async (req, res) => {
     return;
   }
 
+    const tenantInfoMatch = pathname === '/tenants/current';
+    if (tenantInfoMatch && req.method === 'GET') {
+      if (!ensureRole(req, res, 'viewer')) {
+        return;
+      }
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      tenant: getTenantPayload(req),
+      isGlobal: Boolean(req.userSession?.user?.isGlobal),
+    }));
+    return;
+  }
+
   const aiSettingsMatch = pathname === '/settings/ai';
-  if (aiSettingsMatch && req.method === 'GET') {
-    if (!ensureRole(req, res, 'admin')) {
+    if (aiSettingsMatch && req.method === 'GET') {
+      if (!ensureRole(req, res, 'admin')) {
+        return;
+      }
+
+      const tenantId = getTenantIdForRequest(req);
+      const tenantSettings = getGeneralSettingsForTenant(tenantId);
+
+      const payload = {
+        systemPrompt: tenantSettings.aiAgent?.systemPrompt ?? DEFAULT_AI_AGENT_SETTINGS.systemPrompt,
+        apiKeyConfigured: Boolean(tenantSettings.aiAgent?.apiKey),
+      };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(payload));
       return;
     }
 
-    const payload = {
-      systemPrompt: generalSettings.aiAgent?.systemPrompt ?? DEFAULT_AI_AGENT_SETTINGS.systemPrompt,
-      apiKeyConfigured: Boolean(generalSettings.aiAgent?.apiKey),
-    };
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(payload));
-    return;
-  }
+    const tenantsListMatch = pathname === '/tenants' && req.method === 'GET';
+    if (tenantsListMatch) {
+      if (!ensureRole(req, res, 'admin')) {
+        return;
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ tenants }));
+      return;
+    }
+
+    if (pathname === '/tenants' && req.method === 'POST') {
+      if (!ensureRole(req, res, 'admin')) {
+        return;
+      }
+
+      collectBody(req, (body) => {
+        try {
+          const payload = JSON.parse(body);
+          const normalized = normalizeTenantPayload(payload);
+          if (!normalized?.id) {
+            res.writeHead(400);
+            return res.end('Tenant id is required');
+          }
+          if (findTenantById(normalized.id)) {
+            res.writeHead(409);
+            return res.end('Tenant already exists');
+          }
+
+          const updated = [...tenants, normalized];
+          if (!commitTenantList(updated)) {
+            res.writeHead(500);
+            return res.end('Unable to persist tenant');
+          }
+
+          res.writeHead(201, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ tenant: normalized }));
+        } catch (error) {
+          res.writeHead(400);
+          res.end('Invalid tenant payload');
+        }
+      });
+
+      return;
+    }
+
+    const tenantOpMatch = pathname.match(/^\/tenants\/([^/]+)$/);
+    if (tenantOpMatch) {
+      if (!ensureRole(req, res, 'admin')) {
+        return;
+      }
+
+      const targetId = typeof tenantOpMatch[1] === 'string' ? tenantOpMatch[1].trim() : '';
+      if (!targetId) {
+        res.writeHead(400);
+        res.end('Tenant id is required');
+        return;
+      }
+
+      if (req.method === 'PUT') {
+        collectBody(req, (body) => {
+          try {
+            const payload = JSON.parse(body);
+            const tenant = findTenantById(targetId);
+            if (!tenant) {
+              res.writeHead(404);
+              return res.end('Tenant not found');
+            }
+            const updates = {};
+            if (typeof payload.name === 'string' && payload.name.trim()) {
+              updates.name = payload.name.trim();
+            }
+            if (typeof payload.description === 'string') {
+              updates.description = payload.description.trim();
+            }
+            if (payload.domains !== undefined) {
+              updates.domains = parseTenantDomains(payload.domains);
+            }
+            if (!Object.keys(updates).length) {
+              res.writeHead(400);
+              return res.end('No tenant fields to update');
+            }
+
+            const updated = tenants.map((entry) => {
+              if (entry.id === targetId) {
+                return { ...entry, ...updates };
+              }
+              return entry;
+            });
+
+            if (!commitTenantList(updated)) {
+              res.writeHead(500);
+              return res.end('Unable to persist tenant update');
+            }
+
+            const refreshed = findTenantById(targetId);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ tenant: refreshed }));
+          } catch (error) {
+            res.writeHead(400);
+            res.end('Invalid tenant payload');
+          }
+        });
+
+        return;
+      }
+
+      if (req.method === 'DELETE') {
+        if (targetId === DEFAULT_TENANT_ID) {
+          res.writeHead(400);
+          return res.end('Default tenant cannot be removed');
+        }
+
+        const existing = findTenantById(targetId);
+        if (!existing) {
+          res.writeHead(404);
+          return res.end('Tenant not found');
+        }
+
+        const updated = tenants.filter((entry) => entry.id !== targetId);
+        if (!commitTenantList(updated)) {
+          res.writeHead(500);
+          return res.end('Unable to delete tenant');
+        }
+
+        res.writeHead(204);
+        return res.end();
+      }
+    }
 
   if (aiSettingsMatch && req.method === 'POST') {
     if (!ensureRole(req, res, 'admin')) {
@@ -1443,11 +1654,13 @@ server.on('request', async (req, res) => {
     collectBody(req, (body) => {
       try {
         const payload = JSON.parse(body);
+        const tenantId = getTenantIdForRequest(req);
+        const currentSettings = getGeneralSettingsForTenant(tenantId);
         const systemPrompt = typeof payload.systemPrompt === 'string'
           ? payload.systemPrompt
-          : generalSettings.aiAgent?.systemPrompt ?? DEFAULT_AI_AGENT_SETTINGS.systemPrompt;
+          : currentSettings.aiAgent?.systemPrompt ?? DEFAULT_AI_AGENT_SETTINGS.systemPrompt;
         const updatedAiAgent = {
-          ...generalSettings.aiAgent,
+          ...currentSettings.aiAgent,
           systemPrompt,
         };
 
@@ -1456,11 +1669,11 @@ server.on('request', async (req, res) => {
           updatedAiAgent.apiKey = key ? key : null;
         }
 
-        generalSettings = {
-          ...generalSettings,
+        const updatedSettings = {
+          ...currentSettings,
           aiAgent: updatedAiAgent,
         };
-        persistGeneralSettings();
+        persistGeneralSettings(tenantId, updatedSettings);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
@@ -1518,6 +1731,9 @@ server.on('request', async (req, res) => {
           return;
         }
 
+        const tenantId = getTenantIdForRequest(req);
+        const tenantSettings = getGeneralSettingsForTenant(tenantId);
+
         const sessionId = typeof payload.sessionId === 'string' && payload.sessionId.trim()
           ? payload.sessionId.trim()
           : createAiSession();
@@ -1531,13 +1747,13 @@ server.on('request', async (req, res) => {
           text,
         });
 
-        const baseMessages = buildAiMessages(session, text);
+        const baseMessages = buildAiMessages(session, text, [], tenantSettings);
         const {
           assistantMessage,
           toolDetails,
           functionCallMessage,
           functionResultMessage,
-        } = await callAiWithToolLoop(baseMessages);
+        } = await callAiWithToolLoop(baseMessages, {}, tenantSettings);
         const assistantContent = assistantMessage?.content ?? '';
 
         if (toolDetails) {
@@ -2179,12 +2395,14 @@ server.on('request', async (req, res) => {
           scale: requestedScale,
         });
 
+        const tenantId = getTenantIdForRequest(req);
+        const tenantSettings = getGeneralSettingsForTenant(tenantId);
         console.log(`Sending start-screen to agent ${agentId} for session ${sessionId}`);
         sendControl(entry.socket, 'start-screen', {
           sessionId,
           screenId: requestedScreenId,
           scale: requestedScale,
-          requireConsent: Boolean(generalSettings?.screenConsentRequired !== false),
+          requireConsent: Boolean(tenantSettings?.screenConsentRequired !== false),
         });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ sessionId }));
@@ -2506,6 +2724,8 @@ server.on('request', async (req, res) => {
       return res.end('Agent not found');
     }
 
+    const tenantId = getTenantIdForRequest(req);
+
     collectBody(req, (body) => {
       try {
         const payload = body ? JSON.parse(body) : {};
@@ -2555,19 +2775,21 @@ server.on('request', async (req, res) => {
     collectBody(req, (body) => {
       try {
         const payload = body ? JSON.parse(body) : {};
+        const tenantId = getTenantIdForRequest(req);
+        const tenantSettings = getGeneralSettingsForTenant(tenantId);
         const versionValue = typeof payload.version === 'string' && payload.version.trim()
           ? payload.version.trim().toLowerCase()
-          : (generalSettings?.snmpVersion ?? DEFAULT_SNMP_VERSION);
+          : (tenantSettings?.snmpVersion ?? DEFAULT_SNMP_VERSION);
 
-        const snmpConfig = getSnmpConfigForVersion(versionValue);
-        if (!snmpConfig) {
-          res.writeHead(400);
-          return res.end('SNMP defaults are not configured for the selected version');
-        }
+          const snmpConfig = getSnmpConfigForVersion(versionValue, tenantSettings);
+          if (!snmpConfig) {
+            res.writeHead(400);
+            return res.end('SNMP defaults are not configured for the selected version');
+          }
 
-        const requestId = typeof payload.requestId === 'string' && payload.requestId.trim()
-          ? payload.requestId.trim()
-          : uuidv4();
+          const requestId = typeof payload.requestId === 'string' && payload.requestId.trim()
+            ? payload.requestId.trim()
+            : uuidv4();
 
         const message = {
           requestId,
@@ -2578,7 +2800,7 @@ server.on('request', async (req, res) => {
           hostsPerSubnet: typeof payload.hostsPerSubnet === 'number' ? payload.hostsPerSubnet : undefined,
         };
 
-        beginSnmpDiscoveryRecord(agentId, entry.info.name ?? 'unknown', requestId);
+        beginSnmpDiscoveryRecord(agentId, entry.info.name ?? 'unknown', requestId, tenantId);
 
         sendControl(entry.socket, 'start-snmp-scan', message);
         res.writeHead(202, { 'Content-Type': 'application/json' });
@@ -2604,6 +2826,8 @@ server.on('request', async (req, res) => {
       res.writeHead(404);
       return res.end('Agent not found');
     }
+
+    const tenantId = getTenantIdForRequest(req);
 
     collectBody(req, (body) => {
       try {
@@ -2634,7 +2858,7 @@ server.on('request', async (req, res) => {
           udpPorts,
         };
 
-        beginNetworkScannerRecord(agentId, entry.info.name ?? 'unknown', requestId);
+        beginNetworkScannerRecord(agentId, entry.info.name ?? 'unknown', requestId, tenantId);
 
         sendControl(entry.socket, 'start-network-scanner', message);
         res.writeHead(202, { 'Content-Type': 'application/json' });
@@ -4590,6 +4814,7 @@ wss.on('connection', (socket, request) => {
     bitlockerStatus: null,
     avStatus: null,
     license: null,
+    tenantId: DEFAULT_TENANT_ID,
     identified: false,
   };
 
@@ -4703,6 +4928,7 @@ wss.on('connection', (socket, request) => {
           info.externalIp = null;
         }
         info.license = licenseCode;
+        info.tenantId = getLicenseTenantId(licenseRecord);
         info.identified = true;
         info.snmpDiscoveryEnabled = isSnmpDiscoveryEnabled(info.id);
         markLicenseUsed(licenseCode);
@@ -6127,7 +6353,8 @@ function handleLogin(req, res) {
         throw new Error('Missing credentials.');
       }
 
-      const user = USERS_CONFIG.find((entry) => entry.username === username);
+      const tenantId = getTenantIdForRequest(req);
+      const user = findUserForTenant(username, tenantId);
       if (!user) {
         throw new Error('Invalid credentials.');
       }
@@ -6169,7 +6396,8 @@ function handleSso(req, res, requestedUrl) {
     return res.end('Invalid SSO signature.');
   }
 
-  const user = USERS_CONFIG.find((entry) => entry.username === username);
+  const tenantId = getTenantIdForRequest(req);
+  const user = findUserForTenant(username, tenantId);
   if (!user) {
     res.writeHead(401);
     return res.end('Unknown user.');
@@ -6257,9 +6485,15 @@ function agentSupports(info, feature) {
   return features.includes(feature);
 }
 
-function createSession(user) {
+function createSession(userEntry) {
+  const sanitized = {
+    username: userEntry.username,
+    role: userEntry.role,
+    tenantId: userEntry.tenantId ?? DEFAULT_TENANT_ID,
+    isGlobal: userEntry.tenantId === GLOBAL_TENANT_ID,
+  };
   const id = uuidv4();
-  const session = { id, user, expires: Date.now() + SESSION_TTL_MS };
+  const session = { id, user: sanitized, expires: Date.now() + SESSION_TTL_MS };
   sessions.set(id, session);
   return session;
 }
@@ -6274,6 +6508,29 @@ function respondUnauthorized(req, res) {
 
   res.writeHead(401);
   res.end('Unauthorized');
+}
+
+function getSessionTenantId(sessionUser) {
+  if (!sessionUser) {
+    return DEFAULT_TENANT_ID;
+  }
+  if (sessionUser.tenantId === GLOBAL_TENANT_ID) {
+    return GLOBAL_TENANT_ID;
+  }
+  return sessionUser.tenantId ?? DEFAULT_TENANT_ID;
+}
+
+function sessionHasTenantAccess(sessionUser, tenantId) {
+  if (!sessionUser) {
+    return false;
+  }
+  if (sessionUser.isGlobal) {
+    return true;
+  }
+  const normalizedTenant = (typeof tenantId === 'string' && tenantId.trim())
+    ? tenantId.trim()
+    : DEFAULT_TENANT_ID;
+  return sessionUser.tenantId === normalizedTenant;
 }
 
 function ensureRole(req, res, minRole) {
@@ -6296,7 +6553,12 @@ function ensureRole(req, res, minRole) {
 function loadUsersConfig() {
   try {
     const raw = fs.readFileSync(USERS_CONFIG_PATH, 'utf-8');
-    return JSON.parse(raw);
+    const data = JSON.parse(raw);
+    const { list, mutated } = normalizeUsersPayload(data);
+    if (mutated && Array.isArray(list)) {
+      fs.writeFileSync(USERS_CONFIG_PATH, JSON.stringify(list, null, 2), 'utf-8');
+    }
+    return list;
   } catch (error) {
     console.error('Failed to load users config', error);
     return [];
@@ -6352,6 +6614,118 @@ function persistUsersConfig() {
     console.error('Failed to save users config', error);
     return false;
   }
+}
+
+function normalizeUsersPayload(payload) {
+  const normalized = [];
+  let mutated = false;
+  const seen = new Set();
+  const entries = Array.isArray(payload) ? payload : [];
+  if (!Array.isArray(payload)) {
+    mutated = true;
+  }
+
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') {
+      mutated = true;
+      continue;
+    }
+
+    const usernameRaw = typeof entry.username === 'string' ? entry.username.trim() : '';
+    if (!usernameRaw) {
+      mutated = true;
+      continue;
+    }
+
+    const usernameKey = usernameRaw.toLowerCase();
+    if (seen.has(usernameKey)) {
+      mutated = true;
+      continue;
+    }
+    seen.add(usernameKey);
+
+    const passwordHash = typeof entry.passwordHash === 'string' && entry.passwordHash.trim()
+      ? entry.passwordHash.trim()
+      : null;
+    if (!passwordHash) {
+      mutated = true;
+      continue;
+    }
+
+    const roleRaw = typeof entry.role === 'string' ? entry.role.trim().toLowerCase() : '';
+    const role = VALID_USER_ROLES.has(roleRaw) ? roleRaw : 'viewer';
+    if (role !== roleRaw) {
+      mutated = true;
+    }
+
+    const totpSecretRaw = typeof entry.totpSecret === 'string' ? entry.totpSecret.trim() : '';
+    const totpSecret = totpSecretRaw || authenticator.generateSecret();
+    if (!totpSecretRaw) {
+      mutated = true;
+    }
+
+    const tenantIdRaw = typeof entry.tenantId === 'string' ? entry.tenantId.trim() : '';
+    const tenantId = tenantIdRaw || DEFAULT_TENANT_ID;
+    if (!tenantIdRaw) {
+      mutated = true;
+    }
+
+    const createdAt = typeof entry.createdAt === 'number' ? entry.createdAt : Date.now();
+    if (!('createdAt' in entry)) {
+      mutated = true;
+    }
+
+    normalized.push({
+      username: usernameRaw,
+      passwordHash,
+      role,
+      totpSecret,
+      tenantId,
+      createdAt,
+    });
+  }
+
+  return { list: normalized, mutated };
+}
+
+function findUserForTenant(username, tenantId) {
+  if (!username) {
+    return null;
+  }
+  const key = username.trim();
+  if (!key) {
+    return null;
+  }
+
+  const targetTenant = typeof tenantId === 'string' && tenantId.trim()
+    ? tenantId.trim()
+    : DEFAULT_TENANT_ID;
+
+  return USERS_CONFIG.find((entry) => {
+    if (entry.username !== key) {
+      return false;
+    }
+    if (entry.tenantId === GLOBAL_TENANT_ID) {
+      return true;
+    }
+    return entry.tenantId === targetTenant;
+  }) ?? null;
+}
+
+function resolveTenantForNewUser(req, requestedTenantId) {
+  const sessionUser = req.userSession?.user;
+  const normalizedRequested = typeof requestedTenantId === 'string' && requestedTenantId.trim()
+    ? requestedTenantId.trim()
+    : null;
+
+  if (sessionUser?.isGlobal) {
+    if (normalizedRequested) {
+      return normalizedRequested;
+    }
+    return DEFAULT_TENANT_ID;
+  }
+
+  return sessionUser?.tenantId ?? DEFAULT_TENANT_ID;
 }
 
 function getScreenName(agentId, screenId) {
@@ -6520,6 +6894,70 @@ function ensureDataDirectory() {
   }
 }
 
+// Tenant storage helpers - ensures we can persist tenant-specific files
+function sanitizeTenantId(tenantId) {
+  if (typeof tenantId === 'string') {
+    const candidate = tenantId.trim();
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return DEFAULT_TENANT_ID;
+}
+
+function ensureTenantStorageRoot() {
+  ensureDataDirectory();
+  if (!fs.existsSync(TENANT_DATA_ROOT)) {
+    fs.mkdirSync(TENANT_DATA_ROOT, { recursive: true });
+  }
+}
+
+function ensureTenantDataDir(tenantId) {
+  ensureTenantStorageRoot();
+  const safeTenantId = sanitizeTenantId(tenantId);
+  const dir = path.join(TENANT_DATA_ROOT, safeTenantId);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
+function getTenantFilePath(tenantId, fileName) {
+  const dir = ensureTenantDataDir(tenantId);
+  return path.join(dir, fileName);
+}
+
+function loadTenantJson(tenantId, fileName, fallback = null) {
+  try {
+    const filePath = getTenantFilePath(tenantId, fileName);
+    if (!fs.existsSync(filePath)) {
+      return fallback;
+    }
+
+    let raw = fs.readFileSync(filePath, 'utf-8');
+    if (raw.charCodeAt(0) === 0xfeff) {
+      raw = raw.slice(1);
+    }
+
+    return JSON.parse(raw);
+  } catch (error) {
+    console.error(`Failed to load tenant data (${fileName})`, error);
+    return fallback;
+  }
+}
+
+function persistTenantJson(tenantId, fileName, data) {
+  try {
+    const filePath = getTenantFilePath(tenantId, fileName);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error(`Failed to persist tenant data (${fileName})`, error);
+    return false;
+  }
+}
+
 function loadGroups() {
   ensureDataDirectory();
   let stored = [];
@@ -6570,31 +7008,18 @@ function loadLicenses() {
       if (raw.charCodeAt(0) === 0xfeff) {
         raw = raw.slice(1);
       }
-      stored = JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      const normalized = normalizeLicensesPayload(parsed);
+      if (normalized.mutated) {
+        fs.writeFileSync(LICENSES_PATH, JSON.stringify(normalized.list, null, 2), 'utf-8');
+      }
+      return normalized.list;
     }
   } catch (error) {
     console.error('Failed to load license config', error);
   }
 
-  if (!Array.isArray(stored)) {
-    return [];
-  }
-
-  return stored
-    .map((entry) => {
-      if (!entry || typeof entry.code !== 'string') {
-        return null;
-      }
-      return {
-        code: entry.code.trim(),
-        createdAt: typeof entry.createdAt === 'string' ? entry.createdAt : new Date().toISOString(),
-        revokedAt: typeof entry.revokedAt === 'string' ? entry.revokedAt : null,
-        lastUsedAt: typeof entry.lastUsedAt === 'string' ? entry.lastUsedAt : null,
-        assignedAgentId: typeof entry.assignedAgentId === 'string' ? entry.assignedAgentId : null,
-        assignedAt: typeof entry.assignedAt === 'string' ? entry.assignedAt : null,
-      };
-    })
-    .filter(Boolean);
+  return [];
 }
 
 function persistLicenses() {
@@ -6624,6 +7049,16 @@ function markLicenseUsed(code) {
 
   record.lastUsedAt = new Date().toISOString();
   persistLicenses();
+}
+
+function getLicenseTenantId(record) {
+  if (!record) {
+    return DEFAULT_TENANT_ID;
+  }
+  const tenant = typeof record.tenantId === 'string' && record.tenantId.trim()
+    ? record.tenantId.trim()
+    : DEFAULT_TENANT_ID;
+  return tenant;
 }
 
 function assignLicenseToAgent(code, agentId) {
@@ -6738,6 +7173,85 @@ function persistAgentGroupAssignments(map = agentGroupAssignments) {
     console.error('Failed to persist agent group assignments', error);
     return false;
   }
+}
+
+function normalizeLicensesPayload(payload) {
+  const normalized = [];
+  let mutated = false;
+  const entries = Array.isArray(payload) ? payload : [];
+  if (!Array.isArray(payload)) {
+    mutated = true;
+  }
+
+  for (const entry of entries) {
+    if (!entry || typeof entry.code !== 'string') {
+      mutated = true;
+      continue;
+    }
+
+    const code = entry.code.trim();
+    if (!code) {
+      mutated = true;
+      continue;
+    }
+
+    const createdAt = typeof entry.createdAt === 'string' ? entry.createdAt : new Date().toISOString();
+    if (entry.createdAt !== createdAt) {
+      mutated = true;
+    }
+
+    const revokedAt = typeof entry.revokedAt === 'string' ? entry.revokedAt : null;
+    if (entry.revokedAt !== revokedAt) {
+      mutated = true;
+    }
+
+    const lastUsedAt = typeof entry.lastUsedAt === 'string' ? entry.lastUsedAt : null;
+    if (entry.lastUsedAt !== lastUsedAt) {
+      mutated = true;
+    }
+
+    const assignedAgentId = typeof entry.assignedAgentId === 'string' ? entry.assignedAgentId : null;
+    if (entry.assignedAgentId !== assignedAgentId) {
+      mutated = true;
+    }
+
+    const assignedAt = typeof entry.assignedAt === 'string' ? entry.assignedAt : null;
+    if (entry.assignedAt !== assignedAt) {
+      mutated = true;
+    }
+
+    const tenantId = typeof entry.tenantId === 'string' && entry.tenantId.trim()
+      ? entry.tenantId.trim()
+      : DEFAULT_TENANT_ID;
+    if (entry.tenantId !== tenantId) {
+      mutated = true;
+    }
+
+    normalized.push({
+      code,
+      createdAt,
+      revokedAt,
+      lastUsedAt,
+      assignedAgentId,
+      assignedAt,
+      tenantId,
+    });
+  }
+
+  return { list: normalized, mutated };
+}
+
+function resolveLicenseTenant(req, requestedTenantId) {
+  const sessionUser = req.userSession?.user;
+  const normalized = typeof requestedTenantId === 'string' && requestedTenantId.trim()
+    ? requestedTenantId.trim()
+    : null;
+
+  if (sessionUser?.isGlobal) {
+    return normalized ?? DEFAULT_TENANT_ID;
+  }
+
+  return sessionUser?.tenantId ?? DEFAULT_TENANT_ID;
 }
 
 function loadSnmpDiscoverySettings() {
@@ -6881,17 +7395,20 @@ function finalizeSnmpDiscoveryRecord(requestId, summary) {
     durationMs: typeof summary.durationMs === 'number' ? summary.durationMs : null,
     message: typeof summary.message === 'string' ? summary.message : null,
     devices: pending.devices,
+    tenantId: typeof pending.tenantId === 'string' && pending.tenantId ? pending.tenantId : DEFAULT_TENANT_ID,
   };
 
-  snmpDiscoveryHistory.unshift(record);
-  if (snmpDiscoveryHistory.length > SNMP_DISCOVERY_LOG_LIMIT) {
-    snmpDiscoveryHistory.length = SNMP_DISCOVERY_LOG_LIMIT;
-  }
-
-  persistSnmpDiscoveryHistory();
+  appendTenantHistoryRecord(
+    snmpDiscoveryHistory,
+    record.tenantId,
+    SNMP_HISTORY_FILENAME,
+    SNMP_DISCOVERY_LOG_LIMIT,
+    SNMP_DISCOVERY_LOG_PATH,
+    record
+  );
 }
 
-function beginSnmpDiscoveryRecord(agentId, agentName, requestId) {
+function beginSnmpDiscoveryRecord(agentId, agentName, requestId, tenantId = DEFAULT_TENANT_ID) {
   if (!agentId || !requestId) {
     return;
   }
@@ -6902,6 +7419,7 @@ function beginSnmpDiscoveryRecord(agentId, agentName, requestId) {
     requestId,
     startedAt: new Date().toISOString(),
     devices: [],
+    tenantId: typeof tenantId === 'string' && tenantId ? tenantId : DEFAULT_TENANT_ID,
   });
 }
 
@@ -6978,17 +7496,20 @@ function finalizeNetworkScannerRecord(requestId, summary) {
     durationMs: typeof summary.durationMs === 'number' ? summary.durationMs : null,
     message: typeof summary.message === 'string' ? summary.message : null,
     devices: pending.devices,
+    tenantId: typeof pending.tenantId === 'string' && pending.tenantId ? pending.tenantId : DEFAULT_TENANT_ID,
   };
 
-  networkScannerHistory.unshift(record);
-  if (networkScannerHistory.length > NETWORK_SCANNER_LOG_LIMIT) {
-    networkScannerHistory.length = NETWORK_SCANNER_LOG_LIMIT;
-  }
-
-  persistNetworkScannerHistory();
+  appendTenantHistoryRecord(
+    networkScannerHistory,
+    record.tenantId,
+    NETWORK_HISTORY_FILENAME,
+    NETWORK_SCANNER_LOG_LIMIT,
+    NETWORK_SCANNER_LOG_PATH,
+    record
+  );
 }
 
-function beginNetworkScannerRecord(agentId, agentName, requestId) {
+function beginNetworkScannerRecord(agentId, agentName, requestId, tenantId = DEFAULT_TENANT_ID) {
   if (!agentId || !requestId) {
     return;
   }
@@ -6999,75 +7520,309 @@ function beginNetworkScannerRecord(agentId, agentName, requestId) {
     requestId,
     startedAt: new Date().toISOString(),
     devices: [],
+    tenantId: typeof tenantId === 'string' && tenantId ? tenantId : DEFAULT_TENANT_ID,
   });
 }
 
-function loadSnmpDiscoveryHistory() {
+function clearSnmpDiscoveryHistory(tenantId) {
+  return clearTenantHistory(snmpDiscoveryHistory, tenantId, SNMP_HISTORY_FILENAME);
+}
+
+function clearNetworkScannerHistory(tenantId) {
+  return clearTenantHistory(networkScannerHistory, tenantId, NETWORK_HISTORY_FILENAME);
+}
+
+function normalizeHistoryRecords(stored, limit) {
+  const normalized = [];
+  if (!Array.isArray(stored)) {
+    return normalized;
+  }
+
+  const maxEntries = Number.isFinite(limit) && limit > 0 ? limit : Number.POSITIVE_INFINITY;
+  for (const record of stored) {
+    if (!record || typeof record !== 'object') {
+      continue;
+    }
+
+    const tenantId = typeof record.tenantId === 'string' && record.tenantId.trim()
+      ? record.tenantId.trim()
+      : DEFAULT_TENANT_ID;
+    normalized.push({ ...record, tenantId });
+    if (normalized.length >= maxEntries) {
+      break;
+    }
+  }
+
+  return normalized;
+}
+
+function loadLegacyHistoryRecords(filePath, limit) {
+  ensureDataDirectory();
+  try {
+    if (!filePath || !fs.existsSync(filePath)) {
+      return [];
+    }
+    let raw = fs.readFileSync(filePath, 'utf-8');
+    if (raw.charCodeAt(0) === 0xfeff) {
+      raw = raw.slice(1);
+    }
+    const parsed = JSON.parse(raw);
+    return normalizeHistoryRecords(parsed, limit);
+  } catch (error) {
+    console.error('Failed to load legacy history', error);
+    return [];
+  }
+}
+
+function loadTenantHistoryRecords(map, tenantId, fileName, limit, legacyPath = null) {
+  const normalizedTenantId = sanitizeTenantId(tenantId);
+  if (map.has(normalizedTenantId)) {
+    return map.get(normalizedTenantId);
+  }
+
+  let stored = loadTenantJson(normalizedTenantId, fileName, null);
+  let records = [];
+  if (stored !== null) {
+    records = normalizeHistoryRecords(stored, limit);
+  } else if (normalizedTenantId === DEFAULT_TENANT_ID && legacyPath) {
+    records = loadLegacyHistoryRecords(legacyPath, limit);
+  }
+
+  map.set(normalizedTenantId, records);
+  return records;
+}
+
+function appendTenantHistoryRecord(map, tenantId, fileName, limit, legacyPath, record) {
+  const normalizedTenantId = sanitizeTenantId(tenantId);
+  const records = loadTenantHistoryRecords(
+    map,
+    normalizedTenantId,
+    fileName,
+    limit,
+    legacyPath
+  );
+  const entry = { ...record, tenantId: normalizedTenantId };
+  records.unshift(entry);
+  if (records.length > limit) {
+    records.length = limit;
+  }
+
+  persistTenantJson(normalizedTenantId, fileName, records);
+}
+
+function clearTenantHistory(map, tenantId, fileName) {
+  const normalizedTenantId = sanitizeTenantId(tenantId);
+  map.set(normalizedTenantId, []);
+  return persistTenantJson(normalizedTenantId, fileName, []);
+}
+
+function getSnmpHistoryForTenant(tenantId) {
+  return loadTenantHistoryRecords(
+    snmpDiscoveryHistory,
+    tenantId,
+    SNMP_HISTORY_FILENAME,
+    SNMP_DISCOVERY_LOG_LIMIT,
+    SNMP_DISCOVERY_LOG_PATH
+  );
+}
+
+function getNetworkHistoryForTenant(tenantId) {
+  return loadTenantHistoryRecords(
+    networkScannerHistory,
+    tenantId,
+    NETWORK_HISTORY_FILENAME,
+    NETWORK_SCANNER_LOG_LIMIT,
+    NETWORK_SCANNER_LOG_PATH
+  );
+}
+
+function resolveTenantFromHost(hostname) {
+  const normalizedHost = typeof hostname === 'string' ? hostname.trim().toLowerCase() : '';
+  if (!normalizedHost) {
+    return tenantIndex.get(DEFAULT_TENANT_ID) ?? DEFAULT_TENANT;
+  }
+
+  for (const tenant of tenants) {
+    const domains = Array.isArray(tenant.domains) ? tenant.domains : [];
+    for (const domain of domains) {
+      const normalizedDomain = typeof domain === 'string' ? domain.trim().toLowerCase() : '';
+      if (!normalizedDomain) {
+        continue;
+      }
+      if (normalizedDomain === normalizedHost) {
+        return tenant;
+      }
+      if (normalizedDomain.startsWith('*.')) {
+        const suffix = normalizedDomain.slice(2);
+        if (suffix && (normalizedHost === suffix || normalizedHost.endsWith(`.${suffix}`))) {
+          return tenant;
+        }
+      }
+    }
+  }
+
+  return tenantIndex.get(DEFAULT_TENANT_ID) ?? DEFAULT_TENANT;
+}
+
+function getTenantFromRequest(req) {
+  const hostHeader = typeof req.headers?.host === 'string' ? req.headers.host : '';
+  const hostname = hostHeader.split(':')[0] ?? '';
+  return resolveTenantFromHost(hostname);
+}
+
+function getTenantIdForRequest(req) {
+  return getTenantFromRequest(req).id ?? DEFAULT_TENANT_ID;
+}
+
+function getTenantPayload(req) {
+  const tenant = getTenantFromRequest(req);
+  if (!tenant) {
+    return { id: DEFAULT_TENANT_ID, name: DEFAULT_TENANT.name, domains: DEFAULT_TENANT.domains, description: DEFAULT_TENANT.description };
+  }
+  return {
+    id: tenant.id,
+    name: tenant.name,
+    description: tenant.description ?? null,
+    domains: Array.isArray(tenant.domains) ? tenant.domains : [],
+  };
+}
+
+function loadTenants() {
   ensureDataDirectory();
   let stored = [];
+  let mutated = false;
   try {
-    if (fs.existsSync(SNMP_DISCOVERY_LOG_PATH)) {
-      let raw = fs.readFileSync(SNMP_DISCOVERY_LOG_PATH, 'utf-8');
+    if (fs.existsSync(TENANTS_CONFIG_PATH)) {
+      let raw = fs.readFileSync(TENANTS_CONFIG_PATH, 'utf-8');
       if (raw.charCodeAt(0) === 0xfeff) {
         raw = raw.slice(1);
       }
       stored = JSON.parse(raw);
     }
   } catch (error) {
-    console.error('Failed to load SNMP discovery history', error);
+    console.error('Failed to load tenant configuration', error);
   }
 
-  return Array.isArray(stored) ? stored.slice(0, SNMP_DISCOVERY_LOG_LIMIT) : [];
-}
-
-function persistSnmpDiscoveryHistory() {
-  try {
-    ensureDataDirectory();
-    fs.writeFileSync(SNMP_DISCOVERY_LOG_PATH, JSON.stringify(snmpDiscoveryHistory, null, 2), 'utf-8');
-    return true;
-  } catch (error) {
-    console.error('Failed to persist SNMP discovery history', error);
-    return false;
-  }
-}
-
-function clearSnmpDiscoveryHistory() {
-  snmpDiscoveryHistory.length = 0;
-  return persistSnmpDiscoveryHistory();
-}
-
-function loadNetworkScannerHistory() {
-  ensureDataDirectory();
-  let stored = [];
-  try {
-    if (fs.existsSync(NETWORK_SCANNER_LOG_PATH)) {
-      let raw = fs.readFileSync(NETWORK_SCANNER_LOG_PATH, 'utf-8');
-      if (raw.charCodeAt(0) === 0xfeff) {
-        raw = raw.slice(1);
+  const normalized = [];
+  if (Array.isArray(stored)) {
+    for (const entry of stored) {
+      if (!entry || typeof entry !== 'object') {
+        continue;
       }
-      stored = JSON.parse(raw);
+      const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : null;
+      if (!id) {
+        continue;
+      }
+      const name = typeof entry.name === 'string' && entry.name.trim()
+        ? entry.name.trim()
+        : DEFAULT_TENANT.name;
+      const description = typeof entry.description === 'string' ? entry.description.trim() : '';
+      const domains = Array.isArray(entry.domains)
+        ? Array.from(new Set(entry.domains
+          .map((domain) => (typeof domain === 'string' ? domain.trim().toLowerCase() : ''))
+          .filter(Boolean)))
+        : [];
+
+      normalized.push({
+        id,
+        name,
+        description,
+        domains,
+      });
     }
-  } catch (error) {
-    console.error('Failed to load network scanner history', error);
   }
 
-  return Array.isArray(stored) ? stored.slice(0, NETWORK_SCANNER_LOG_LIMIT) : [];
+  if (!normalized.some((tenant) => tenant.id === DEFAULT_TENANT_ID)) {
+    normalized.unshift({ ...DEFAULT_TENANT });
+    mutated = true;
+  }
+
+  if (!normalized.length) {
+    normalized.push({ ...DEFAULT_TENANT });
+    mutated = true;
+  }
+
+  if (mutated) {
+    persistTenants(normalized);
+  }
+
+  return normalized;
 }
 
-function persistNetworkScannerHistory() {
+function persistTenants(list) {
   try {
     ensureDataDirectory();
-    fs.writeFileSync(NETWORK_SCANNER_LOG_PATH, JSON.stringify(networkScannerHistory, null, 2), 'utf-8');
+    const payload = Array.isArray(list) ? list : [];
+    fs.writeFileSync(TENANTS_CONFIG_PATH, JSON.stringify(payload, null, 2), 'utf-8');
     return true;
   } catch (error) {
-    console.error('Failed to persist network scanner history', error);
+    console.error('Failed to persist tenant configuration', error);
     return false;
   }
 }
 
-function clearNetworkScannerHistory() {
-  networkScannerHistory.length = 0;
-  return persistNetworkScannerHistory();
+function commitTenantList(updated) {
+  const success = persistTenants(updated);
+  if (!success) {
+    return false;
+  }
+
+  tenants = loadTenants();
+  refreshTenantIndex();
+  return true;
+}
+
+function parseTenantDomains(value) {
+  if (!value) {
+    return [];
+  }
+
+  const items = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[;,\s]+/) : [];
+  const normalized = [];
+  for (const item of items) {
+    const trimmed = typeof item === 'string' ? item.trim().toLowerCase() : '';
+    if (trimmed) {
+      normalized.push(trimmed);
+    }
+  }
+
+  return Array.from(new Set(normalized));
+}
+
+function normalizeTenantPayload(payload, options = { requireId: true }) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const idRaw = typeof payload.id === 'string' ? payload.id.trim() : '';
+  const id = options.requireId ? (idRaw || null) : idRaw;
+  if (options.requireId && !id) {
+    return null;
+  }
+
+  const nameRaw = typeof payload.name === 'string' ? payload.name.trim() : '';
+  const name = nameRaw || (options.requireId ? id : DEFAULT_TENANT.name);
+  const description = typeof payload.description === 'string' ? payload.description.trim() : '';
+  const domains = parseTenantDomains(payload.domains);
+
+  if (!id) {
+    return { name, description, domains };
+  }
+
+  return {
+    id,
+    name,
+    description,
+    domains,
+  };
+}
+
+function findTenantById(id) {
+  const normalized = typeof id === 'string' ? id.trim() : '';
+  if (!normalized) {
+    return null;
+  }
+  return tenants.find((entry) => entry.id === normalized) ?? null;
 }
 
 function ensureRemediationDirectory() {
@@ -7167,36 +7922,39 @@ function updateNavigationVisibility(entries) {
   return mutated;
 }
 
-function loadGeneralSettings() {
-  ensureDataDirectory();
-  let stored = null;
-  let foundFile = false;
-  try {
-    if (fs.existsSync(GENERAL_SETTINGS_PATH)) {
-      foundFile = true;
-      let raw = fs.readFileSync(GENERAL_SETTINGS_PATH, 'utf-8');
-      if (raw.charCodeAt(0) === 0xfeff) {
-        raw = raw.slice(1);
+function loadLegacyGeneralSettings() {
+    try {
+      if (fs.existsSync(GENERAL_SETTINGS_PATH)) {
+        let raw = fs.readFileSync(GENERAL_SETTINGS_PATH, 'utf-8');
+        if (raw.charCodeAt(0) === 0xfeff) {
+          raw = raw.slice(1);
+        }
+        return JSON.parse(raw);
       }
-      stored = JSON.parse(raw);
+    } catch (error) {
+      console.error('Failed to load legacy general settings', error);
     }
-  } catch (error) {
-    console.error('Failed to load general settings', error);
+    return null;
   }
 
-  const settings = {
-    screenConsentRequired: true,
-    autoRespondToAgentChat: DEFAULT_GENERAL_SETTINGS.autoRespondToAgentChat ?? false,
-  aiAgent: {
-    ...DEFAULT_AI_AGENT_SETTINGS,
-  },
-  techDirect: {
-    ...DEFAULT_TECH_DIRECT_SETTINGS,
-  },
-  snmp: createDefaultSnmpSettings(),
-  snmpVersion: DEFAULT_SNMP_VERSION,
-};
-  if (stored && typeof stored === 'object') {
+  function buildGeneralSettingsFromStored(stored) {
+    const settings = {
+      screenConsentRequired: true,
+      autoRespondToAgentChat: DEFAULT_GENERAL_SETTINGS.autoRespondToAgentChat ?? false,
+      aiAgent: {
+        ...DEFAULT_AI_AGENT_SETTINGS,
+      },
+      techDirect: {
+        ...DEFAULT_TECH_DIRECT_SETTINGS,
+      },
+      snmp: createDefaultSnmpSettings(),
+      snmpVersion: DEFAULT_SNMP_VERSION,
+    };
+
+    if (!stored || typeof stored !== 'object') {
+      return settings;
+    }
+
     if (typeof stored.screenConsentRequired === 'boolean') {
       settings.screenConsentRequired = stored.screenConsentRequired;
     }
@@ -7208,10 +7966,13 @@ function loadGeneralSettings() {
       if (typeof aiAgent.systemPrompt === 'string') {
         settings.aiAgent.systemPrompt = aiAgent.systemPrompt;
       }
-      if (typeof aiAgent.apiKey === 'string') {
-        settings.aiAgent.apiKey = aiAgent.apiKey.trim() ? aiAgent.apiKey : null;
-      } else if (aiAgent.apiKey === null) {
-        settings.aiAgent.apiKey = null;
+      if (Object.prototype.hasOwnProperty.call(aiAgent, 'apiKey')) {
+        if (typeof aiAgent.apiKey === 'string') {
+          const trimmed = aiAgent.apiKey.trim();
+          settings.aiAgent.apiKey = trimmed ? trimmed : null;
+        } else if (aiAgent.apiKey === null) {
+          settings.aiAgent.apiKey = null;
+        }
       }
     }
     if (stored.techDirect && typeof stored.techDirect === 'object') {
@@ -7241,29 +8002,52 @@ function loadGeneralSettings() {
         settings.snmp = mergedSnmp;
       }
     }
+
+    return settings;
   }
 
-  if (!foundFile) {
-    persistGeneralSettings(settings);
+  function loadGeneralSettings(tenantId = DEFAULT_TENANT_ID) {
+    const normalizedTenantId = sanitizeTenantId(tenantId);
+    let stored = loadTenantJson(normalizedTenantId, 'settings.json');
+    let foundFile = stored !== null;
+    if (!foundFile && normalizedTenantId === DEFAULT_TENANT_ID) {
+      stored = loadLegacyGeneralSettings();
+      foundFile = stored !== null;
+    }
+
+    const settings = buildGeneralSettingsFromStored(stored);
+    if (!foundFile) {
+      persistTenantJson(normalizedTenantId, 'settings.json', settings);
+    }
+
+    generalSettingsCache.set(normalizedTenantId, settings);
+
+    return settings;
   }
 
-  return settings;
-}
-
-function persistGeneralSettings(settings = generalSettings) {
-  if (!settings) {
-    return false;
+  function getGeneralSettingsForTenant(tenantId) {
+    const normalized = sanitizeTenantId(tenantId);
+    if (generalSettingsCache.has(normalized)) {
+      return generalSettingsCache.get(normalized);
+    }
+    return loadGeneralSettings(normalized);
   }
 
-  try {
-    ensureDataDirectory();
-    fs.writeFileSync(GENERAL_SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
-    return true;
-  } catch (error) {
-    console.error('Failed to persist general settings', error);
-    return false;
+  function persistGeneralSettings(tenantId, settings) {
+    const normalizedTenantId = sanitizeTenantId(tenantId);
+    if (!settings) {
+      return false;
+    }
+
+    const result = persistTenantJson(normalizedTenantId, 'settings.json', settings);
+    if (result) {
+      generalSettingsCache.set(normalizedTenantId, settings);
+      if (normalizedTenantId === DEFAULT_TENANT_ID) {
+        generalSettings = settings;
+      }
+    }
+    return result;
   }
-}
 
 function loadAiHistory() {
   ensureDataDirectory();
@@ -7382,8 +8166,8 @@ function appendSessionMessages(session, entries) {
   session.lastUsed = Date.now();
 }
 
-function buildAiMessages(session, userContent, extraSystemMessages = []) {
-  const systemPrompt = generalSettings.aiAgent?.systemPrompt ?? DEFAULT_AI_AGENT_SETTINGS.systemPrompt;
+function buildAiMessages(session, userContent, extraSystemMessages = [], tenantSettings = generalSettings) {
+  const systemPrompt = tenantSettings.aiAgent?.systemPrompt ?? DEFAULT_AI_AGENT_SETTINGS.systemPrompt;
   const history = Array.isArray(session?.messages) ? session.messages.slice() : [];
   return [
     { role: 'system', content: systemPrompt },
@@ -7394,8 +8178,8 @@ function buildAiMessages(session, userContent, extraSystemMessages = []) {
   ];
 }
 
-async function callOpenAi(messages, overrides = {}) {
-  const apiKey = generalSettings.aiAgent?.apiKey;
+async function callOpenAi(messages, overrides = {}, tenantSettings = generalSettings) {
+  const apiKey = tenantSettings.aiAgent?.apiKey;
   if (!apiKey) {
     throw new Error('OpenAI API key is not configured');
   }
@@ -7439,8 +8223,8 @@ async function callOpenAi(messages, overrides = {}) {
   return { choice, data };
 }
 
-async function callAiWithToolLoop(messages, overrides = {}) {
-  const initialResponse = await callOpenAi(messages, overrides);
+async function callAiWithToolLoop(messages, overrides = {}, tenantSettings = generalSettings) {
+  const initialResponse = await callOpenAi(messages, overrides, tenantSettings);
   let assistantMessage = initialResponse.choice?.message ?? null;
   let functionCallMessage = null;
   let functionResultMessage = null;
@@ -7479,6 +8263,7 @@ async function callAiWithToolLoop(messages, overrides = {}) {
         ...overrides,
         function_call: 'none',
       },
+      tenantSettings,
     );
     assistantMessage = followUpResponse.choice?.message ?? null;
   }
@@ -8232,11 +9017,13 @@ async function respondToAgentWithAi(info, chatEvent) {
   if (!info?.id || !info.socket || info.socket.readyState !== WebSocket.OPEN) {
     return;
   }
-  if (!generalSettings.aiAgent?.apiKey) {
+  const tenantId = info?.tenantId ?? DEFAULT_TENANT_ID;
+  const tenantSettings = getGeneralSettingsForTenant(tenantId);
+  if (!tenantSettings.aiAgent?.apiKey) {
     console.log('AI auto reply skipped: API key missing');
     return;
   }
-  if (!generalSettings.autoRespondToAgentChat) {
+  if (!tenantSettings.autoRespondToAgentChat) {
     console.log('AI auto reply skipped: feature disabled');
     return;
   }
@@ -8252,7 +9039,7 @@ async function respondToAgentWithAi(info, chatEvent) {
   const agentFocusInstruction = `Focus exclusively on agent ${agentDisplay}. Only provide information, guidance, and tool actions that target this agent.`;
   const messages = buildAiMessages(conversation, userContent, [
     { role: 'system', content: agentFocusInstruction },
-  ]);
+  ], tenantSettings);
 
   try {
     const {
@@ -8263,6 +9050,7 @@ async function respondToAgentWithAi(info, chatEvent) {
     } = await callAiWithToolLoop(
       messages,
       { ...AI_AGENT_RESPONSE_OPTIONS },
+      tenantSettings,
     );
     const reply = assistantMessage?.content?.trim() ?? '';
     if (!reply) {
@@ -9295,27 +10083,38 @@ async function fetchJson(url, options = {}) {
   return res.json();
 }
 
-function clearTechDirectTokenCache() {
-  cachedTechDirectToken = null;
-  cachedTechDirectTokenExpiresAt = 0;
+function getTenantTechDirectSettings(tenantId = DEFAULT_TENANT_ID) {
+  const normalizedTenantId = sanitizeTenantId(tenantId);
+  const tenantSettings = getGeneralSettingsForTenant(normalizedTenantId);
+  return {
+    ...DEFAULT_TECH_DIRECT_SETTINGS,
+    ...(tenantSettings?.techDirect ?? {}),
+  };
 }
 
-async function getTechDirectAccessToken() {
-  const techDirectSettings = {
-    ...DEFAULT_TECH_DIRECT_SETTINGS,
-    ...(generalSettings?.techDirect ?? {}),
-  };
+function clearTechDirectTokenCache(tenantId) {
+  if (typeof tenantId === 'string' && tenantId.trim()) {
+    techDirectTokenCache.delete(sanitizeTenantId(tenantId));
+  } else {
+    techDirectTokenCache.clear();
+  }
+}
+
+async function getTechDirectAccessToken(tenantId = DEFAULT_TENANT_ID) {
+  const normalizedTenantId = sanitizeTenantId(tenantId);
+  const techDirectSettings = getTenantTechDirectSettings(normalizedTenantId);
   const apiKey = (techDirectSettings.apiKey ?? '').trim();
   const apiSecret = (techDirectSettings.apiSecret ?? '').trim();
 
   if (!apiKey || !apiSecret) {
-    clearTechDirectTokenCache();
+    clearTechDirectTokenCache(normalizedTenantId);
     throw new Error('TechDirect credentials are missing');
   }
 
   const now = Date.now();
-  if (cachedTechDirectToken && cachedTechDirectTokenExpiresAt > now) {
-    return cachedTechDirectToken;
+  const cached = techDirectTokenCache.get(normalizedTenantId);
+  if (cached && cached.expiresAt > now) {
+    return cached.token;
   }
 
   const params = new URLSearchParams();
@@ -9349,13 +10148,15 @@ async function getTechDirectAccessToken() {
   const ttl = Number.isFinite(expiresIn) && expiresIn > 0
     ? expiresIn * 1000
     : TECH_DIRECT_TOKEN_MIN_TTL_MS;
-  cachedTechDirectToken = payload.access_token;
-  cachedTechDirectTokenExpiresAt = now + Math.max(ttl, TECH_DIRECT_TOKEN_MIN_TTL_MS);
-  return cachedTechDirectToken;
+  techDirectTokenCache.set(normalizedTenantId, {
+    token: payload.access_token,
+    expiresAt: now + Math.max(ttl, TECH_DIRECT_TOKEN_MIN_TTL_MS),
+  });
+  return payload.access_token;
 }
 
-function hasTechDirectCredentials() {
-  const techDirect = generalSettings?.techDirect ?? {};
+function hasTechDirectCredentials(tenantId = DEFAULT_TENANT_ID) {
+  const techDirect = getTenantTechDirectSettings(tenantId);
   const hasCredentials = Boolean(
     typeof techDirect.apiKey === 'string'
       && techDirect.apiKey.trim()
@@ -9363,7 +10164,7 @@ function hasTechDirectCredentials() {
       && techDirect.apiSecret.trim(),
   );
   if (!hasCredentials) {
-    clearTechDirectTokenCache();
+    clearTechDirectTokenCache(tenantId);
   }
   return hasCredentials;
 }
@@ -9558,18 +10359,12 @@ function parseDellWarrantyResponse(payload, serviceTag) {
   };
 }
 
-async function fetchDellWarrantyForTag(serviceTag) {
-  const techDirect = {
-    ...DEFAULT_TECH_DIRECT_SETTINGS,
-    ...(generalSettings?.techDirect ?? {}),
-  };
-  const apiKey = (techDirect.apiKey ?? '').trim();
-  const hasSecret = typeof techDirect.apiSecret === 'string' && techDirect.apiSecret.trim();
-  if (!apiKey || !hasSecret) {
+async function fetchDellWarrantyForTag(serviceTag, tenantId = DEFAULT_TENANT_ID) {
+  if (!hasTechDirectCredentials(tenantId)) {
     throw new Error('TechDirect credentials are missing');
   }
 
-  const accessToken = await getTechDirectAccessToken();
+  const accessToken = await getTechDirectAccessToken(tenantId);
   const params = new URLSearchParams();
   const normalizedTag = (serviceTag ?? '').toString().trim().toLowerCase();
   params.set('servicetags', normalizedTag);
@@ -9590,6 +10385,7 @@ async function maybeRefreshWarranty(info, { force = false } = {}) {
     return;
   }
 
+  const tenantId = info?.tenantId ?? DEFAULT_TENANT_ID;
   if (!shouldCheckDellWarranty(info)) {
     if (info.warranty) {
       info.warranty = null;
@@ -9597,7 +10393,7 @@ async function maybeRefreshWarranty(info, { force = false } = {}) {
     return;
   }
 
-  if (!hasTechDirectCredentials()) {
+  if (!hasTechDirectCredentials(tenantId)) {
     if (info.warranty) {
       info.warranty = null;
     }
@@ -9623,7 +10419,7 @@ async function maybeRefreshWarranty(info, { force = false } = {}) {
   }
 
   try {
-    const summary = await fetchDellWarrantyForTag(serviceTag);
+    const summary = await fetchDellWarrantyForTag(serviceTag, tenantId);
     info.warranty = {
       ...summary,
       serviceTag,
@@ -9645,16 +10441,6 @@ async function maybeRefreshWarranty(info, { force = false } = {}) {
 }
 
 async function refreshDellWarrantyForAllAgents({ force = false } = {}) {
-  if (!hasTechDirectCredentials()) {
-    clearTechDirectTokenCache();
-    for (const info of agents.values()) {
-      if (info.warranty) {
-        info.warranty = null;
-      }
-    }
-    return;
-  }
-
   for (const info of agents.values()) {
     await maybeRefreshWarranty(info, { force });
   }

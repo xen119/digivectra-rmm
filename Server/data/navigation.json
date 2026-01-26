@@ -44,8 +44,12 @@
     "visible": true
   },
   {
+    "id": "tenants",
+    "visible": true
+  },
+  {
     "id": "users",
-    "visible": false
+    "visible": true
   },
   {
     "id": "compliance",
@@ -61,6 +65,6 @@
   },
   {
     "id": "licenses",
-    "visible": false
+    "visible": true
   }
 ]

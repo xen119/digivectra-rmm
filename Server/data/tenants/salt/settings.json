@@ -1,0 +1,34 @@
+{
+  "screenConsentRequired": true,
+  "autoRespondToAgentChat": false,
+  "aiAgent": {
+    "systemPrompt": "You are the RMM operations assistant. Help administrators understand the fleet, surface risks, and take safe actions via the provided tools. Ask clarifying questions before acting, think step-by-step, and explain each outcome.",
+    "apiKey": null
+  },
+  "techDirect": {
+    "apiKey": null,
+    "apiSecret": null
+  },
+  "snmp": {
+    "v1": {
+      "port": 161,
+      "community": "public",
+      "resolveNamesOnly": false
+    },
+    "v2c": {
+      "port": 161,
+      "community": "public",
+      "resolveNamesOnly": false
+    },
+    "v3": {
+      "port": 161,
+      "username": "",
+      "authProtocol": "SHA1",
+      "authPassword": "",
+      "privProtocol": "AES",
+      "privPassword": "",
+      "resolveNamesOnly": false
+    }
+  },
+  "snmpVersion": "v3"
+}

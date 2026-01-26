@@ -11,6 +11,7 @@ const agentSelect = document.getElementById('scanAgent');
 const liveHostsList = document.getElementById('liveHostsList');
 const scanSummaryEl = document.getElementById('scanSummary');
 const clearHistoryButton = document.getElementById('clearHistoryButton');
+const tenantBadge = document.getElementById('tenantBadge');
 const wakeStatusEl = document.getElementById('wakeStatus');
 
 const MAX_LIVE_HOSTS = 120;
@@ -461,9 +462,32 @@ async function clearNetworkHistory() {
   }
 }
 
+async function loadTenantInfo() {
+  if (!tenantBadge) {
+    return;
+  }
+
+  try {
+    const response = await authFetch('/tenants/current', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const tenant = data?.tenant;
+    const name = tenant?.name ?? 'unknown';
+    const suffix = tenant?.description ? ` – ${tenant.description}` : '';
+    tenantBadge.textContent = `Tenant: ${name}${suffix}`;
+  } catch (error) {
+    console.error('Unable to load tenant info', error);
+    tenantBadge.textContent = 'Tenant: unknown';
+  }
+}
+
 refreshButton?.addEventListener('click', () => {
   loadNetworkRecords();
   loadAgentOptions();
+  loadTenantInfo();
 });
 
 clearHistoryButton?.addEventListener('click', clearNetworkHistory);
@@ -474,3 +498,4 @@ window.addEventListener('beforeunload', closeScanStream);
 setInterval(loadNetworkRecords, 60_000);
 loadNetworkRecords();
 loadAgentOptions();
+loadTenantInfo();

@@ -111,6 +111,26 @@
       color: rgba(226, 232, 240, 0.6);
     }
 
+    .tenant-filter {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      min-width: 190px;
+    }
+
+    .tenant-filter select {
+      background: #0d1117;
+      border: 1px solid #2f3640;
+      border-radius: 0.4rem;
+      padding: 0.4rem 0.5rem;
+      color: #cdd9e5;
+      font-size: 0.9rem;
+    }
+
+    .hidden {
+      display: none;
+    }
+
     @media (max-width: 768px) {
       .panel--dashboard {
         padding: 1.25rem;
@@ -135,6 +155,10 @@
         <h1>Agent Licenses</h1>
         <p class="panel__summary">Issue, monitor, and revoke the codes that gate agent connectivity.</p>
         <p class="panel__hint">Revoke disconnects agents immediately; use Unassign to release a consumed code for reuse.</p>
+      </div>
+      <div class="tenant-filter hidden" id="tenantFilterGroup">
+        <label for="licenseTenantSelect">Tenant</label>
+        <select id="licenseTenantSelect"></select>
       </div>
       <button id="generateLicense" class="primary">Generate license</button>
     </div>

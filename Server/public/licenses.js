@@ -1,8 +1,15 @@
 const statusEl = document.getElementById('statusMessage');
 const tableBody = document.getElementById('licenseTableBody');
 const generateButton = document.getElementById('generateLicense');
+const tenantFilterGroup = document.getElementById('tenantFilterGroup');
+const tenantSelect = document.getElementById('licenseTenantSelect');
 
 const authFetch = (input, init = {}) => fetch(input, { credentials: 'same-origin', ...init });
+
+const tenantMap = new Map();
+let isGlobalView = false;
+let selectedTenantId = null;
+let resolvedTenantId = null;
 
 function setStatus(message, variant = '') {
   if (!statusEl) {
@@ -108,24 +115,109 @@ function createLicenseRow(entry) {
   return row;
 }
 
+async function populateTenantSelect() {
+  if (!tenantSelect) {
+    return;
+  }
+
+  try {
+    const response = await authFetch('/tenants', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const tenants = Array.isArray(payload.tenants) ? payload.tenants : [];
+
+    tenantSelect.innerHTML = '';
+    tenantMap.clear();
+
+    tenants.forEach((tenant) => {
+      if (!tenant?.id) {
+        return;
+      }
+      tenantMap.set(tenant.id, tenant);
+      const option = document.createElement('option');
+      option.value = tenant.id;
+      option.textContent = tenant.name ? `${tenant.name} (${tenant.id})` : tenant.id;
+      tenantSelect.appendChild(option);
+    });
+  } catch (error) {
+    console.error('Unable to load tenant list', error);
+    tenantFilterGroup?.classList.add('hidden');
+  }
+}
+
+async function initializeTenantFilter() {
+  if (!tenantFilterGroup || !tenantSelect) {
+    return;
+  }
+
+  try {
+    const response = await authFetch('/tenants/current', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const currentTenantId = payload?.tenant?.id;
+    resolvedTenantId = currentTenantId || resolvedTenantId;
+    selectedTenantId = currentTenantId || selectedTenantId;
+
+    if (payload?.isGlobal) {
+      isGlobalView = true;
+      tenantFilterGroup.classList.remove('hidden');
+      await populateTenantSelect();
+      tenantSelect.value = selectedTenantId || resolvedTenantId || '';
+    } else {
+      tenantFilterGroup.classList.add('hidden');
+    }
+  } catch (error) {
+    console.error('Unable to initialize tenant selector', error);
+    tenantFilterGroup.classList.add('hidden');
+  }
+}
+
 async function loadLicenses() {
   setStatus('Loading licenses...');
   try {
-    const response = await authFetch('/licenses', { cache: 'no-store' });
+    const params = new URLSearchParams();
+    if (isGlobalView && selectedTenantId) {
+      params.set('tenantId', selectedTenantId);
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const response = await authFetch(`/licenses${query}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
     const data = await response.json();
     const entries = Array.isArray(data.licenses) ? data.licenses : [];
-  tableBody.innerHTML = '';
-  if (!entries.length) {
+    const tenantIdFromResponse = typeof data.tenantId === 'string' && data.tenantId.trim()
+      ? data.tenantId.trim()
+      : null;
+    const displayedTenantId = tenantIdFromResponse || selectedTenantId;
+    if (displayedTenantId) {
+      resolvedTenantId = displayedTenantId;
+      selectedTenantId = displayedTenantId;
+      if (tenantSelect) {
+        tenantSelect.value = selectedTenantId;
+      }
+    }
+
+    tableBody.innerHTML = '';
+    if (!entries.length) {
       const placeholder = document.createElement('tr');
       placeholder.innerHTML = '<td colspan="5">No licenses issued yet.</td>';
       tableBody.appendChild(placeholder);
     } else {
       entries.forEach((entry) => tableBody.appendChild(createLicenseRow(entry)));
     }
-    setStatus('License list loaded.', 'success');
+
+    const tenantName = tenantMap.get(selectedTenantId ?? resolvedTenantId)?.name
+      || selectedTenantId
+      || resolvedTenantId
+      || 'this tenant';
+    setStatus(`Showing ${entries.length} license${entries.length === 1 ? '' : 's'} for ${tenantName}.`, entries.length ? 'success' : '');
   } catch (error) {
     console.error('Unable to load licenses', error);
     setStatus('Unable to load licenses.', 'error');
@@ -140,9 +232,15 @@ async function createLicense() {
   generateButton.disabled = true;
   setStatus('Creating license...');
   try {
+    const payload = {};
+    if (isGlobalView && selectedTenantId) {
+      payload.tenantId = selectedTenantId;
+    }
+
     const response = await authFetch('/licenses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -197,8 +295,18 @@ async function unassignLicense(code) {
   }
 }
 
+if (tenantSelect) {
+  tenantSelect.addEventListener('change', () => {
+    selectedTenantId = tenantSelect.value || null;
+    loadLicenses();
+  });
+}
+
 if (generateButton) {
   generateButton.addEventListener('click', createLicense);
 }
 
-loadLicenses();
+(async function init() {
+  await initializeTenantFilter();
+  await loadLicenses();
+})();

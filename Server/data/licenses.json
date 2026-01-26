@@ -5,15 +5,17 @@
     "revokedAt": "2026-01-19T01:44:50.078Z",
     "lastUsedAt": "2026-01-19T01:44:21.138Z",
     "assignedAgentId": null,
-    "assignedAt": null
+    "assignedAt": null,
+    "tenantId": "global"
   },
   {
     "code": "6bdff337e56d2fb86336a950",
     "createdAt": "2026-01-19T01:18:08.275Z",
     "revokedAt": null,
-    "lastUsedAt": "2026-01-23T11:27:12.182Z",
+    "lastUsedAt": "2026-01-26T20:33:10.461Z",
     "assignedAgentId": "7c0cf07f-f76b-4984-9385-ffa54c65d630",
-    "assignedAt": "2026-01-19T07:39:13.312Z"
+    "assignedAt": "2026-01-26T20:33:10.457Z",
+    "tenantId": "default"
   },
   {
     "code": "ead435bd4e93a23eb63b65cd",
@@ -21,7 +23,8 @@
     "revokedAt": null,
     "lastUsedAt": null,
     "assignedAgentId": null,
-    "assignedAt": null
+    "assignedAt": null,
+    "tenantId": "default"
   },
   {
     "code": "a97ff003fa472f1c1dced120",
@@ -29,7 +32,8 @@
     "revokedAt": "2026-01-19T01:44:36.405Z",
     "lastUsedAt": null,
     "assignedAgentId": null,
-    "assignedAt": null
+    "assignedAt": null,
+    "tenantId": "default"
   },
   {
     "code": "1d90b7bc6acae74de1d38b89",
@@ -37,7 +41,8 @@
     "revokedAt": null,
     "lastUsedAt": null,
     "assignedAgentId": null,
-    "assignedAt": null
+    "assignedAt": null,
+    "tenantId": "default"
   },
   {
     "code": "8a6007be63a19d784557040b",
@@ -45,7 +50,8 @@
     "revokedAt": null,
     "lastUsedAt": null,
     "assignedAgentId": null,
-    "assignedAt": null
+    "assignedAt": null,
+    "tenantId": "default"
   },
   {
     "code": "4f31742b022ea4e51897bbaf",
@@ -53,6 +59,34 @@
     "revokedAt": null,
     "lastUsedAt": null,
     "assignedAgentId": null,
-    "assignedAt": null
+    "assignedAt": null,
+    "tenantId": "default"
+  },
+  {
+    "code": "e91ccb221c9050fd4e08f796",
+    "createdAt": "2026-01-26T18:16:46.464Z",
+    "revokedAt": null,
+    "lastUsedAt": null,
+    "assignedAgentId": null,
+    "assignedAt": null,
+    "tenantId": "default"
+  },
+  {
+    "code": "462edcd416f8a76174cf8025",
+    "createdAt": "2026-01-26T18:33:44.312Z",
+    "revokedAt": null,
+    "lastUsedAt": null,
+    "assignedAgentId": null,
+    "assignedAt": null,
+    "tenantId": "default"
+  },
+  {
+    "code": "c301c64b48f3d2f68006d745",
+    "createdAt": "2026-01-26T19:15:07.319Z",
+    "revokedAt": null,
+    "lastUsedAt": "2026-01-26T20:28:47.552Z",
+    "assignedAgentId": null,
+    "assignedAt": null,
+    "tenantId": "salt"
   }
 ]

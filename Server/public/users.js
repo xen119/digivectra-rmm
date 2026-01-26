@@ -2,6 +2,12 @@ const authFetch = (input, init = {}) => fetch(input, { credentials: 'same-origin
 const userListEl = document.getElementById('userList');
 const userForm = document.getElementById('userForm');
 const userMessageEl = document.getElementById('userMessage');
+const tenantSelectGroup = document.getElementById('tenantSelectGroup');
+const userTenantSelect = document.getElementById('userTenant');
+
+let isGlobalUser = false;
+let currentTenantId = '';
+let selectedTenantId = '';
 
 function renderUsers(users = []) {
   if (!userListEl) {
@@ -17,6 +23,7 @@ function renderUsers(users = []) {
     <tr>
       <td><strong>${user.username}</strong></td>
       <td>${user.role}</td>
+      <td>${user.tenantId ?? 'default'}</td>
       <td>${user.totpSecret}</td>
       <td>${user.createdAt ? new Date(user.createdAt).toLocaleString() : '—'}</td>
       <td><span class="pill">${user.role}</span></td>
@@ -26,13 +33,14 @@ function renderUsers(users = []) {
   userListEl.innerHTML = `
     <table>
       <thead>
-        <tr>
-          <th>Username</th>
-          <th>Role</th>
-          <th>TOTP secret</th>
-          <th>Created at</th>
-          <th>Status</th>
-        </tr>
+    <tr>
+      <th>Username</th>
+      <th>Role</th>
+      <th>Tenant</th>
+      <th>TOTP secret</th>
+      <th>Created at</th>
+      <th>Status</th>
+    </tr>
       </thead>
       <tbody>
         ${rows.join('')}
@@ -47,7 +55,16 @@ async function loadUsers() {
   }
 
   try {
-    const response = await authFetch('/users', { cache: 'no-store' });
+    const params = new URLSearchParams();
+    const effectiveTenant = isGlobalUser
+      ? (selectedTenantId || currentTenantId) 
+      : (currentTenantId || selectedTenantId);
+    if (isGlobalUser && effectiveTenant) {
+      params.set('tenantId', effectiveTenant);
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+
+    const response = await authFetch(`/users${query}`, { cache: 'no-store' });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       const message = text || `HTTP ${response.status}`;
@@ -75,6 +92,65 @@ function showUserMessage(text, type = '') {
   userMessageEl.className = `message ${type}`;
 }
 
+async function populateTenantOptions() {
+  if (!userTenantSelect) {
+    return;
+  }
+
+  try {
+    const response = await authFetch('/tenants', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const tenants = Array.isArray(payload.tenants) ? payload.tenants : [];
+    userTenantSelect.innerHTML = '';
+    tenants.forEach((tenant) => {
+      if (!tenant?.id) {
+        return;
+      }
+      const option = document.createElement('option');
+      option.value = tenant.id;
+      option.textContent = tenant.name ? `${tenant.name} (${tenant.id})` : tenant.id;
+      userTenantSelect.appendChild(option);
+    });
+  } catch (error) {
+    console.error('Unable to load tenants', error);
+  }
+}
+
+async function initializeTenantSelector() {
+  if (!tenantSelectGroup) {
+    return;
+  }
+
+  try {
+    const response = await authFetch('/tenants/current', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    isGlobalUser = Boolean(payload?.isGlobal);
+    currentTenantId = payload?.tenant?.id ?? '';
+    selectedTenantId = selectedTenantId || currentTenantId;
+
+    if (isGlobalUser) {
+      tenantSelectGroup.classList.remove('hidden');
+      await populateTenantOptions();
+      if (userTenantSelect) {
+        userTenantSelect.value = currentTenantId || '';
+      }
+    } else {
+      tenantSelectGroup.classList.add('hidden');
+    }
+  } catch (error) {
+    console.error('Unable to initialize tenant selector', error);
+    tenantSelectGroup.classList.add('hidden');
+  }
+}
+
 userForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!userForm) {
@@ -88,6 +164,9 @@ userForm?.addEventListener('submit', async (event) => {
     role: formData.get('role'),
     totp: formData.get('totp'),
   };
+  if (isGlobalUser && userTenantSelect?.value) {
+    payload.tenantId = userTenantSelect.value;
+  }
 
   try {
     const response = await authFetch('/users', {
@@ -99,7 +178,7 @@ userForm?.addEventListener('submit', async (event) => {
     if (!response.ok) {
       const errorPayload = await response.json().catch(() => null);
       let text = await response.text().catch(() => '');
-      const message = errorPayload?.message ?? text || `HTTP ${response.status}`;
+      const message = errorPayload?.message ?? (text || `HTTP ${response.status}`);
       throw new Error(message);
     }
 
@@ -113,4 +192,14 @@ userForm?.addEventListener('submit', async (event) => {
   }
 });
 
-loadUsers();
+(async function init() {
+  await initializeTenantSelector();
+  await loadUsers();
+})();
+
+if (userTenantSelect) {
+  userTenantSelect.addEventListener('change', () => {
+    selectedTenantId = userTenantSelect.value || '';
+    loadUsers();
+  });
+}

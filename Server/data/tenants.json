@@ -1,0 +1,20 @@
+[
+  {
+    "id": "default",
+    "name": "Default tenant",
+    "description": "Global default tenant",
+    "domains": [
+      "localhost",
+      "127.0.0.1",
+      "::1"
+    ]
+  },
+  {
+    "id": "salt",
+    "name": "Salt tenant",
+    "description": "",
+    "domains": [
+      "salt.localhost"
+    ]
+  }
+]

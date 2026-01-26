@@ -88,6 +88,10 @@
         font-size: 0.9rem;
       }
 
+      .hidden {
+        display: none;
+      }
+
       .message.success {
         color: #34d399;
       }
@@ -168,6 +172,10 @@
           <label>
             TOTP secret
             <input id="userTotp" name="totp" type="text" placeholder="Leave empty to auto-generate" />
+          </label>
+          <label id="tenantSelectGroup" class="hidden">
+            Tenant
+            <select id="userTenant" name="tenant"></select>
           </label>
           <div style="grid-column: 1 / -1;">
             <button type="submit">Create user</button>

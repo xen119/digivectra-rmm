@@ -4,6 +4,7 @@ const groupPanel = document.getElementById('groupPanel');
 const newGroupForm = document.getElementById('newGroupForm');
 const newGroupInput = document.getElementById('newGroupName');
 const logoutButton = document.getElementById('logoutButton');
+const tenantBadge = document.getElementById('tenantBadge');
 const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
 
 async function applySidebarSettings() {
@@ -28,6 +29,7 @@ async function applySidebarSettings() {
 }
 
 applySidebarSettings();
+loadTenantInfo();
 const chatIndicators = new Map();
 const chatState = new Map();
 let monitoringStateSource;
@@ -86,6 +88,26 @@ async function refreshAgents() {
     statusEl.textContent = 'Failed to load agents.';
     listEl.innerHTML = '';
     console.error(error);
+  }
+}
+
+async function loadTenantInfo() {
+  if (!tenantBadge) {
+    return;
+  }
+  try {
+    const response = await authFetch('/tenants/current', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const tenant = data?.tenant;
+    const name = tenant?.name ?? 'unknown tenant';
+    const suffix = tenant?.description ? ` – ${tenant.description}` : '';
+    tenantBadge.textContent = `Tenant: ${name}${suffix}`;
+  } catch (error) {
+    console.error('Unable to load current tenant info', error);
+    tenantBadge.textContent = 'Tenant: unknown';
   }
 }
 

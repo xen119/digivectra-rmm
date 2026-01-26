@@ -11,6 +11,7 @@ const agentSelect = document.getElementById('scanAgent');
 const liveDevicesList = document.getElementById('liveDevicesList');
 const scanSummaryEl = document.getElementById('scanSummary');
 const clearHistoryButton = document.getElementById('clearHistoryButton');
+const tenantBadge = document.getElementById('tenantBadge');
 
 const MAX_LIVE_DEVICES = 120;
 let liveDeviceCount = 0;
@@ -324,6 +325,28 @@ async function loadAgentOptions() {
   }
 }
 
+async function loadTenantInfo() {
+  if (!tenantBadge) {
+    return;
+  }
+
+  try {
+    const response = await authFetch('/tenants/current', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const tenant = data?.tenant;
+    const name = tenant?.name ?? 'unknown';
+    const suffix = tenant?.description ? ` – ${tenant.description}` : '';
+    tenantBadge.textContent = `Tenant: ${name}${suffix}`;
+  } catch (error) {
+    console.error('Unable to load tenant info', error);
+    tenantBadge.textContent = 'Tenant: unknown';
+  }
+}
+
 async function handleScanSubmit(event) {
   event.preventDefault();
   if (!scanForm || !scanStatusEl || !agentSelect) {
@@ -377,6 +400,7 @@ async function handleScanSubmit(event) {
 refreshButton?.addEventListener('click', () => {
   loadSnmpRecords();
   loadAgentOptions();
+  loadTenantInfo();
 });
 
 clearHistoryButton?.addEventListener('click', clearSnmpHistory);
@@ -387,3 +411,4 @@ window.addEventListener('beforeunload', closeScanStream);
 setInterval(loadSnmpRecords, 60_000);
 loadSnmpRecords();
 loadAgentOptions();
+loadTenantInfo();

@@ -61,7 +61,6 @@ internal static class Program
     private static string? screenSessionId;
     private static bool remoteUserInputBlocked;
     private static bool remoteScreenBlanked;
-    private static byte[]? blankFrameData;
     private static Thread? blankOverlayThread;
     private static ScreenBlankOverlay? blankOverlayForm;
     private static ManualResetEvent? blankOverlayReady;
@@ -5486,9 +5485,7 @@ internal static class Program
             try
             {
                 var targetScreen = GetCaptureScreen();
-                var frame = remoteScreenBlanked
-                    ? GetBlankFrameData()
-                    : CaptureScreenFrame(targetScreen);
+                var frame = CaptureScreenFrame(targetScreen);
                 if (screenDataChannel is not null)
                 {
                     if (frame.Length > 0)
@@ -5601,23 +5598,6 @@ internal static class Program
         encoderParams.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, ScreenJpegQuality);
         bitmap.Save(ms, encoder ?? ImageCodecInfo.GetImageEncoders()[0], encoderParams);
         return ms.ToArray();
-    }
-
-    private static byte[] GetBlankFrameData()
-    {
-        if (blankFrameData is not null)
-        {
-            return blankFrameData;
-        }
-
-        using var blank = new Bitmap(1, 1);
-        using (var g = Graphics.FromImage(blank))
-        {
-            g.Clear(Color.Black);
-        }
-
-        blankFrameData = EncodeBitmapToJpeg(blank);
-        return blankFrameData;
     }
 
     private static void ShowBlankOverlay()
@@ -6072,7 +6052,6 @@ internal static class Program
         }
 
         remoteScreenBlanked = blank;
-        blankFrameData = null;
         if (blank)
         {
             ShowBlankOverlay();

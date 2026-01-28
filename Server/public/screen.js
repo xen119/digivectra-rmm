@@ -525,8 +525,21 @@ function syncBlankScreenState() {
   }
 }
 
+function isEditableControl(target) {
+  if (!target || !(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName;
+  return tagName === 'INPUT' || tagName === 'TEXTAREA' || target.isContentEditable;
+}
+
 function handleKeyEvent(event, action) {
   if (!controlEnabled || !isControlChannelOpen()) {
+    return;
+  }
+
+  if (isEditableControl(event.target)) {
     return;
   }
 

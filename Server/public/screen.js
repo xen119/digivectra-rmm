@@ -3,9 +3,8 @@ const frameEl = document.getElementById('frame');
 const cursorEl = document.getElementById('remoteCursor');
 const controlButton = document.getElementById('controlButton');
 const controlInstructions = document.getElementById('controlInstructions');
-const screenSelect = document.getElementById('screenSelect');
-const resolutionSelect = document.getElementById('resolutionSelect');
-const viewModeSelect = document.getElementById('viewModeSelect');
+const displayButtonsContainer = document.getElementById('displayButtons');
+const desktopViewButton = document.getElementById('desktopViewButton');
 const keyMapContainer = document.getElementById('keyMapList');
 
 const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
@@ -19,7 +18,7 @@ let pc;
 let controlChannel;
 let controlEnabled = false;
 let selectedScreenId = null;
-let captureScale = 0.75;
+let captureScale = 1.0;
 let viewMode = 'single';
 let lastCursorPayload = null;
 let remoteUserInputBlocked = false;
@@ -64,46 +63,15 @@ if (frameEl) {
   });
 }
 
-if (screenSelect) {
-  screenSelect.addEventListener('change', async () => {
-    if (!screenSelect.value || screenSelect.value === selectedScreenId) {
+if (desktopViewButton) {
+  desktopViewButton.addEventListener('click', async () => {
+    if (viewMode === 'desktop') {
       return;
     }
 
-    selectedScreenId = screenSelect.value;
-    await restartScreenSession();
-  });
-}
-
-if (viewModeSelect) {
-  viewMode = viewModeSelect.value || viewMode;
-  viewModeSelect.addEventListener('change', async () => {
-    const requested = viewModeSelect.value;
-    if (!requested || requested === viewMode) {
-      return;
-    }
-
-    viewMode = requested;
-    updateScreenSelectState();
-    await restartScreenSession();
-  });
-}
-
-if (resolutionSelect) {
-  const initial = parseFloat(resolutionSelect.value);
-  captureScale = clampScale(!Number.isNaN(initial) ? initial : captureScale);
-  resolutionSelect.addEventListener('change', async () => {
-    const requested = parseFloat(resolutionSelect.value);
-    if (Number.isNaN(requested)) {
-      return;
-    }
-
-    const clamped = clampScale(requested);
-    if (Math.abs(clamped - captureScale) < 0.01) {
-      return;
-    }
-
-    captureScale = clamped;
+    viewMode = 'desktop';
+    selectedScreenId = null;
+    updateDisplayButtons();
     await restartScreenSession();
   });
 }
@@ -134,39 +102,56 @@ async function initialize() {
 }
 
 async function loadScreenOptions() {
-  if (!screenSelect || !agentId) {
+  if (!agentId || !displayButtonsContainer) {
     return;
   }
 
-    try {
-      const response = await authFetch(`/screen/${agentId}/screens`, { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+  try {
+    const response = await authFetch(`/screen/${agentId}/screens`, { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const payload = await response.json();
     const screens = Array.isArray(payload.screens) ? payload.screens : [];
     if (screens.length === 0) {
-      screenSelect.disabled = true;
+      displayButtonsContainer.innerHTML = '<span class="empty">No displays found.</span>';
       return;
     }
 
-    screenSelect.innerHTML = '';
+    displayButtonsContainer.innerHTML = '';
     screens.forEach((screen) => {
-      const option = document.createElement('option');
-      option.value = screen.id;
-      option.textContent = `${screen.name ?? screen.id} (${screen.width ?? '?'}x${screen.height ?? '?'})`;
-      screenSelect.appendChild(option);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'display-button';
+      button.dataset.screenId = screen.id;
+      button.textContent = `${screen.name ?? screen.id} (${screen.width ?? '?'}x${screen.height ?? '?'})`;
+
+      button.addEventListener('click', async () => {
+        if (viewMode === 'desktop') {
+          viewMode = 'single';
+        }
+        if (selectedScreenId === screen.id && viewMode === 'single') {
+          return;
+        }
+
+        selectedScreenId = screen.id;
+        viewMode = 'single';
+        updateDisplayButtons();
+        await restartScreenSession();
+      });
+
+      displayButtonsContainer.appendChild(button);
     });
 
     selectedScreenId = screens[0].id;
-    screenSelect.disabled = false;
-    updateScreenSelectState();
-    } catch (error) {
-      console.error('Failed to load screen list', error);
-      screenSelect.disabled = true;
-    }
+    viewMode = 'single';
+    updateDisplayButtons();
+  } catch (error) {
+    console.error('Failed to load screen list', error);
+    displayButtonsContainer.innerHTML = '<span class="empty">Unable to load displays.</span>';
   }
+}
 
 async function startScreenSession() {
   try {
@@ -211,13 +196,14 @@ async function startScreenSession() {
 
         if (payload.state) {
           const prefix = payload.state === 'offer-ready' ? 'Offer ready for' : 'Requesting screen stream for';
-          const viewLabel = payload.captureAllScreens ? 'Full desktop view' : 'Single display view';
+          const isDesktopView = Boolean(payload.captureAllScreens);
+          const viewLabel = isDesktopView ? 'Full desktop view' : 'Single display view';
           statusEl.textContent = `${prefix} ${agentName} · ${viewLabel}`;
-          if (viewModeSelect) {
-            viewModeSelect.value = payload.captureAllScreens ? 'desktop' : 'single';
-            viewMode = viewModeSelect.value;
+          viewMode = isDesktopView ? 'desktop' : 'single';
+          if (!isDesktopView && payload.screenId) {
+            selectedScreenId = payload.screenId;
           }
-          updateScreenSelectState();
+          updateDisplayButtons();
         }
       } catch (error) {
         console.error('Failed to parse screen status event', error);
@@ -612,6 +598,24 @@ function handleMouseWheel(event) {
   event.preventDefault();
 }
 
+function updateDisplayButtons() {
+  if (!displayButtonsContainer) {
+    return;
+  }
+
+  const buttons = displayButtonsContainer.querySelectorAll('.display-button');
+  buttons.forEach((button) => {
+    const matches = button.dataset.screenId === selectedScreenId;
+    const active = viewMode === 'single' && matches;
+    button.classList.toggle('active', active);
+    button.disabled = viewMode === 'desktop';
+  });
+
+  if (desktopViewButton) {
+    desktopViewButton.classList.toggle('active', viewMode === 'desktop');
+  }
+}
+
 function getFrameCoordinates(event) {
   const rect = frameEl?.getBoundingClientRect();
   if (!rect) {
@@ -707,14 +711,6 @@ function clampScale(value) {
   }
 
   return Math.min(Math.max(value, min), max);
-}
-
-function updateScreenSelectState() {
-  if (!screenSelect) {
-    return;
-  }
-
-  screenSelect.disabled = viewMode === 'desktop';
 }
 
 function setupChatCollapse() {

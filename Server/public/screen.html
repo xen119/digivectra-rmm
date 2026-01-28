@@ -105,6 +105,46 @@
         margin: 0.25rem 0 0;
       }
 
+      .display-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 0.35rem;
+      }
+
+      .display-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+      }
+
+      .display-button,
+      .display-control-button {
+        border: 1px solid #30363d;
+        border-radius: 999px;
+        padding: 0.35rem 0.9rem;
+        background: #161b22;
+        color: #cdd9e5;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+      }
+
+      .display-button.active,
+      .display-control-button.active {
+        background: #0d4c91;
+        border-color: #2563eb;
+        color: #e0f2ff;
+      }
+
+      .display-button:disabled {
+        border-color: #1f2937;
+        color: #4b5563;
+        cursor: not-allowed;
+      }
+
       .control-block {
         display: flex;
         align-items: center;
@@ -489,20 +529,13 @@
         <div class="status-row">
           <div class="status-group">
             <p id="status">Connecting to agent.</p>
-            <label for="screenSelect">Display</label>
-            <select id="screenSelect" disabled></select>
-            <label for="resolutionSelect">Resolution</label>
-            <select id="resolutionSelect">
-              <option value="1.0">High (100%)</option>
-              <option value="0.75" selected>Balanced (75%)</option>
-              <option value="0.5">Low (50%)</option>
-              <option value="0.35">Very low (35%)</option>
-            </select>
-            <label for="viewModeSelect">View</label>
-            <select id="viewModeSelect">
-              <option value="single">Single display</option>
-              <option value="desktop">Full desktop</option>
-            </select>
+            <label>Display</label>
+            <div class="display-controls">
+              <div id="displayButtons" class="display-buttons"></div>
+              <button id="desktopViewButton" class="display-control-button" type="button">
+                Full desktop
+              </button>
+            </div>
           </div>
         <div id="controlPanel">
           <button id="controlButton" disabled>Enable control</button>

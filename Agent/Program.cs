@@ -96,6 +96,12 @@ internal static class Program
     private static string[] activeMonitoringMetrics = Array.Empty<string>();
     private static readonly ImageCodecInfo? JpegEncoder = ImageCodecInfo.GetImageEncoders()
         .FirstOrDefault(codec => codec.FormatID == ImageFormat.Jpeg.Guid);
+    private enum DisplayAffinity : uint
+    {
+        WDA_NONE = 0x0,
+        WDA_MONITOR = 0x1,
+        WDA_EXCLUDEFROMCAPTURE = 0x11,
+    }
     private static readonly Dictionary<string, ushort> VirtualKeyMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["Enter"] = 0x0D,
@@ -5627,19 +5633,12 @@ internal static class Program
                         blankOverlayForm = overlay;
                     }
 
+                    SetWindowDisplayAffinity(overlay.Handle, DisplayAffinity.WDA_EXCLUDEFROMCAPTURE);
                     Application.Run(overlay);
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Blank overlay failed: {ex}");
-                }
-                finally
-                {
-                    lock (blankOverlayLock)
-                    {
-                        blankOverlayForm = null;
-                        blankOverlayThread = null;
-                    }
                 }
             })
             {
@@ -6066,6 +6065,9 @@ internal static class Program
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowDisplayAffinity(IntPtr hwnd, DisplayAffinity affinity);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool BlockInput(bool fBlockIt);

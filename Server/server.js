@@ -5356,6 +5356,9 @@ function emitShellOutput(agentId, data) {
   stream.write('event: shell\n');
   stream.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
+function notifyShellOutputWaiters(agentId) {
+  // placeholder to satisfy existing call sites; no waiters to notify currently.
+}
 
 function collectBody(req, callback) {
   let body = '';

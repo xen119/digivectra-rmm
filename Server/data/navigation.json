@@ -29,7 +29,7 @@
   },
   {
     "id": "network-scanner",
-    "visible": true
+    "visible": false
   },
   {
     "id": "scripts",
@@ -41,23 +41,23 @@
   },
   {
     "id": "ai-agent",
-    "visible": true
+    "visible": false
   },
   {
     "id": "tenants",
-    "visible": true
+    "visible": false
   },
   {
     "id": "users",
-    "visible": true
+    "visible": false
   },
   {
     "id": "compliance",
-    "visible": true
+    "visible": false
   },
   {
     "id": "compliance-admin",
-    "visible": true
+    "visible": false
   },
   {
     "id": "gpo",

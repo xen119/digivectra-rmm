@@ -566,3 +566,314 @@ function setupChatCollapse() {
 }
 
 setupChatCollapse();
+
+const shellSummaryEl = document.getElementById('shellSummary');
+const shellStatusEl = document.getElementById('shellStatus');
+const shellLogEl = document.getElementById('shellLog');
+const shellForm = document.getElementById('shellForm');
+const shellInput = document.getElementById('shellInput');
+const shellSubmit = document.getElementById('shellSubmit');
+let shellSource;
+let shellAgentName = agentName;
+
+if (!agentId) {
+  if (shellSummaryEl) {
+    shellSummaryEl.textContent = 'Agent identifier missing.';
+  }
+  if (shellSubmit) {
+    shellSubmit.disabled = true;
+  }
+} else {
+  shellSource = new EventSource(`/shell/${agentId}`);
+
+  shellSource.addEventListener('shell', (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      const prefix = payload.stream === 'stderr' ? '[stderr]' : '[stdout]';
+      appendShellLine(`${prefix} ${payload.output}`);
+    } catch (error) {
+      console.error(error);
+    }
+  });
+
+  shellSource.onopen = () => {
+    if (shellSummaryEl) {
+      shellSummaryEl.textContent = `Streaming shell for ${shellAgentName || agentId}`;
+    }
+    if (shellStatusEl) {
+      shellStatusEl.textContent = 'Connected';
+    }
+  };
+
+  shellSource.onerror = () => {
+    if (shellSummaryEl) {
+      shellSummaryEl.textContent = 'Reconnecting to agent…';
+    }
+    if (shellStatusEl) {
+      shellStatusEl.textContent = 'Reconnecting…';
+    }
+  };
+
+  refreshShellAgentInfo();
+}
+
+async function refreshShellAgentInfo() {
+  if (!agentId) {
+    return;
+  }
+
+  try {
+    const response = await authFetch('/clients', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error('agent lookup failed');
+    }
+
+    const agents = await response.json();
+    const agent = Array.isArray(agents) ? agents.find((entry) => entry.id === agentId) : null;
+    if (agent) {
+      shellAgentName = agent.name;
+      if (shellSummaryEl) {
+        shellSummaryEl.textContent = `Streaming shell for ${agent.name}`;
+      }
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+shellForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  if (!agentId) {
+    return;
+  }
+
+  const command = shellInput?.value.trim();
+  if (!command) {
+    return;
+  }
+
+  try {
+    await authFetch(`/shell/${agentId}/input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      body: command,
+    });
+    if (shellStatusEl) {
+      shellStatusEl.textContent = 'Command sent';
+    }
+  } catch (error) {
+    console.error(error);
+    appendShellLine('[local] failed to send command.');
+    if (shellStatusEl) {
+      shellStatusEl.textContent = 'Send failed';
+    }
+  }
+
+  if (shellInput) {
+    shellInput.value = '';
+  }
+});
+
+function appendShellLine(text) {
+  if (!shellLogEl) {
+    return;
+  }
+
+  shellLogEl.textContent += `${text}\n`;
+  shellLogEl.scrollTop = shellLogEl.scrollHeight;
+}
+
+const aiStatusEl = document.getElementById('screenAiConfigStatus');
+const aiMessageList = document.getElementById('screenAiMessageList');
+const aiForm = document.getElementById('screenAiForm');
+const aiInput = document.getElementById('screenAiInput');
+const aiButton = document.getElementById('screenAiButton');
+const aiActivityEl = document.getElementById('screenAiActivity');
+const aiSessionIdEl = document.getElementById('screenAiSessionId');
+
+let aiSessionId = null;
+let aiReady = false;
+
+function setAiStatus(message, variant = 'info') {
+  if (!aiStatusEl) {
+    return;
+  }
+  aiStatusEl.textContent = message;
+  aiStatusEl.dataset.state = variant;
+}
+
+function setAiFormReady(enabled) {
+  if (aiInput) {
+    aiInput.disabled = !enabled;
+  }
+  if (aiButton) {
+    aiButton.disabled = !enabled;
+  }
+}
+
+function clearAiPlaceholder() {
+  const placeholder = aiMessageList?.querySelector('.ai-empty');
+  placeholder?.remove();
+}
+
+function renderAiEntry(role, content) {
+  if (!aiMessageList || !content) {
+    return;
+  }
+  clearAiPlaceholder();
+  const wrapper = document.createElement('div');
+  wrapper.className = `ai-message ${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'ai-bubble';
+  bubble.textContent = content;
+  wrapper.appendChild(bubble);
+  aiMessageList.appendChild(wrapper);
+  aiMessageList.scrollTop = aiMessageList.scrollHeight;
+}
+
+function formatTimestamp(value) {
+  if (!value) {
+    return 'Unknown time';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown time';
+  }
+  return date.toLocaleString();
+}
+
+function updateAiActivity(entries) {
+  if (!aiActivityEl) {
+    return;
+  }
+  if (!Array.isArray(entries) || entries.length === 0) {
+    aiActivityEl.textContent = 'No recent activity.';
+    return;
+  }
+  const latest = entries[0];
+  const label = latest.type ? latest.type.replace(/-/g, ' ') : 'entry';
+  aiActivityEl.textContent = `${label} · ${formatTimestamp(latest.timestamp)} · ${latest.text ?? '—'}`;
+}
+
+async function loadAiActivityLog() {
+  if (!aiActivityEl) {
+    return;
+  }
+  try {
+    const response = await authFetch('/ai/history?limit=3', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    updateAiActivity(Array.isArray(data.history) ? data.history : []);
+  } catch (error) {
+    console.error(error);
+    aiActivityEl.textContent = 'Unable to load activity.';
+  }
+}
+
+async function loadAiSettings() {
+  try {
+    const response = await authFetch('/settings/ai', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    aiReady = Boolean(data.apiKeyConfigured);
+    if (aiStatusEl) {
+      aiStatusEl.textContent = aiReady ? 'AI assistant ready.' : 'Configure OpenAI key in Settings.';
+    }
+    setAiFormReady(aiReady);
+  } catch (error) {
+    console.error(error);
+    aiReady = false;
+    if (aiStatusEl) {
+      aiStatusEl.textContent = 'Unable to load AI configuration.';
+    }
+    setAiFormReady(false);
+  }
+}
+
+async function ensureAiSession() {
+  try {
+    const response = await authFetch('/ai/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    aiSessionId = data.sessionId;
+    if (aiSessionIdEl) {
+      aiSessionIdEl.textContent = aiSessionId ? aiSessionId.slice(0, 8) : '—';
+    }
+  } catch (error) {
+    console.error(error);
+    setAiStatus('Unable to start AI session.', 'error');
+  }
+}
+
+async function sendAiMessage(text) {
+  if (!aiReady) {
+    setAiStatus('Enable the AI API key first.', 'warning');
+    return;
+  }
+  if (!aiSessionId) {
+    setAiStatus('Session unavailable.', 'error');
+    return;
+  }
+  setAiFormReady(false);
+  renderAiEntry('user', text);
+  try {
+    const response = await authFetch('/ai/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: aiSessionId, text }),
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status} ${body}`);
+    }
+    const data = await response.json();
+    aiSessionId = data.sessionId ?? aiSessionId;
+    if (aiSessionIdEl) {
+      aiSessionIdEl.textContent = aiSessionId ? aiSessionId.slice(0, 8) : '—';
+    }
+    if (typeof data.message === 'string' && data.message) {
+      renderAiEntry('assistant', data.message);
+    }
+    setAiStatus('Assistant replied.', 'success');
+    loadAiActivityLog();
+  } catch (error) {
+    console.error(error);
+    setAiStatus('AI request failed. Try again.', 'error');
+  } finally {
+    if (aiInput) {
+      aiInput.value = '';
+      aiInput.focus();
+    }
+    setAiFormReady(aiReady);
+  }
+}
+
+function handleAiSubmit(event) {
+  event.preventDefault();
+  const text = aiInput?.value.trim();
+  if (!text) {
+    return;
+  }
+  sendAiMessage(text);
+}
+
+async function initAiAssistant() {
+  setAiFormReady(false);
+  setAiStatus('Loading AI configuration…');
+  await loadAiSettings();
+  await ensureAiSession();
+  await loadAiActivityLog();
+  aiForm?.addEventListener('submit', handleAiSubmit);
+}
+
+initAiAssistant();

@@ -62,6 +62,10 @@ internal static class Program
     private static bool remoteUserInputBlocked;
     private static bool remoteScreenBlanked;
     private static byte[]? blankFrameData;
+    private static Thread? blankOverlayThread;
+    private static ScreenBlankOverlay? blankOverlayForm;
+    private static ManualResetEvent? blankOverlayReady;
+    private static readonly object blankOverlayLock = new();
     private static string? currentChatSessionId;
     private static string? selectedScreenId;
     private enum SessionResult
@@ -5616,6 +5620,108 @@ internal static class Program
         return blankFrameData;
     }
 
+    private static void ShowBlankOverlay()
+    {
+        lock (blankOverlayLock)
+        {
+            if (blankOverlayForm is not null)
+            {
+                blankOverlayForm.BeginInvoke((Action)(() =>
+                {
+                    blankOverlayForm.Bounds = SystemInformation.VirtualScreen;
+                    if (!blankOverlayForm.Visible)
+                    {
+                        blankOverlayForm.Show();
+                    }
+                    blankOverlayForm.TopMost = true;
+                }));
+                return;
+            }
+
+            blankOverlayReady?.Dispose();
+            blankOverlayReady = new ManualResetEvent(false);
+            blankOverlayThread = new Thread(() =>
+            {
+                using var overlay = new ScreenBlankOverlay();
+                lock (blankOverlayLock)
+                {
+                    blankOverlayForm = overlay;
+                }
+
+                blankOverlayReady?.Set();
+                Application.Run(overlay);
+
+                lock (blankOverlayLock)
+                {
+                    blankOverlayForm = null;
+                    blankOverlayThread = null;
+                }
+            })
+            {
+                IsBackground = true,
+                Priority = ThreadPriority.AboveNormal
+            };
+            blankOverlayThread.SetApartmentState(ApartmentState.STA);
+            blankOverlayThread.Start();
+            blankOverlayReady.WaitOne();
+        }
+    }
+
+    private static void HideBlankOverlay()
+    {
+        lock (blankOverlayLock)
+        {
+            blankOverlayReady?.Dispose();
+            blankOverlayReady = null;
+            if (blankOverlayForm is not null)
+            {
+                blankOverlayForm.BeginInvoke((Action)(() => blankOverlayForm.Close()));
+            }
+        }
+    }
+
+    private sealed class ScreenBlankOverlay : Form
+    {
+        private const int WS_EX_NOACTIVATE = 0x08000000;
+        private const int WS_EX_TOOLWINDOW = 0x00000080;
+
+        protected override bool ShowWithoutActivation => true;
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.ExStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+                return cp;
+            }
+        }
+
+        public ScreenBlankOverlay()
+        {
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            BackColor = Color.Black;
+            Opacity = 1.0;
+            StartPosition = FormStartPosition.Manual;
+            Bounds = SystemInformation.VirtualScreen;
+            TopMost = true;
+            Enabled = false;
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            Bounds = SystemInformation.VirtualScreen;
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            Bounds = SystemInformation.VirtualScreen;
+        }
+    }
+
     private static Screen GetCaptureScreen()
     {
         var screens = Screen.AllScreens;
@@ -5966,9 +6072,14 @@ internal static class Program
         }
 
         remoteScreenBlanked = blank;
-        if (!blank)
+        blankFrameData = null;
+        if (blank)
         {
-            blankFrameData = null;
+            ShowBlankOverlay();
+        }
+        else
+        {
+            HideBlankOverlay();
         }
     }
 

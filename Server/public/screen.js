@@ -20,7 +20,9 @@ let selectedScreenId = null;
 let captureScale = 0.75;
 let lastCursorPayload = null;
 let remoteUserInputBlocked = false;
+let remoteScreenBlanked = false;
 let pendingRemoteUserInputBlock = null;
+let pendingRemoteScreenBlank = null;
 
 if (controlButton) {
   controlButton.addEventListener('click', () => {
@@ -278,6 +280,7 @@ async function handleOffer(payload) {
         controlInstructions.textContent = 'Click to enable remote control.';
       }
       syncBlockInputState();
+      syncBlankScreenState();
     };
 
     channel.onclose = () => {
@@ -361,6 +364,7 @@ function setControlEnabled(enabled) {
 }
 
 const blockInputToggle = document.getElementById('blockInputToggle');
+const blankScreenToggle = document.getElementById('blankScreenToggle');
 
 function updateControlInstructions() {
   if (!controlInstructions) {
@@ -383,6 +387,11 @@ blockInputToggle?.addEventListener('change', () => {
   remoteUserInputBlocked = blockInputToggle.checked;
   updateControlInstructions();
   syncBlockInputState();
+});
+
+blankScreenToggle?.addEventListener('change', () => {
+  remoteScreenBlanked = blankScreenToggle.checked;
+  syncBlankScreenState();
 });
 
 function sendControlMessage(payload) {
@@ -415,6 +424,27 @@ function syncBlockInputState() {
     controlChannel?.send(JSON.stringify(payload));
   } catch (error) {
     console.error('Failed to update block input state', error);
+  }
+}
+
+function syncBlankScreenState() {
+  if (!isControlChannelOpen()) {
+    pendingRemoteScreenBlank = remoteScreenBlanked;
+    return;
+  }
+
+  const blankState = pendingRemoteScreenBlank ?? remoteScreenBlanked;
+  pendingRemoteScreenBlank = null;
+
+  const payload = {
+    type: 'blank-screen',
+    blank: blankState,
+  };
+
+  try {
+    controlChannel?.send(JSON.stringify(payload));
+  } catch (error) {
+    console.error('Failed to update blank screen state', error);
   }
 }
 

@@ -60,6 +60,8 @@ internal static class Program
     private static Task? screenCaptureTask;
     private static string? screenSessionId;
     private static bool remoteUserInputBlocked;
+    private static bool remoteScreenBlanked;
+    private static byte[]? blankFrameData;
     private static string? currentChatSessionId;
     private static string? selectedScreenId;
     private enum SessionResult
@@ -5222,6 +5224,8 @@ internal static class Program
         selectedScreenId = screenId;
         captureScale = ClampCaptureScale(requestedScale);
         SetRemoteUserInputBlocked(false);
+        SetRemoteScreenBlanked(false);
+        SetRemoteScreenBlanked(false);
         Console.WriteLine($"Starting screen session {sessionId} (screen:{selectedScreenId ?? "primary"})");
         if (requireConsent)
         {
@@ -5478,7 +5482,9 @@ internal static class Program
             try
             {
                 var targetScreen = GetCaptureScreen();
-                var frame = CaptureScreenFrame(targetScreen);
+                var frame = remoteScreenBlanked
+                    ? GetBlankFrameData()
+                    : CaptureScreenFrame(targetScreen);
                 if (screenDataChannel is not null)
                 {
                     if (frame.Length > 0)
@@ -5593,6 +5599,23 @@ internal static class Program
         return ms.ToArray();
     }
 
+    private static byte[] GetBlankFrameData()
+    {
+        if (blankFrameData is not null)
+        {
+            return blankFrameData;
+        }
+
+        using var blank = new Bitmap(1, 1);
+        using (var g = Graphics.FromImage(blank))
+        {
+            g.Clear(Color.Black);
+        }
+
+        blankFrameData = EncodeBitmapToJpeg(blank);
+        return blankFrameData;
+    }
+
     private static Screen GetCaptureScreen()
     {
         var screens = Screen.AllScreens;
@@ -5679,6 +5702,10 @@ internal static class Program
             else if (string.Equals(type, "block-input", StringComparison.OrdinalIgnoreCase))
             {
                 HandleBlockInputMessage(root);
+            }
+            else if (string.Equals(type, "blank-screen", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleBlankScreenMessage(root);
             }
         }
         catch (JsonException)
@@ -5772,6 +5799,21 @@ internal static class Program
         }
 
         SetRemoteUserInputBlocked(blockElement.GetBoolean());
+    }
+
+    private static void HandleBlankScreenMessage(JsonElement root)
+    {
+        if (!root.TryGetProperty("blank", out var blankElement))
+        {
+            return;
+        }
+
+        if (blankElement.ValueKind != JsonValueKind.True && blankElement.ValueKind != JsonValueKind.False)
+        {
+            return;
+        }
+
+        SetRemoteScreenBlanked(blankElement.GetBoolean());
     }
 
     private static bool TryGetNormalizedCoordinates(JsonElement root, out int normalizedX, out int normalizedY)
@@ -5913,6 +5955,20 @@ internal static class Program
         if (!BlockInput(block))
         {
             Console.WriteLine($"BlockInput({block}) failed ({Marshal.GetLastWin32Error()}).");
+        }
+    }
+
+    private static void SetRemoteScreenBlanked(bool blank)
+    {
+        if (remoteScreenBlanked == blank)
+        {
+            return;
+        }
+
+        remoteScreenBlanked = blank;
+        if (!blank)
+        {
+            blankFrameData = null;
         }
     }
 

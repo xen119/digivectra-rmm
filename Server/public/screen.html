@@ -104,32 +104,231 @@
         font-size: 0.85rem;
         margin: 0.25rem 0 0;
       }
+
+      .screen-layout {
+        display: grid;
+        gap: 1.5rem;
+        grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+        align-items: start;
+      }
+
+      .screen-layout.chat-collapsed {
+        grid-template-columns: minmax(0, 2fr) auto;
+      }
+
+      .screen-panel {
+        background: #0b1119;
+        border: 1px solid #22272d;
+        border-radius: 0.75rem;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .chat-panel {
+        background: #0b1119;
+        border: 1px solid #22272d;
+        border-radius: 0.75rem;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .chat-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 0.5rem;
+      }
+
+      .chat-header h2 {
+        margin: 0;
+        font-size: 1.25rem;
+      }
+
+      .chat-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .chat-toggle {
+        border: 1px solid #30363d;
+        border-radius: 0.5rem;
+        padding: 0.35rem 0.85rem;
+        background: #161b22;
+        color: #cdd9e5;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .chat-indicator {
+        width: 0.75rem;
+        height: 0.75rem;
+        border-radius: 50%;
+        background: #4b5563;
+        transition: background 0.2s ease, transform 0.2s ease;
+      }
+
+      .chat-indicator.chat-indicator--active {
+        background: #38bdf8;
+        transform: scale(1.4);
+      }
+
+      .chat-panel.collapsed {
+        min-width: 3rem;
+        width: 3rem;
+        padding-right: 0.25rem;
+        align-items: center;
+      }
+
+      .chat-panel.collapsed .chat-header {
+        justify-content: center;
+      }
+
+      .chat-panel.collapsed .chat-header h2,
+      .chat-panel.collapsed .chat-header .chat-subtitle {
+        display: none;
+      }
+
+      .chat-panel.collapsed .chat-history,
+      .chat-panel.collapsed .chat-form,
+      .chat-panel.collapsed .status-text {
+        display: none;
+      }
+
+      .chat-subtitle {
+        margin: 0.2rem 0 0;
+        font-size: 0.9rem;
+        color: #8b949e;
+      }
+
+      .chat-history {
+        background: #0f141a;
+        border: 1px solid #22272d;
+        border-radius: 0.75rem;
+        padding: 0.75rem;
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .chat-message {
+        padding: 0.65rem 0.75rem;
+        border-radius: 0.5rem;
+        font-size: 0.95rem;
+        line-height: 1.4;
+      }
+
+      .chat-message.server {
+        background: #0a2b45;
+        align-self: flex-end;
+        color: #c7f5ff;
+      }
+
+      .chat-message.agent {
+        background: #1f2933;
+        align-self: flex-start;
+      }
+
+      .chat-message .meta {
+        font-size: 0.75rem;
+        color: #94a3b8;
+        margin-bottom: 0.25rem;
+      }
+
+      .chat-form {
+        display: flex;
+        gap: 0.5rem;
+      }
+
+      .chat-form input[type='text'] {
+        flex: 1;
+        border-radius: 0.5rem;
+        border: 1px solid #30363d;
+        background: #010409;
+        color: #cdd9e5;
+        padding: 0.65rem 0.8rem;
+        font-size: 1rem;
+      }
+
+      .chat-form button {
+        border: none;
+        border-radius: 0.5rem;
+        padding: 0.65rem 1.25rem;
+        background: #238636;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .status-text {
+        margin: 0;
+        color: #8b949e;
+        font-size: 0.9rem;
+      }
+
+      @media (max-width: 900px) {
+        .screen-layout {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
   </head>
   <body>
-    <h1>Agent Screen</h1>
-    <div class="status-row">
-      <div class="status-group">
-        <p id="status">Connecting to agent.</p>
-        <label for="screenSelect">Display</label>
-        <select id="screenSelect" disabled></select>
-        <label for="resolutionSelect">Resolution</label>
-        <select id="resolutionSelect">
-          <option value="1.0">High (100%)</option>
-          <option value="0.75" selected>Balanced (75%)</option>
-          <option value="0.5">Low (50%)</option>
-          <option value="0.35">Very low (35%)</option>
-        </select>
-      </div>
-      <div id="controlPanel">
-        <button id="controlButton" disabled>Enable control</button>
-        <p id="controlInstructions">Control is disabled until the data channel opens.</p>
-      </div>
-    </div>
-    <div class="frame-wrapper">
-      <img id="frame" alt="Live screen" />
-      <div id="remoteCursor" aria-hidden="true"></div>
+    <div class="screen-layout">
+      <section class="screen-panel">
+        <h1>Agent Screen</h1>
+        <div class="status-row">
+          <div class="status-group">
+            <p id="status">Connecting to agent.</p>
+            <label for="screenSelect">Display</label>
+            <select id="screenSelect" disabled></select>
+            <label for="resolutionSelect">Resolution</label>
+            <select id="resolutionSelect">
+              <option value="1.0">High (100%)</option>
+              <option value="0.75" selected>Balanced (75%)</option>
+              <option value="0.5">Low (50%)</option>
+              <option value="0.35">Very low (35%)</option>
+            </select>
+          </div>
+          <div id="controlPanel">
+            <button id="controlButton" disabled>Enable control</button>
+            <p id="controlInstructions">Control is disabled until the data channel opens.</p>
+          </div>
+        </div>
+        <div class="frame-wrapper">
+          <img id="frame" alt="Live screen" />
+          <div id="remoteCursor" aria-hidden="true"></div>
+        </div>
+      </section>
+      <section class="chat-panel">
+        <header class="chat-header">
+          <div>
+            <h2>Agent Chat</h2>
+            <p class="chat-subtitle">Talking to <span id="agentName">...</span></p>
+          </div>
+          <div class="chat-header-actions">
+            <button id="chatToggle" class="chat-toggle" type="button" aria-expanded="true">Hide chat</button>
+            <span id="chatIndicator" class="chat-indicator" aria-hidden="true"></span>
+            <span id="statusLabel" class="chat-subtitle">Connecting...</span>
+          </div>
+        </header>
+        <div id="chatHistory" class="chat-history">
+          <div id="emptyHistory">Awaiting chat events...</div>
+        </div>
+        <form id="chatForm" class="chat-form">
+          <input id="chatInput" type="text" autocomplete="off" placeholder="Type a message and press Enter" />
+          <button type="submit">Send</button>
+        </form>
+        <p id="statusText" class="status-text">Messages flow over a secure channel.</p>
+      </section>
     </div>
     <script src="screen.js"></script>
+    <script src="chat.js"></script>
   </body>
 </html>

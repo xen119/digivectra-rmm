@@ -77,6 +77,12 @@
         color: white;
       }
 
+      .managed-alert {
+        margin: 0 0 1rem;
+        color: #fbbf24;
+        font-size: 0.95rem;
+      }
+
       #status {
         margin: 0;
         margin-bottom: 1rem;
@@ -157,6 +163,136 @@
         margin: 0;
       }
 
+      .installed-section {
+        border: 1px solid #30363d;
+        border-radius: 0.75rem;
+        background: #0f141a;
+        padding: 1rem;
+        margin-top: 1rem;
+        box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.05);
+      }
+
+      .installed-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .installed-header strong {
+        display: block;
+        font-size: 1.1rem;
+      }
+
+      .installed-note {
+        margin: 0.15rem 0 0;
+        font-size: 0.85rem;
+        color: #94a3b8;
+      }
+
+      .installed-count {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #a5b4fc;
+      }
+
+      .installed-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.65rem;
+      }
+
+      .installed-entry {
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        padding-top: 0.65rem;
+      }
+
+      .installed-entry:first-child {
+        border-top: none;
+        padding-top: 0;
+      }
+
+      .installed-entry-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+      }
+
+      .installed-entry strong {
+        font-size: 1rem;
+      }
+
+      .installed-entry p {
+        margin: 0.2rem 0;
+        color: #e2e8f0;
+        font-size: 0.9rem;
+      }
+
+      .installed-entry small {
+        color: #94a3b8;
+        display: block;
+      }
+
+      .installed-date {
+        font-size: 0.85rem;
+        color: #94a3b8;
+      }
+
+      .installed-result {
+        margin-top: 0.1rem;
+      }
+
+      .installed-category-card {
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 0.75rem;
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+        background: #0f141a;
+      }
+
+      .installed-category-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .installed-category-count {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #a5b4fc;
+      }
+
+      .installed-category-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .installed-actions {
+        margin-top: 0.35rem;
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .installed-uninstall {
+        border: none;
+        border-radius: 0.5rem;
+        padding: 0.35rem 0.9rem;
+        font-weight: 600;
+        background: #dc2626;
+        color: white;
+        cursor: pointer;
+      }
+
+      .installed-uninstall:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
       #log {
         margin-top: 2rem;
         font-size: 0.85rem;
@@ -180,7 +316,18 @@
       <button id="installButton" type="button" disabled>Install selected updates</button>
     </div>
     <p id="status">Fetching update data...</p>
+    <p id="managedAlert" class="managed-alert" hidden>Updates are managed by policy so uninstall requests are disabled.</p>
     <section id="categories"></section>
+    <section id="installedSection" class="installed-section">
+      <div class="installed-header">
+        <div>
+          <strong>Installed updates</strong>
+          <p class="installed-note">Showing the most recent installed updates.</p>
+        </div>
+        <span id="installedCount" class="installed-count">0</span>
+      </div>
+      <div id="installedList" class="installed-list"></div>
+    </section>
     <div id="log"></div>
     <script src="updates.js"></script>
   </body>

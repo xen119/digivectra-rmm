@@ -543,3 +543,26 @@ function clampScale(value) {
 
   return Math.min(Math.max(value, min), max);
 }
+
+function setupChatCollapse() {
+  const chatPanel = document.querySelector('.chat-panel');
+  const chatToggle = document.getElementById('chatToggle');
+  const layout = document.querySelector('.screen-layout');
+  if (!chatPanel || !chatToggle) {
+    return;
+  }
+
+  chatToggle.addEventListener('click', () => {
+    const collapsed = chatPanel.classList.toggle('collapsed');
+    if (layout) {
+      layout.classList.toggle('chat-collapsed', collapsed);
+    }
+    chatToggle.textContent = collapsed ? 'Show chat' : 'Hide chat';
+    chatToggle.setAttribute('aria-expanded', (!collapsed).toString());
+    if (!collapsed && typeof window.clearChatIndicator === 'function') {
+      window.clearChatIndicator();
+    }
+  });
+}
+
+setupChatCollapse();

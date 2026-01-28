@@ -417,7 +417,6 @@ internal static class Program
     private static string? agentLicenseCode;
     private static DeviceSpecs? deviceSpecs;
     private static UpdateSummary? lastUpdateSummary;
-    private static BsodSummary? lastBsodSummary;
     private static readonly Dictionary<int, ProcessSample> processSamples = new();
     private static readonly string[] UpdateCategoryOrder = new[]
     {
@@ -443,6 +442,10 @@ internal static class Program
         ["Cumulative Updates"] = "All fixes combined",
         ["Other Updates"] = "Miscellaneous updates",
     };
+    private const int InstalledUpdateHistoryLimit = 150;
+    private static readonly Regex InstalledKbRegex = new(@"\bKB\d+\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static bool? updatePolicyManaged;
 
     private static async Task SendAgentIdentityAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
@@ -467,7 +470,6 @@ internal static class Program
         });
         await SendTextAsync(socket, identity, cancellationToken);
         await SendAgentUpdateSummaryAsync(socket, cancellationToken);
-        await SendBsodSummaryAsync(socket, cancellationToken);
     }
 
     private static string? GetPreferredInternalIpAddress()
@@ -1372,6 +1374,7 @@ internal static class Program
             summary = new UpdateSummary();
         }
 
+        summary.ManagedByPolicy = AreUpdatesManagedByPolicy();
         lastUpdateSummary = summary;
         await SendJsonAsync(socket, new
         {
@@ -1461,19 +1464,6 @@ internal static class Program
         }
 
         return false;
-    }
-
-    private static async Task SendBsodSummaryAsync(ClientWebSocket socket, CancellationToken cancellationToken, bool force = false)
-    {
-        if (!force && lastBsodSummary is not null)
-        {
-            await SendJsonAsync(socket, new { type = "bsod-summary", summary = lastBsodSummary }, cancellationToken);
-            return;
-        }
-
-        var summary = CollectBsodSummary();
-        lastBsodSummary = summary;
-        await SendJsonAsync(socket, new { type = "bsod-summary", summary }, cancellationToken);
     }
 
     private static async Task SendProcessListAsync(ClientWebSocket socket, CancellationToken cancellationToken)
@@ -2753,49 +2743,6 @@ internal static class Program
         return Task.Run(() => CollectUpdateSummary());
     }
 
-    private static BsodSummary CollectBsodSummary()
-    {
-        var summary = new BsodSummary();
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            return summary;
-        }
-
-        try
-        {
-            var queryText = "*[System/EventID=1001]";
-            var query = new EventLogQuery("System", PathType.LogName, queryText);
-            using var reader = new EventLogReader(query);
-            var events = new List<BsodEvent>();
-            EventRecord? record;
-            while (events.Count < 50 && (record = reader.ReadEvent()) is not null)
-            {
-                using (record)
-                {
-                    var description = record.FormatDescription() ?? record.ProviderName ?? string.Empty;
-                    events.Add(new BsodEvent
-                    {
-                        TimestampUtc = record.TimeCreated?.ToUniversalTime() ?? DateTime.MinValue,
-                        Description = description
-                    });
-                }
-            }
-
-            summary.TotalCount = events.Count;
-            summary.Events = events.ToArray();
-        }
-        catch (EventLogNotFoundException)
-        {
-            // ignore missing log
-        }
-        catch (Exception)
-        {
-            // ignore other failures
-        }
-
-        return summary;
-    }
-
     private static UpdateSummary CollectUpdateSummary()
     {
         var sessionType = Type.GetTypeFromProgID("Microsoft.Update.Session");
@@ -2885,11 +2832,14 @@ internal static class Program
             });
         }
 
+        var installed = CollectInstalledUpdates(searcher);
+
         return new UpdateSummary
         {
             RetrievedAt = DateTime.UtcNow,
             TotalCount = entries.Count,
-            Categories = ordered.ToArray()
+            Categories = ordered.ToArray(),
+            InstalledUpdates = installed
         };
     }
 
@@ -2912,6 +2862,142 @@ internal static class Program
         }
 
         return ids.ToArray();
+    }
+
+    private static InstalledUpdateEntry[] CollectInstalledUpdates(dynamic searcher)
+    {
+        if (searcher is null)
+        {
+            return Array.Empty<InstalledUpdateEntry>();
+        }
+
+        try
+        {
+            var totalHistory = Math.Max(0, Convert.ToInt32(searcher.GetTotalHistoryCount()));
+            if (totalHistory == 0)
+            {
+                return Array.Empty<InstalledUpdateEntry>();
+            }
+
+            var fetchCount = Math.Min(totalHistory, InstalledUpdateHistoryLimit);
+            dynamic history = searcher.QueryHistory(0, fetchCount);
+            if (history is null)
+            {
+                return Array.Empty<InstalledUpdateEntry>();
+            }
+
+            var entries = new List<InstalledUpdateEntry>();
+            var available = Math.Max(0, Convert.ToInt32(history.Count));
+            for (var i = 0; i < available; i++)
+            {
+                dynamic? historyEntry;
+                try
+                {
+                    historyEntry = history.Item(i);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (historyEntry is null)
+                {
+                    continue;
+                }
+
+                string? updateId = historyEntry.UpdateIdentity?.UpdateID as string;
+                var installedEntry = new InstalledUpdateEntry
+                {
+                    Id = !string.IsNullOrWhiteSpace(updateId) ? updateId.Trim() : string.Empty,
+                    Title = ((historyEntry.Title as string)?.Trim()) ?? "Unnamed update",
+                    Description = (historyEntry.Description as string)?.Trim(),
+                    KBArticleIDs = CollectKbArticles(historyEntry),
+                    Categories = ExtractHistoryCategories(historyEntry),
+                    InstalledOn = historyEntry.Date is DateTime installedDate
+                        ? DateTime.SpecifyKind(installedDate, DateTimeKind.Utc)
+                        : null,
+                    ResultCode = historyEntry.ResultCode?.ToString()
+                };
+                entries.Add(installedEntry);
+            }
+
+            if (entries.Count > 1)
+            {
+                entries.Sort((a, b) => Nullable.Compare<DateTime>(b.InstalledOn, a.InstalledOn));
+            }
+
+            return entries.Take(InstalledUpdateHistoryLimit).ToArray();
+        }
+        catch
+        {
+            return Array.Empty<InstalledUpdateEntry>();
+        }
+    }
+
+    private static string? NormalizeKbIdentifier(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var match = InstalledKbRegex.Match(value);
+        return match.Success ? match.Value.ToUpperInvariant() : null;
+    }
+
+    private static bool AreUpdatesManagedByPolicy()
+    {
+        if (updatePolicyManaged.HasValue)
+        {
+            return updatePolicyManaged.Value;
+        }
+
+        var policyPaths = new[]
+        {
+            @"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU",
+            @"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate",
+            @"SOFTWARE\Microsoft\PolicyManager\current\device\Update",
+            @"SOFTWARE\Microsoft\PolicyManager\Update"
+        };
+
+        foreach (var path in policyPaths)
+        {
+            if (HasRegistryPolicyKey(path))
+            {
+                updatePolicyManaged = true;
+                return true;
+            }
+        }
+
+        updatePolicyManaged = false;
+        return false;
+    }
+
+    private static bool HasRegistryPolicyKey(string path)
+    {
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+        {
+            try
+            {
+                using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+                using var key = baseKey.OpenSubKey(path);
+                if (key is null)
+                {
+                    continue;
+                }
+
+                if (key.ValueCount > 0 || key.SubKeyCount > 0)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        return false;
     }
 
     private static string[] ExtractCategoryNames(dynamic update)
@@ -2981,6 +3067,27 @@ internal static class Program
         return UpdateCategoryPurposes["Other Updates"];
     }
 
+    private static string[] ExtractHistoryCategories(dynamic historyEntry)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (dynamic category in historyEntry.Categories)
+            {
+                if (category?.Name is string name && !string.IsNullOrWhiteSpace(name))
+                {
+                    names.Add(name.Trim());
+                }
+            }
+        }
+        catch
+        {
+            // ignore missing categories
+        }
+
+        return names.ToArray();
+    }
+
     private static async Task HandleInstallUpdatesAsync(ClientWebSocket socket, JsonElement element, CancellationToken cancellationToken)
     {
         string? scheduleId = null;
@@ -3032,6 +3139,39 @@ internal static class Program
         {
             await SendAgentUpdateSummaryAsync(socket, cancellationToken, true);
         }
+    }
+
+    private static async Task HandleUninstallUpdateAsync(ClientWebSocket socket, JsonElement element, CancellationToken cancellationToken)
+    {
+        var kbArticleId = element.TryGetProperty("kbArticleId", out var kbElement) && kbElement.ValueKind == JsonValueKind.String
+            ? kbElement.GetString()
+            : null;
+
+        var normalizedKb = NormalizeKbIdentifier(kbArticleId);
+        if (string.IsNullOrWhiteSpace(normalizedKb))
+        {
+            await SendUpdateUninstallResultAsync(socket, false, "KB article identifier is required.", cancellationToken, null);
+            return;
+        }
+
+        var kbDigits = normalizedKb.StartsWith("KB", StringComparison.OrdinalIgnoreCase)
+            ? normalizedKb[2..]
+            : normalizedKb;
+        if (string.IsNullOrWhiteSpace(kbDigits))
+        {
+            await SendUpdateUninstallResultAsync(socket, false, "Invalid KB identifier.", cancellationToken, normalizedKb);
+            return;
+        }
+
+        var command = $"wusa.exe /uninstall /kb:{kbDigits} /quiet /norestart";
+        var (success, message) = await RunCommandAsync(command, cancellationToken);
+
+        await SendUpdateUninstallResultAsync(
+            socket,
+            success,
+            success ? $"Uninstall request submitted for {normalizedKb}." : $"Uninstall failed: {message}",
+            cancellationToken,
+            normalizedKb);
     }
 
     private static UpdateInstallResult InstallSelectedUpdates(string[] requestedIds, CancellationToken cancellationToken)
@@ -3143,6 +3283,17 @@ internal static class Program
             message,
             rebootRequired,
             scheduleId
+        }, cancellationToken);
+    }
+
+    private static Task SendUpdateUninstallResultAsync(ClientWebSocket socket, bool success, string message, CancellationToken cancellationToken, string? kbArticleId = null)
+    {
+        return SendJsonAsync(socket, new
+        {
+            type = "update-uninstall-result",
+            success,
+            message,
+            kbArticleId
         }, cancellationToken);
     }
 
@@ -3516,9 +3667,6 @@ internal static class Program
             case "manage-service":
                 await HandleServiceActionAsync(socket, document.RootElement, cancellationToken);
                 break;
-            case "request-bsod":
-                await SendBsodSummaryAsync(socket, cancellationToken, true);
-                break;
             case "request-event-stats":
                 if (document.RootElement.TryGetProperty("requestId", out var statsRequestId) &&
                     statsRequestId.ValueKind == JsonValueKind.String &&
@@ -3553,6 +3701,9 @@ internal static class Program
                 break;
             case "install-updates":
                 await HandleInstallUpdatesAsync(socket, document.RootElement, cancellationToken);
+                break;
+            case "uninstall-update":
+                await HandleUninstallUpdateAsync(socket, document.RootElement, cancellationToken);
                 break;
             case "invoke-action":
                 await HandleInvokeActionAsync(socket, document.RootElement, cancellationToken);
@@ -7231,24 +7382,6 @@ internal static class Program
         public ulong ullAvailExtendedVirtual;
     }
 
-    private sealed class BsodSummary
-    {
-        [JsonPropertyName("totalCount")]
-        public int TotalCount { get; set; }
-
-        [JsonPropertyName("events")]
-        public BsodEvent[] Events { get; set; } = Array.Empty<BsodEvent>();
-    }
-
-    private sealed class BsodEvent
-    {
-        [JsonPropertyName("timestampUtc")]
-        public DateTime TimestampUtc { get; set; }
-
-        [JsonPropertyName("description")]
-        public string Description { get; set; } = string.Empty;
-    }
-
     private sealed class UpdateSummary
     {
         [JsonPropertyName("retrievedAt")]
@@ -7257,6 +7390,10 @@ internal static class Program
         public int TotalCount { get; set; }
         [JsonPropertyName("categories")]
         public UpdateCategoryInfo[] Categories { get; set; } = Array.Empty<UpdateCategoryInfo>();
+        [JsonPropertyName("installedUpdates")]
+        public InstalledUpdateEntry[] InstalledUpdates { get; set; } = Array.Empty<InstalledUpdateEntry>();
+        [JsonPropertyName("managedByPolicy")]
+        public bool ManagedByPolicy { get; set; }
     }
 
     private sealed class UpdateCategoryInfo
@@ -7279,6 +7416,24 @@ internal static class Program
         public string? Description { get; set; }
         [JsonPropertyName("kbArticleIDs")]
         public string[] KBArticleIDs { get; set; } = Array.Empty<string>();
+        [JsonPropertyName("categories")]
+        public string[] Categories { get; set; } = Array.Empty<string>();
+    }
+
+    private sealed class InstalledUpdateEntry
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+        [JsonPropertyName("title")]
+        public string Title { get; set; } = string.Empty;
+        [JsonPropertyName("description")]
+        public string? Description { get; set; }
+        [JsonPropertyName("kbArticleIDs")]
+        public string[] KBArticleIDs { get; set; } = Array.Empty<string>();
+        [JsonPropertyName("installedOn")]
+        public DateTime? InstalledOn { get; set; }
+        [JsonPropertyName("resultCode")]
+        public string? ResultCode { get; set; }
         [JsonPropertyName("categories")]
         public string[] Categories { get; set; } = Array.Empty<string>();
     }

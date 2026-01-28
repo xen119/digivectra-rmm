@@ -39,7 +39,6 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - The **Scheduler** view lets you select one or more agent/group targets, choose an interval (seconds/minutes/etc.), pick from stored scripts, and save recurring jobs for future automation or patch campaigns.
 - A new **Scheduler** view (sidebar link) lets you sketch recurring script or patch jobs for future implementation and keeps a client-side list of the planned runs.
 - From that page you can also delete obsolete monitoring profiles so agents stop collecting the associated metrics.
-- A **BSODs** badge tracks Windows bug check counts; click it to open `bsod.html`, which lists timestamped events.
 
 ## Authentication
 
@@ -52,7 +51,6 @@ This repository illustrates a simple HTTPS/WSS setup with a C# agent that connec
 - RBAC is enforced: viewers can browse the dashboard, operators may run remote installs and terminate processes, and admins have full control.
 - MFA is implemented via TOTP (use any authenticator app with the secret above when logging in).
 - SSO is supported through a signed token handshake (`/auth/sso`). Use `Server/scripts/gen_sso_url.md` (and the `SSO_SECRET` environment variable your deployment uses) to craft a URL; the link stays valid for five minutes and automatically redirects back to `/` when the signature matches.
-- BSOD totals appear on every card; clicking the new badge opens `bsod.html` to show each recorded blue screen with its timestamp.
 - A **Manage tasks** button opens `processes.html`, letting you view per-process CPU/RAM/disk/network percentages and send kill requests directly from the browser.
 - A **Files** button launches `files.html` for the selected agent so you can explore folders, download binaries, or push new files to a specific destination.
 - A **Monitoring** button opens `monitoring.html`, where you can define monitoring and alert profiles, assign them to agents/groups, watch real-time alert streams, and optionally trigger remediation scripts that execute on the agent.

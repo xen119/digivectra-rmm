@@ -448,18 +448,6 @@ const chatButton = document.createElement('button');
   chatIndicators.set(agent.id, { button: chatButton, label: chatLabel });
   updateChatIndicator(agent.id, agent.chatNotifications ?? 0);
   actions.appendChild(chatButton);
-  const bsodCount = typeof agent.bsodSummary?.totalCount === 'number'
-    ? agent.bsodSummary.totalCount
-    : 0;
-  const bsodButton = document.createElement('button');
-  bsodButton.type = 'button';
-  bsodButton.textContent = `BSODs: ${bsodCount}`;
-  bsodButton.title = bsodCount === 0 ? 'No blue screens detected' : 'View BSOD history';
-  bsodButton.className = `bsod-button ${bsodCount === 0 ? 'ok' : 'warn'}`;
-  bsodButton.addEventListener('click', () => {
-    window.open(`bsod.html?agent=${encodeURIComponent(agent.id)}`, '_blank', 'noopener');
-  });
-  actions.appendChild(bsodButton);
   const eventButton = document.createElement('button');
   eventButton.type = 'button';
   eventButton.textContent = 'Event log';

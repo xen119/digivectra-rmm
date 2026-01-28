@@ -888,7 +888,6 @@ server.on('request', async (req, res) => {
       group: info.group ?? DEFAULT_GROUP,
       specs: info.specs ?? null,
       updatesSummary: info.updatesSummary ?? null,
-      bsodSummary: info.bsodSummary ?? null,
       processSnapshot: info.processSnapshot ?? null,
       status: info.status ?? 'offline',
       lastSeen: info.lastSeen ?? null,
@@ -1323,6 +1322,50 @@ server.on('request', async (req, res) => {
         unassignLicense(code);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ license: record }));
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid request');
+      }
+    });
+
+    return;
+  }
+
+  const licenseDeleteMatch = pathname === '/licenses/delete' && req.method === 'POST';
+  if (licenseDeleteMatch) {
+    if (!ensureRole(req, res, 'admin')) {
+      return;
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const code = typeof payload?.code === 'string' ? payload.code.trim() : '';
+        if (!code) {
+          res.writeHead(400);
+          return res.end('License code is required');
+        }
+
+        const record = getLicenseRecord(code);
+        if (!record) {
+          res.writeHead(404);
+          return res.end('License not found');
+        }
+
+        if (!record.revokedAt) {
+          res.writeHead(400);
+          return res.end('License must be revoked before it can be removed');
+        }
+
+        const recordIndex = licenseRecords.indexOf(record);
+        if (recordIndex >= 0) {
+          licenseRecords.splice(recordIndex, 1);
+        }
+        licenseIndex.delete(code);
+        persistLicenses();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code }));
       } catch (error) {
         res.writeHead(400);
         res.end('Invalid request');
@@ -2754,6 +2797,42 @@ server.on('request', async (req, res) => {
     return;
   }
 
+  const updatesUninstallMatch = pathname.match(/^\/updates\/([^/]+)\/uninstall$/);
+  if (updatesUninstallMatch && req.method === 'POST') {
+    if (!ensureRole(req, res, 'operator')) {
+      return;
+    }
+
+    const agentId = updatesUninstallMatch[1];
+    const entry = clientsById.get(agentId);
+    if (!entry) {
+      res.writeHead(404);
+      return res.end('Agent not found');
+    }
+
+    collectBody(req, (body) => {
+      try {
+        const payload = JSON.parse(body);
+        const candidate = typeof payload?.kbArticleId === 'string' ? payload.kbArticleId.trim() : '';
+        if (!candidate) {
+          res.writeHead(400);
+          return res.end('KB article identifier missing');
+        }
+
+        const normalizedKb = candidate.toUpperCase();
+        console.log(`Requesting uninstall of ${normalizedKb} on agent ${agentId}`);
+        sendControl(entry.socket, 'uninstall-update', { kbArticleId: normalizedKb });
+        res.writeHead(202);
+        res.end();
+      } catch (error) {
+        res.writeHead(400);
+        res.end('Invalid JSON');
+      }
+    });
+
+    return;
+  }
+
   const snmpScanMatch = pathname.match(/^\/clients\/([^/]+)\/snmp\/scan$/);
   if (snmpScanMatch && req.method === 'POST') {
     if (!ensureRole(req, res, 'operator')) {
@@ -2990,35 +3069,6 @@ server.on('request', async (req, res) => {
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ history: patchHistory.slice() }));
-    return;
-  }
-
-  const bsodDataMatch = pathname.match(/^\/bsod\/([^/]+)\/data$/);
-  if (bsodDataMatch && req.method === 'GET') {
-    const agentId = bsodDataMatch[1];
-    const entry = clientsById.get(agentId);
-    if (!entry) {
-      res.writeHead(404);
-      return res.end('Agent not found');
-    }
-
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ summary: entry.info.bsodSummary ?? null }));
-    return;
-  }
-
-  const bsodRefreshMatch = pathname.match(/^\/bsod\/([^/]+)\/refresh$/);
-  if (bsodRefreshMatch && req.method === 'POST') {
-    const agentId = bsodRefreshMatch[1];
-    const entry = clientsById.get(agentId);
-    if (!entry) {
-      res.writeHead(404);
-      return res.end('Agent not found');
-    }
-
-    sendControl(entry.socket, 'request-bsod');
-    res.writeHead(202);
-    res.end();
     return;
   }
 
@@ -4804,7 +4854,6 @@ wss.on('connection', (socket, request) => {
     lastSeen: null,
     specs: null,
     updatesSummary: null,
-    bsodSummary: null,
     processSnapshot: null,
     loggedInUser: 'Unknown',
     pendingReboot: false,
@@ -5016,8 +5065,6 @@ wss.on('connection', (socket, request) => {
       if (typeof parsed.pendingReboot === 'boolean') {
         info.pendingReboot = parsed.pendingReboot;
       }
-      } else if (parsed?.type === 'bsod-summary') {
-        info.bsodSummary = parsed.summary ?? null;
       } else if (parsed?.type === 'update-install-result') {
         console.log(`Update install result from ${info.name}: success=${parsed.success}, message="${parsed.message}", rebootRequired=${parsed.rebootRequired}`);
         info.pendingReboot = Boolean(parsed.rebootRequired);
@@ -5038,7 +5085,18 @@ wss.on('connection', (socket, request) => {
             patchIds: schedule?.patchIds ?? [],
           });
         }
-        } else if (parsed?.type === 'process-list') {
+      } else if (parsed?.type === 'update-uninstall-result') {
+        console.log(`Update uninstall result from ${info.name}: success=${parsed.success}, message="${parsed.message ?? ''}"`);
+        logPatchEvent({
+          timestamp: new Date().toISOString(),
+          type: 'result',
+          agentId: info.id,
+          action: 'uninstall-update',
+          success: Boolean(parsed.success),
+          message: parsed.message ?? '',
+          kbArticleId: typeof parsed.kbArticleId === 'string' ? parsed.kbArticleId : null,
+        });
+      } else if (parsed?.type === 'process-list') {
           info.processSnapshot = parsed.snapshot ?? null;
         } else if (parsed?.type === 'process-kill-result') {
         console.log(`Process kill result from ${info.name}: pid=${parsed.processId}, success=${parsed.success}, message=${parsed.message ?? 'n/a'}`);

@@ -80,6 +80,8 @@ function createLicenseRow(entry) {
   usedCell.textContent = entry.lastUsedAt ? formatDate(entry.lastUsedAt) : 'Never';
 
   const actionCell = document.createElement('td');
+  let hasAction = false;
+
   if (!isRevoked) {
     const revokeButton = document.createElement('button');
     revokeButton.type = 'button';
@@ -90,8 +92,18 @@ function createLicenseRow(entry) {
       }
     });
     actionCell.appendChild(revokeButton);
+    hasAction = true;
   } else {
-    actionCell.textContent = '—';
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.textContent = 'Delete';
+    deleteButton.addEventListener('click', () => {
+      if (window.confirm('Permanently delete this revoked license?')) {
+        deleteLicense(entry.code);
+      }
+    });
+    actionCell.appendChild(deleteButton);
+    hasAction = true;
   }
 
   if (entry.assignedAgentId && !isRevoked) {
@@ -104,6 +116,11 @@ function createLicenseRow(entry) {
       }
     });
     actionCell.appendChild(unassignButton);
+    hasAction = true;
+  }
+
+  if (!hasAction) {
+    actionCell.textContent = '—';
   }
 
   row.appendChild(codeCell);
@@ -271,6 +288,25 @@ async function revokeLicense(code) {
   } catch (error) {
     console.error('Unable to revoke license', error);
     setStatus('Unable to revoke license.', 'error');
+  }
+}
+
+async function deleteLicense(code) {
+  setStatus('Deleting license...');
+  try {
+    const response = await authFetch('/licenses/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    await loadLicenses();
+    setStatus('License removed.', 'success');
+  } catch (error) {
+    console.error('Unable to delete license', error);
+    setStatus('Unable to delete license.', 'error');
   }
 }
 

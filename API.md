@@ -84,13 +84,6 @@ Subscribe to `/screen/{agentId}/events` (added to `screenSessions` when a sessio
 | `GET /patches/history` | GET | viewer | Returns the most recent 200 patch/log entries. |
 | `POST /clients/{agentId}/action` | POST | operator | Body `{ action, scheduleId? }`. Sends `invoke-action`. Used by scheduler and remote buttons. |
 
-## BSOD tracking
-
-| Endpoint | Method | Role | Description |
-| --- | --- | --- | --- |
-| `GET /bsod/{agentId}/data` | GET | viewer | Returns `{ summary }` recorded for agent. |
-| `POST /bsod/{agentId}/refresh` | POST | viewer | Triggers `request-bsod` and replies with `202`. |
-
 ## Process management
 
 | Endpoint | Method | Role | Description |
@@ -201,7 +194,6 @@ Agents and the dashboard connect to `wss://<host>:8443`. The server exposes the 
 | `start-screen` | server → agent | Initiates WebRTC offer with `{ sessionId, screenId, scale }`. |
 | `screen-answer` | client → server → agent | Dashboard posts to `/screen/{sessionId}/answer`, server forwards agent's response. |
 | `screen-candidate` | both | Handles ICE candidate relay through HTTP proxy endpoints. |
-| `request-updates` / `install-updates` / `request-bsod` | server → agent | Triggers update scans, installs, or BSOD history retrieval. |
 | `list-processes` / `kill-process` | server → agent | For process snapshots and termination. |
 | `list-software` / `uninstall-software` | server → agent | Software inventory and uninstall requests. |
 | `list-services` / `manage-service` | server → agent | Service enumeration and control. |

@@ -5687,6 +5687,8 @@ internal static class Program
         private const int WS_EX_NOACTIVATE = 0x08000000;
         private const int WS_EX_TOOLWINDOW = 0x00000080;
         private const int WS_EX_TRANSPARENT = 0x00000020;
+        private const int WM_NCHITTEST = 0x0084;
+        private const int HTTRANSPARENT = -1;
 
         protected override bool ShowWithoutActivation => true;
 
@@ -5722,6 +5724,17 @@ internal static class Program
         {
             base.OnResize(e);
             Bounds = SystemInformation.VirtualScreen;
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_NCHITTEST)
+            {
+                m.Result = (IntPtr)HTTRANSPARENT;
+                return;
+            }
+
+            base.WndProc(ref m);
         }
     }
 

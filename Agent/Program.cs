@@ -63,6 +63,7 @@ internal static class Program
     private static bool remoteScreenBlanked;
     private static Thread? blankOverlayThread;
     private static ScreenBlankOverlay? blankOverlayForm;
+    private static AutoResetEvent? blankOverlayReady;
     private static readonly object blankOverlayLock = new();
     private static string? currentChatSessionId;
     private static string? selectedScreenId;
@@ -5233,7 +5234,7 @@ internal static class Program
         captureScale = ClampCaptureScale(requestedScale);
         SetRemoteUserInputBlocked(false);
         SetRemoteScreenBlanked(false);
-        SetRemoteScreenBlanked(false);
+        CloseBlankOverlay();
         Console.WriteLine($"Starting screen session {sessionId} (screen:{selectedScreenId ?? "primary"})");
         if (requireConsent)
         {
@@ -5411,6 +5412,8 @@ internal static class Program
     private static Task StopScreenSessionAsync()
     {
         SetRemoteUserInputBlocked(false);
+        SetRemoteScreenBlanked(false);
+        CloseBlankOverlay();
         screenCaptureCts?.Cancel();
         screenCaptureCts?.Dispose();
         screenCaptureCts = null;
@@ -5623,11 +5626,22 @@ internal static class Program
                 return;
             }
 
+            blankOverlayReady?.Dispose();
+            blankOverlayReady = new AutoResetEvent(false);
             blankOverlayThread = new Thread(() =>
             {
                 try
                 {
                     using var overlay = new ScreenBlankOverlay();
+                    overlay.Load += (_, _) => blankOverlayReady?.Set();
+                    overlay.FormClosed += (_, _) =>
+                    {
+                        lock (blankOverlayLock)
+                        {
+                            blankOverlayForm = null;
+                            blankOverlayThread = null;
+                        }
+                    };
                     lock (blankOverlayLock)
                     {
                         blankOverlayForm = overlay;
@@ -5647,6 +5661,7 @@ internal static class Program
             };
             blankOverlayThread.SetApartmentState(ApartmentState.STA);
             blankOverlayThread.Start();
+            blankOverlayReady?.WaitOne();
         }
     }
 
@@ -5656,15 +5671,30 @@ internal static class Program
         {
             if (blankOverlayForm is not null)
             {
+                blankOverlayForm.BeginInvoke((Action)(() => blankOverlayForm.Hide()));
+            }
+        }
+    }
+
+    private static void CloseBlankOverlay()
+    {
+        lock (blankOverlayLock)
+        {
+            if (blankOverlayForm is not null)
+            {
                 blankOverlayForm.BeginInvoke((Action)(() => blankOverlayForm.Close()));
             }
         }
+        blankOverlayReady?.Set();
+        blankOverlayReady?.Dispose();
+        blankOverlayReady = null;
     }
 
     private sealed class ScreenBlankOverlay : Form
     {
         private const int WS_EX_NOACTIVATE = 0x08000000;
         private const int WS_EX_TOOLWINDOW = 0x00000080;
+        private const int WS_EX_TRANSPARENT = 0x00000020;
 
         protected override bool ShowWithoutActivation => true;
 
@@ -5673,7 +5703,7 @@ internal static class Program
             get
             {
                 var cp = base.CreateParams;
-                cp.ExStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+                cp.ExStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT;
                 return cp;
             }
         }

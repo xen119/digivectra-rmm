@@ -877,3 +877,26 @@ async function initAiAssistant() {
 }
 
 initAiAssistant();
+
+const tabButtons = document.querySelectorAll('.tab-button');
+const tabPanels = document.querySelectorAll('[data-tab-panel]');
+
+function showTab(target) {
+  tabButtons.forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tabTarget === target);
+  });
+  tabPanels.forEach((panel) => {
+    panel.classList.toggle('active', panel.dataset.tabPanel === target);
+  });
+}
+
+tabButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    const target = button.dataset.tabTarget;
+    if (target) {
+      showTab(target);
+    }
+  });
+});
+
+showTab('chat');

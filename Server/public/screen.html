@@ -193,78 +193,7 @@
         display: none;
       }
 
-      .shell-panel {
-        grid-column: 1 / -1;
-        background: #0b1119;
-        border: 1px solid #22272d;
-        border-radius: 0.75rem;
-        padding: 1rem;
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-        margin-top: 1rem;
-      }
-
-      .shell-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        gap: 0.5rem;
-      }
-
-      .shell-header h2 {
-        margin: 0;
-        font-size: 1.25rem;
-      }
-
-      .shell-subtitle {
-        margin: 0.25rem 0 0;
-        color: #8b949e;
-        font-size: 0.9rem;
-      }
-
-      .shell-log {
-        min-height: 200px;
-        max-height: 250px;
-        border: 1px solid #30363d;
-        border-radius: 0.5rem;
-        padding: 0.75rem;
-        background: #050914;
-        color: #c9d1d9;
-        overflow: auto;
-        font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
-        font-size: 0.9rem;
-        white-space: pre-wrap;
-      }
-
-      .shell-form {
-        display: flex;
-        gap: 0.5rem;
-      }
-
-      .shell-form input {
-        flex: 1;
-        border-radius: 0.5rem;
-        border: 1px solid #30363d;
-        background: #0f141a;
-        color: #cdd9e5;
-        padding: 0.65rem 0.9rem;
-        font-size: 1rem;
-      }
-
-      .shell-form button {
-        border: none;
-        border-radius: 0.5rem;
-        padding: 0.65rem 1.1rem;
-        background: #2563eb;
-        color: #fff;
-        font-weight: 600;
-        cursor: pointer;
-      }
-
-      .chat-panel.collapsed .chat-history,
-      .chat-panel.collapsed .chat-form,
-      .chat-panel.collapsed .status-text {
+      .chat-panel.collapsed .tabbed-panels {
         display: none;
       }
 
@@ -339,6 +268,45 @@
         margin: 0;
         color: #8b949e;
         font-size: 0.9rem;
+      }
+
+      .tabbed-panels {
+        margin-top: 1rem;
+        border: 1px solid #1f2937;
+        border-radius: 0.75rem;
+        background: #080b11;
+      }
+
+      .tab-buttons {
+        display: flex;
+        border-bottom: 1px solid #1f2937;
+      }
+
+      .tab-button {
+        flex: 1;
+        border: none;
+        background: none;
+        color: #cdd9e5;
+        padding: 0.75rem;
+        font-size: 0.95rem;
+        cursor: pointer;
+      }
+
+      .tab-button.active {
+        background: #0f1724;
+        font-weight: 600;
+      }
+
+      .tab-content {
+        padding: 1rem;
+      }
+
+      .tab-panel {
+        display: none;
+      }
+
+      .tab-panel.active {
+        display: block;
       }
 
       .shell-and-ai {
@@ -513,52 +481,60 @@
             <span id="statusLabel" class="chat-subtitle">Connecting...</span>
           </div>
         </header>
-        <div id="chatHistory" class="chat-history">
-          <div id="emptyHistory">Awaiting chat events...</div>
-        </div>
-        <form id="chatForm" class="chat-form">
-          <input id="chatInput" type="text" autocomplete="off" placeholder="Type a message and press Enter" />
-          <button type="submit">Send</button>
-        </form>
-        <p id="statusText" class="status-text">Messages flow over a secure channel.</p>
-      </section>
-    </div>
-    <div class="shell-and-ai">
-      <section class="shell-panel">
-        <header class="shell-header">
-          <div>
-            <h2>Agent Shell</h2>
-            <p id="shellSummary" class="shell-subtitle">Connecting to agent…</p>
+        <div class="tabbed-panels">
+          <div class="tab-buttons">
+            <button type="button" class="tab-button active" data-tab-target="chat">Chat</button>
+            <button type="button" class="tab-button" data-tab-target="shell">Shell</button>
+            <button type="button" class="tab-button" data-tab-target="ai">AI</button>
           </div>
-          <span id="shellStatus" class="shell-subtitle">Awaiting commands …</span>
-        </header>
-        <pre id="shellLog" class="shell-log">Shell output will appear here.</pre>
-        <form id="shellForm" class="shell-form">
-          <input id="shellInput" type="text" autocomplete="off" placeholder="Enter command (e.g. Get-Process)" />
-          <button id="shellSubmit" type="submit">Send</button>
-        </form>
-      </section>
-      <section class="ai-panel">
-        <div class="ai-panel-header">
-          <div>
-            <h2>AI Assistant</h2>
-            <p class="ai-status" id="screenAiConfigStatus">Checking AI settings…</p>
-          </div>
-          <div class="ai-toolbar">
-            <span>Status</span>
-            <strong id="screenAiSessionId">—</strong>
+          <div class="tab-content">
+            <div class="tab-panel active" data-tab-panel="chat">
+              <div id="chatHistory" class="chat-history">
+                <div id="emptyHistory">Awaiting chat events...</div>
+              </div>
+              <form id="chatForm" class="chat-form">
+                <input id="chatInput" type="text" autocomplete="off" placeholder="Type a message and press Enter" />
+                <button type="submit">Send</button>
+              </form>
+              <p id="statusText" class="status-text">Messages flow over a secure channel.</p>
+            </div>
+            <div class="tab-panel" data-tab-panel="shell">
+              <header class="shell-header tab-header">
+                <div>
+                  <h3>Agent Shell</h3>
+                  <p id="shellSummary" class="shell-subtitle">Connecting to agent…</p>
+                </div>
+                <span id="shellStatus" class="shell-subtitle">Awaiting commands …</span>
+              </header>
+              <pre id="shellLog" class="shell-log">Shell output will appear here.</pre>
+              <form id="shellForm" class="shell-form">
+                <input id="shellInput" type="text" autocomplete="off" placeholder="Enter command (e.g. Get-Process)" />
+                <button id="shellSubmit" type="submit">Send</button>
+              </form>
+            </div>
+            <div class="tab-panel" data-tab-panel="ai">
+              <div class="ai-panel-header tab-header">
+                <div>
+                  <h3>AI Assistant</h3>
+                  <p class="ai-status" id="screenAiConfigStatus">Checking AI settings…</p>
+                </div>
+                <div class="ai-toolbar">
+                  <span>Status</span>
+                  <strong id="screenAiSessionId">—</strong>
+                </div>
+              </div>
+              <div id="screenAiMessageList" class="ai-message-list">
+                <p class="ai-empty">Describe the task you'd like the assistant to handle.</p>
+              </div>
+              <form id="screenAiForm" class="ai-form">
+                <textarea id="screenAiInput" placeholder="Ask about the agent, patch policies, or diagnostics." autocomplete="off"></textarea>
+                <button id="screenAiButton" type="submit">Send</button>
+              </form>
+              <div class="ai-activity" id="screenAiActivity">Awaiting conversation…</div>
+            </div>
           </div>
         </div>
-        <div id="screenAiMessageList" class="ai-message-list">
-          <p class="ai-empty">Describe the task you'd like the assistant to handle.</p>
-        </div>
-        <form id="screenAiForm" class="ai-form">
-          <textarea id="screenAiInput" placeholder="Ask about the agent, patch policies, or diagnostics." autocomplete="off"></textarea>
-          <button id="screenAiButton" type="submit">Send</button>
-        </form>
-        <div class="ai-activity" id="screenAiActivity">Awaiting conversation…</div>
       </section>
-    </div>
     <script src="screen.js"></script>
     <script src="chat.js"></script>
   </body>

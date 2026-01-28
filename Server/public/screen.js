@@ -120,12 +120,13 @@ async function loadScreenOptions() {
     }
 
     displayButtonsContainer.innerHTML = '';
-    screens.forEach((screen) => {
+    screens.forEach((screen, index) => {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'display-button';
       button.dataset.screenId = screen.id;
-      button.textContent = `${screen.name ?? screen.id} (${screen.width ?? '?'}x${screen.height ?? '?'})`;
+      button.textContent = `Mon${index + 1}`;
+      button.title = `${screen.name ?? screen.id} (${screen.width ?? '?'}x${screen.height ?? '?'})`;
 
       button.addEventListener('click', async () => {
         if (viewMode === 'desktop') {
@@ -608,7 +609,6 @@ function updateDisplayButtons() {
     const matches = button.dataset.screenId === selectedScreenId;
     const active = viewMode === 'single' && matches;
     button.classList.toggle('active', active);
-    button.disabled = viewMode === 'desktop';
   });
 
   if (desktopViewButton) {

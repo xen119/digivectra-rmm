@@ -63,7 +63,6 @@ internal static class Program
     private static bool remoteScreenBlanked;
     private static Thread? blankOverlayThread;
     private static ScreenBlankOverlay? blankOverlayForm;
-    private static AutoResetEvent? blankOverlayReady;
     private static readonly object blankOverlayLock = new();
     private static string? currentChatSessionId;
     private static string? selectedScreenId;
@@ -5626,22 +5625,11 @@ internal static class Program
                 return;
             }
 
-            blankOverlayReady?.Dispose();
-            blankOverlayReady = new AutoResetEvent(false);
             blankOverlayThread = new Thread(() =>
             {
                 try
                 {
                     using var overlay = new ScreenBlankOverlay();
-                    overlay.Load += (_, _) => blankOverlayReady?.Set();
-                    overlay.FormClosed += (_, _) =>
-                    {
-                        lock (blankOverlayLock)
-                        {
-                            blankOverlayForm = null;
-                            blankOverlayThread = null;
-                        }
-                    };
                     lock (blankOverlayLock)
                     {
                         blankOverlayForm = overlay;
@@ -5654,6 +5642,14 @@ internal static class Program
                 {
                     Console.WriteLine($"Blank overlay failed: {ex}");
                 }
+                finally
+                {
+                    lock (blankOverlayLock)
+                    {
+                        blankOverlayForm = null;
+                        blankOverlayThread = null;
+                    }
+                }
             })
             {
                 IsBackground = true,
@@ -5661,7 +5657,6 @@ internal static class Program
             };
             blankOverlayThread.SetApartmentState(ApartmentState.STA);
             blankOverlayThread.Start();
-            blankOverlayReady?.WaitOne();
         }
     }
 
@@ -5685,9 +5680,6 @@ internal static class Program
                 blankOverlayForm.BeginInvoke((Action)(() => blankOverlayForm.Close()));
             }
         }
-        blankOverlayReady?.Set();
-        blankOverlayReady?.Dispose();
-        blankOverlayReady = null;
     }
 
     private sealed class ScreenBlankOverlay : Form

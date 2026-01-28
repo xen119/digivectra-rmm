@@ -5,6 +5,7 @@ const controlButton = document.getElementById('controlButton');
 const controlInstructions = document.getElementById('controlInstructions');
 const screenSelect = document.getElementById('screenSelect');
 const resolutionSelect = document.getElementById('resolutionSelect');
+const keyMapContainer = document.getElementById('keyMapList');
 
 const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
 
@@ -23,6 +24,17 @@ let remoteUserInputBlocked = false;
 let remoteScreenBlanked = false;
 let pendingRemoteUserInputBlock = null;
 let pendingRemoteScreenBlank = null;
+
+const keyMapEntries = [
+  { label: 'Ctrl + Alt + Del', keys: ['Control', 'Alt', 'Delete'] },
+  { label: 'Alt + Tab', keys: ['Alt', 'Tab'] },
+  { label: 'Alt + Shift + Tab', keys: ['Alt', 'Shift', 'Tab'] },
+  { label: 'Win key', keys: ['Meta'] },
+  { label: 'Ctrl + Shift + Esc', keys: ['Control', 'Shift', 'Escape'] },
+  { label: 'F1', keys: ['F1'] },
+  { label: 'F5', keys: ['F5'] },
+  { label: 'F11', keys: ['F11'] },
+];
 
 if (controlButton) {
   controlButton.addEventListener('click', () => {
@@ -281,6 +293,7 @@ async function handleOffer(payload) {
       }
       syncBlockInputState();
       syncBlankScreenState();
+      renderKeyMappings();
     };
 
     channel.onclose = () => {
@@ -293,6 +306,7 @@ async function handleOffer(payload) {
       if (controlInstructions) {
         controlInstructions.textContent = 'Control channel closed.';
       }
+      renderKeyMappings();
     };
 
     channel.onmessage = async (messageEvent) => {
@@ -361,6 +375,7 @@ function setControlEnabled(enabled) {
   }
 
   updateControlInstructions();
+  renderKeyMappings();
 }
 
 const blockInputToggle = document.getElementById('blockInputToggle');
@@ -394,6 +409,29 @@ blankScreenToggle?.addEventListener('change', () => {
   syncBlankScreenState();
 });
 
+function renderKeyMappings() {
+  if (!keyMapContainer) {
+    return;
+  }
+
+  keyMapContainer.innerHTML = '';
+  keyMapEntries.forEach((entry) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'key-map-button';
+    button.textContent = entry.label;
+    button.dataset.keys = entry.keys.join(',');
+    button.disabled = !controlEnabled || !isControlChannelOpen();
+    button.addEventListener('click', () => {
+      const keys = entry.keys;
+      sendKeyCombo(keys);
+    });
+    keyMapContainer.appendChild(button);
+  });
+}
+
+renderKeyMappings();
+
 function sendControlMessage(payload) {
   if (!controlEnabled || !isControlChannelOpen()) {
     return;
@@ -404,6 +442,35 @@ function sendControlMessage(payload) {
   } catch (error) {
     console.error('Failed to send control message', error);
   }
+}
+
+function sendKeyCombo(keys) {
+  if (!keys.length) {
+    return;
+  }
+  if (!controlEnabled || !isControlChannelOpen()) {
+    return;
+  }
+
+  keys.forEach((key) => {
+    sendControlMessage({
+      type: 'keyboard',
+      action: 'down',
+      key,
+      code: key,
+    });
+  });
+
+  setTimeout(() => {
+    keys.slice().reverse().forEach((key) => {
+      sendControlMessage({
+        type: 'keyboard',
+        action: 'up',
+        key,
+        code: key,
+      });
+    });
+  }, 80);
 }
 
 function syncBlockInputState() {

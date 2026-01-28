@@ -118,6 +118,33 @@
         accent-color: #38bdf8;
       }
 
+      .key-map-toolbar {
+        margin-top: 1rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        border-top: 1px solid #1f2937;
+        padding-top: 0.75rem;
+      }
+
+      .key-map-button {
+        border: 1px solid #30363d;
+        border-radius: 999px;
+        padding: 0.25rem 0.9rem;
+        background: #161b22;
+        color: #cdd9e5;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+      }
+
+      .key-map-button:disabled {
+        border-color: #1f2937;
+        color: #4b5563;
+        cursor: not-allowed;
+      }
+
       .screen-layout {
         display: grid;
         gap: 1.5rem;
@@ -489,6 +516,7 @@
           <img id="frame" alt="Live screen" />
           <div id="remoteCursor" aria-hidden="true"></div>
         </div>
+        <div class="key-map-toolbar" id="keyMapList"></div>
       </section>
       <section class="chat-panel">
         <header class="chat-header">

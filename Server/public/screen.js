@@ -6,6 +6,7 @@ const controlInstructions = document.getElementById('controlInstructions');
 const displayButtonsContainer = document.getElementById('displayButtons');
 const desktopViewButton = document.getElementById('desktopViewButton');
 const keyMapContainer = document.getElementById('keyMapList');
+const popoutButton = document.getElementById('popoutButton');
 
 const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
 
@@ -21,6 +22,9 @@ let selectedScreenId = null;
 let captureScale = 1.0;
 let viewMode = 'single';
 let lastCursorPayload = null;
+let popoutWindow = null;
+let popoutFrameEl = null;
+let popoutCursorEl = null;
 let remoteUserInputBlocked = false;
 let remoteScreenBlanked = false;
 let pendingRemoteUserInputBlock = null;
@@ -73,6 +77,12 @@ if (desktopViewButton) {
     selectedScreenId = null;
     updateDisplayButtons();
     await restartScreenSession();
+  });
+}
+
+if (popoutButton) {
+  popoutButton.addEventListener('click', () => {
+    openPopoutWindow();
   });
 }
 
@@ -239,6 +249,7 @@ async function restartScreenSession() {
 }
 
 async function stopExistingSession() {
+  popoutWindow?.close();
   if (source) {
     source.close();
     source = null;
@@ -299,7 +310,7 @@ async function handleOffer(payload) {
       }
 
       if (controlInstructions) {
-        controlInstructions.textContent = 'Click to enable remote control.';
+        controlInstructions.textContent = 'Control channel ready.';
       }
       syncBlockInputState();
       syncBlankScreenState();
@@ -333,11 +344,12 @@ async function handleOffer(payload) {
         }
 
         const frame = JSON.parse(payloadText);
-        if (frame.type === 'frame' && frame.image) {
-          frameEl.src = `data:image/png;base64,${frame.image}`;
-        } else if (frame.type === 'cursor') {
-          updateRemoteCursor(frame);
-        }
+    if (frame.type === 'frame' && frame.image) {
+      frameEl.src = `data:image/png;base64,${frame.image}`;
+      syncPopoutFrame();
+    } else if (frame.type === 'cursor') {
+      updateRemoteCursor(frame);
+    }
       } catch (error) {
         console.error('Failed to decode frame', error);
       }
@@ -405,7 +417,7 @@ function updateControlInstructions() {
 
   controlInstructions.textContent = controlEnabled
     ? 'Control is active (press Esc to release).'
-    : 'Click to enable remote control.';
+    : 'Control is idle.';
 }
 
 blockInputToggle?.addEventListener('change', () => {
@@ -628,6 +640,109 @@ function updateDisplayButtons() {
     desktopViewButton.classList.toggle('active', viewMode === 'desktop');
   }
 }
+
+function openPopoutWindow() {
+  if (popoutWindow && !popoutWindow.closed) {
+    popoutWindow.focus();
+    return;
+  }
+
+  const specs = 'width=1100,height=700,left=200,top=100';
+  popoutWindow = window.open('', 'agentScreenPopout', specs);
+  if (!popoutWindow) {
+    return;
+  }
+
+  const html = `
+    <!doctype html>
+    <html>
+      <head>
+        <title>Agent screen</title>
+        <style>
+          body {
+            margin: 0;
+            background: #0b1119;
+            color: #cdd9e5;
+            font-family: system-ui, sans-serif;
+          }
+          .popout-shell {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            overflow: hidden;
+            background: #05070c;
+          }
+          #popoutFrame {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            background: #010409;
+          }
+          #popoutCursor {
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: rgba(14, 165, 233, 0.85);
+            box-shadow: 0 0 6px rgba(14, 165, 233, 0.9);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            opacity: 0;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="popout-shell">
+          <img id="popoutFrame" alt="Agent screen stream" />
+          <div id="popoutCursor"></div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  popoutWindow.document.write(html);
+  popoutWindow.document.close();
+
+  popoutFrameEl = popoutWindow.document.getElementById('popoutFrame');
+  popoutCursorEl = popoutWindow.document.getElementById('popoutCursor');
+
+  popoutWindow.addEventListener('beforeunload', () => {
+    popoutWindow = null;
+    popoutFrameEl = null;
+    popoutCursorEl = null;
+  });
+
+  syncPopoutFrame();
+  updatePopoutCursor(lastCursorPayload);
+}
+
+function syncPopoutFrame() {
+  if (!popoutFrameEl || !frameEl) {
+    return;
+  }
+
+  popoutFrameEl.src = frameEl.src || '';
+}
+
+function updatePopoutCursor(payload) {
+  if (!popoutCursorEl || !frameEl) {
+    return;
+  }
+
+  const rect = frameEl.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    popoutCursorEl.style.opacity = '0';
+    return;
+  }
+
+  const x = clampNormalized(payload?.x ?? 0);
+  const y = clampNormalized(payload?.y ?? 0);
+  popoutCursorEl.style.left = `${x * rect.width}px`;
+  popoutCursorEl.style.top = `${y * rect.height}px`;
+  popoutCursorEl.style.opacity = payload?.visible ? '1' : '0';
+}
+
 
 function getFrameCoordinates(event) {
   const rect = frameEl?.getBoundingClientRect();

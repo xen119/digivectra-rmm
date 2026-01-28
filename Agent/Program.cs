@@ -131,6 +131,7 @@ internal static class Program
     private const uint KEYEVENTF_UNICODE = 0x0004;
     private const uint MOUSEEVENTF_MOVE = 0x0001;
     private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+    private const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
     private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
     private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
@@ -5981,7 +5982,7 @@ internal static class Program
     private static void SendMouseMove(int normalizedX, int normalizedY)
     {
         var (x, y) = MapToVirtualCoordinates(normalizedX, normalizedY);
-        SendMouseInput(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, x, y);
+        SendMouseInput(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, x, y);
     }
 
     private static void SendMouseButton(string button, bool isDown, int normalizedX, int normalizedY)
@@ -6000,7 +6001,7 @@ internal static class Program
         }
 
         var (x, y) = MapToVirtualCoordinates(normalizedX, normalizedY);
-        SendMouseInput(flag | MOUSEEVENTF_ABSOLUTE, x, y);
+        SendMouseInput(flag | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, x, y);
     }
 
     private static void SendMouseWheel(double delta)

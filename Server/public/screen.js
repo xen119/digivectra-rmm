@@ -249,7 +249,6 @@ async function restartScreenSession() {
 }
 
 async function stopExistingSession() {
-  popoutWindow?.close();
   if (source) {
     source.close();
     source = null;

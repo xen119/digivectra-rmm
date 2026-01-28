@@ -19,7 +19,8 @@ let controlEnabled = false;
 let selectedScreenId = null;
 let captureScale = 0.75;
 let lastCursorPayload = null;
-let remoteInputBlocked = false;
+let remoteUserInputBlocked = false;
+let pendingRemoteUserInputBlock = null;
 
 if (controlButton) {
   controlButton.addEventListener('click', () => {
@@ -276,6 +277,7 @@ async function handleOffer(payload) {
       if (controlInstructions) {
         controlInstructions.textContent = 'Click to enable remote control.';
       }
+      syncBlockInputState();
     };
 
     channel.onclose = () => {
@@ -365,10 +367,10 @@ function updateControlInstructions() {
     return;
   }
 
-  if (remoteInputBlocked) {
+  if (remoteUserInputBlocked) {
     controlInstructions.textContent = controlEnabled
-      ? 'Remote mouse & keyboard are blocked while control is active.'
-      : 'Remote input is blocked while control is disabled.';
+      ? 'Remote user mouse & keyboard are blocked while control is active.'
+      : 'Remote user input is blocked while control is disabled.';
     return;
   }
 
@@ -378,8 +380,9 @@ function updateControlInstructions() {
 }
 
 blockInputToggle?.addEventListener('change', () => {
-  remoteInputBlocked = blockInputToggle.checked;
+  remoteUserInputBlocked = blockInputToggle.checked;
   updateControlInstructions();
+  syncBlockInputState();
 });
 
 function sendControlMessage(payload) {
@@ -394,8 +397,29 @@ function sendControlMessage(payload) {
   }
 }
 
+function syncBlockInputState() {
+  if (!isControlChannelOpen()) {
+    pendingRemoteUserInputBlock = remoteUserInputBlocked;
+    return;
+  }
+
+  const blockState = pendingRemoteUserInputBlock ?? remoteUserInputBlocked;
+  pendingRemoteUserInputBlock = null;
+
+  const payload = {
+    type: 'block-input',
+    block: blockState,
+  };
+
+  try {
+    controlChannel?.send(JSON.stringify(payload));
+  } catch (error) {
+    console.error('Failed to update block input state', error);
+  }
+}
+
 function handleKeyEvent(event, action) {
-  if (!controlEnabled || !isControlChannelOpen() || remoteInputBlocked) {
+  if (!controlEnabled || !isControlChannelOpen()) {
     return;
   }
 
@@ -417,7 +441,7 @@ function handleKeyEvent(event, action) {
 }
 
 function handleMouseMove(event) {
-  if (!controlEnabled || !isControlChannelOpen() || remoteInputBlocked) {
+  if (!controlEnabled || !isControlChannelOpen()) {
     return;
   }
 
@@ -433,7 +457,7 @@ function handleMouseMove(event) {
 }
 
 function handleMouseButton(event, action) {
-  if (!controlEnabled || !isControlChannelOpen() || remoteInputBlocked) {
+  if (!controlEnabled || !isControlChannelOpen()) {
     return;
   }
 
@@ -455,7 +479,7 @@ function handleMouseButton(event, action) {
 }
 
 function handleMouseWheel(event) {
-  if (!controlEnabled || !isControlChannelOpen() || remoteInputBlocked) {
+  if (!controlEnabled || !isControlChannelOpen()) {
     return;
   }
 

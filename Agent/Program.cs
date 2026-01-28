@@ -59,6 +59,7 @@ internal static class Program
     private const int NET_FW_IP_PROTOCOL_UDP = 17;
     private static Task? screenCaptureTask;
     private static string? screenSessionId;
+    private static bool remoteUserInputBlocked;
     private static string? currentChatSessionId;
     private static string? selectedScreenId;
     private enum SessionResult
@@ -5220,6 +5221,7 @@ internal static class Program
     {
         selectedScreenId = screenId;
         captureScale = ClampCaptureScale(requestedScale);
+        SetRemoteUserInputBlocked(false);
         Console.WriteLine($"Starting screen session {sessionId} (screen:{selectedScreenId ?? "primary"})");
         if (requireConsent)
         {
@@ -5396,6 +5398,7 @@ internal static class Program
 
     private static Task StopScreenSessionAsync()
     {
+        SetRemoteUserInputBlocked(false);
         screenCaptureCts?.Cancel();
         screenCaptureCts?.Dispose();
         screenCaptureCts = null;
@@ -5673,6 +5676,10 @@ internal static class Program
             {
                 HandleMouseMessage(root);
             }
+            else if (string.Equals(type, "block-input", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleBlockInputMessage(root);
+            }
         }
         catch (JsonException)
         {
@@ -5750,6 +5757,21 @@ internal static class Program
 
         var isDown = string.Equals(action, "down", StringComparison.OrdinalIgnoreCase);
         SendMouseButton(button, isDown, clickX, clickY);
+    }
+
+    private static void HandleBlockInputMessage(JsonElement root)
+    {
+        if (!root.TryGetProperty("block", out var blockElement))
+        {
+            return;
+        }
+
+        if (blockElement.ValueKind != JsonValueKind.True && blockElement.ValueKind != JsonValueKind.False)
+        {
+            return;
+        }
+
+        SetRemoteUserInputBlocked(blockElement.GetBoolean());
     }
 
     private static bool TryGetNormalizedCoordinates(JsonElement root, out int normalizedX, out int normalizedY)
@@ -5880,8 +5902,25 @@ internal static class Program
         SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
     }
 
+    private static void SetRemoteUserInputBlocked(bool block)
+    {
+        if (remoteUserInputBlocked == block)
+        {
+            return;
+        }
+
+        remoteUserInputBlocked = block;
+        if (!BlockInput(block))
+        {
+            Console.WriteLine($"BlockInput({block}) failed ({Marshal.GetLastWin32Error()}).");
+        }
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool BlockInput(bool fBlockIt);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT

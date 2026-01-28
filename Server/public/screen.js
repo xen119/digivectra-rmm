@@ -19,6 +19,7 @@ let controlEnabled = false;
 let selectedScreenId = null;
 let captureScale = 0.75;
 let lastCursorPayload = null;
+let remoteInputBlocked = false;
 
 if (controlButton) {
   controlButton.addEventListener('click', () => {
@@ -354,12 +355,32 @@ function setControlEnabled(enabled) {
     controlButton.textContent = enabled ? 'Disable control' : 'Enable control';
   }
 
-  if (controlInstructions) {
-    controlInstructions.textContent = enabled
-      ? 'Control is active (press Esc to release).'
-      : 'Click to enable remote control.';
-  }
+  updateControlInstructions();
 }
+
+const blockInputToggle = document.getElementById('blockInputToggle');
+
+function updateControlInstructions() {
+  if (!controlInstructions) {
+    return;
+  }
+
+  if (remoteInputBlocked) {
+    controlInstructions.textContent = controlEnabled
+      ? 'Remote mouse & keyboard are blocked while control is active.'
+      : 'Remote input is blocked while control is disabled.';
+    return;
+  }
+
+  controlInstructions.textContent = controlEnabled
+    ? 'Control is active (press Esc to release).'
+    : 'Click to enable remote control.';
+}
+
+blockInputToggle?.addEventListener('change', () => {
+  remoteInputBlocked = blockInputToggle.checked;
+  updateControlInstructions();
+});
 
 function sendControlMessage(payload) {
   if (!controlEnabled || !isControlChannelOpen()) {
@@ -374,7 +395,7 @@ function sendControlMessage(payload) {
 }
 
 function handleKeyEvent(event, action) {
-  if (!controlEnabled || !isControlChannelOpen()) {
+  if (!controlEnabled || !isControlChannelOpen() || remoteInputBlocked) {
     return;
   }
 
@@ -396,7 +417,7 @@ function handleKeyEvent(event, action) {
 }
 
 function handleMouseMove(event) {
-  if (!controlEnabled || !isControlChannelOpen()) {
+  if (!controlEnabled || !isControlChannelOpen() || remoteInputBlocked) {
     return;
   }
 
@@ -412,7 +433,7 @@ function handleMouseMove(event) {
 }
 
 function handleMouseButton(event, action) {
-  if (!controlEnabled || !isControlChannelOpen()) {
+  if (!controlEnabled || !isControlChannelOpen() || remoteInputBlocked) {
     return;
   }
 
@@ -434,7 +455,7 @@ function handleMouseButton(event, action) {
 }
 
 function handleMouseWheel(event) {
-  if (!controlEnabled || !isControlChannelOpen()) {
+  if (!controlEnabled || !isControlChannelOpen() || remoteInputBlocked) {
     return;
   }
 

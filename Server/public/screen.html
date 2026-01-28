@@ -105,6 +105,19 @@
         margin: 0.25rem 0 0;
       }
 
+      .control-block {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        margin-top: 0.35rem;
+        font-size: 0.85rem;
+        color: #94a3b8;
+      }
+
+      .control-block input {
+        accent-color: #38bdf8;
+      }
+
       .screen-layout {
         display: grid;
         gap: 1.5rem;
@@ -459,11 +472,15 @@
               <option value="0.35">Very low (35%)</option>
             </select>
           </div>
-          <div id="controlPanel">
-            <button id="controlButton" disabled>Enable control</button>
-            <p id="controlInstructions">Control is disabled until the data channel opens.</p>
-          </div>
+        <div id="controlPanel">
+          <button id="controlButton" disabled>Enable control</button>
+          <p id="controlInstructions">Control is disabled until the data channel opens.</p>
+          <label class="control-block">
+            <input type="checkbox" id="blockInputToggle" />
+            Block remote mouse & keyboard
+          </label>
         </div>
+      </div>
         <div class="frame-wrapper">
           <img id="frame" alt="Live screen" />
           <div id="remoteCursor" aria-hidden="true"></div>

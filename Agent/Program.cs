@@ -102,6 +102,7 @@ internal static class Program
         WDA_MONITOR = 0x1,
         WDA_EXCLUDEFROMCAPTURE = 0x11,
     }
+    private const uint LWA_ALPHA = 0x2;
     private static readonly Dictionary<string, ushort> VirtualKeyMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["Enter"] = 0x0D,
@@ -5636,6 +5637,7 @@ internal static class Program
                     }
 
                     SetWindowDisplayAffinity(overlay.Handle, DisplayAffinity.WDA_EXCLUDEFROMCAPTURE);
+                    SetLayeredWindowAttributes(overlay.Handle, 0, byte.MaxValue, LWA_ALPHA);
                     Application.Run(overlay);
                 }
                 catch (Exception ex)
@@ -5687,6 +5689,7 @@ internal static class Program
         private const int WS_EX_NOACTIVATE = 0x08000000;
         private const int WS_EX_TOOLWINDOW = 0x00000080;
         private const int WS_EX_TRANSPARENT = 0x00000020;
+        private const int WS_EX_LAYERED = 0x00080000;
         private const int WM_NCHITTEST = 0x0084;
         private const int HTTRANSPARENT = -1;
 
@@ -5697,7 +5700,7 @@ internal static class Program
             get
             {
                 var cp = base.CreateParams;
-                cp.ExStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT;
+                cp.ExStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_LAYERED;
                 return cp;
             }
         }
@@ -6103,6 +6106,9 @@ internal static class Program
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowDisplayAffinity(IntPtr hwnd, DisplayAffinity affinity);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool BlockInput(bool fBlockIt);

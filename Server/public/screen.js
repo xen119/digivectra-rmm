@@ -5,6 +5,7 @@ const controlButton = document.getElementById('controlButton');
 const controlInstructions = document.getElementById('controlInstructions');
 const screenSelect = document.getElementById('screenSelect');
 const resolutionSelect = document.getElementById('resolutionSelect');
+const viewModeSelect = document.getElementById('viewModeSelect');
 const keyMapContainer = document.getElementById('keyMapList');
 
 const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
@@ -19,6 +20,7 @@ let controlChannel;
 let controlEnabled = false;
 let selectedScreenId = null;
 let captureScale = 0.75;
+let viewMode = 'single';
 let lastCursorPayload = null;
 let remoteUserInputBlocked = false;
 let remoteScreenBlanked = false;
@@ -69,6 +71,20 @@ if (screenSelect) {
     }
 
     selectedScreenId = screenSelect.value;
+    await restartScreenSession();
+  });
+}
+
+if (viewModeSelect) {
+  viewMode = viewModeSelect.value || viewMode;
+  viewModeSelect.addEventListener('change', async () => {
+    const requested = viewModeSelect.value;
+    if (!requested || requested === viewMode) {
+      return;
+    }
+
+    viewMode = requested;
+    updateScreenSelectState();
     await restartScreenSession();
   });
 }
@@ -145,6 +161,7 @@ async function loadScreenOptions() {
 
     selectedScreenId = screens[0].id;
     screenSelect.disabled = false;
+    updateScreenSelectState();
     } catch (error) {
       console.error('Failed to load screen list', error);
       screenSelect.disabled = true;
@@ -158,6 +175,7 @@ async function startScreenSession() {
       requestBody.screenId = selectedScreenId;
     }
     requestBody.scale = captureScale;
+    requestBody.captureAllScreens = viewMode === 'desktop';
 
     const response = await authFetch('/screen/request', {
       method: 'POST',
@@ -193,7 +211,13 @@ async function startScreenSession() {
 
         if (payload.state) {
           const prefix = payload.state === 'offer-ready' ? 'Offer ready for' : 'Requesting screen stream for';
-          statusEl.textContent = `${prefix} ${agentName}`;
+          const viewLabel = payload.captureAllScreens ? 'Full desktop view' : 'Single display view';
+          statusEl.textContent = `${prefix} ${agentName} · ${viewLabel}`;
+          if (viewModeSelect) {
+            viewModeSelect.value = payload.captureAllScreens ? 'desktop' : 'single';
+            viewMode = viewModeSelect.value;
+          }
+          updateScreenSelectState();
         }
       } catch (error) {
         console.error('Failed to parse screen status event', error);
@@ -683,6 +707,14 @@ function clampScale(value) {
   }
 
   return Math.min(Math.max(value, min), max);
+}
+
+function updateScreenSelectState() {
+  if (!screenSelect) {
+    return;
+  }
+
+  screenSelect.disabled = viewMode === 'desktop';
 }
 
 function setupChatCollapse() {

@@ -2309,6 +2309,7 @@ server.on('request', async (req, res) => {
       state: session.offer ? 'offer-ready' : 'waiting-offer',
       screenId: session.screenId,
       screenName: getScreenName(session.agentId, session.screenId),
+      captureAllScreens: Boolean(session.captureAllScreens),
     });
 
     res.on('close', () => {
@@ -2427,16 +2428,17 @@ server.on('request', async (req, res) => {
 
         const requestedScale = extractScale(payload?.scale);
         const sessionId = uuidv4();
-        screenSessions.set(sessionId, {
-          agentId,
-          socket: entry.socket,
-          agentName: entry.info.name,
-          sseClients: new Set(),
-          offer: null,
-          agentCandidates: [],
-          screenId: requestedScreenId,
-          scale: requestedScale,
-        });
+    screenSessions.set(sessionId, {
+      agentId,
+      socket: entry.socket,
+      agentName: entry.info.name,
+      sseClients: new Set(),
+      offer: null,
+      agentCandidates: [],
+      screenId: requestedScreenId,
+      scale: requestedScale,
+      captureAllScreens: Boolean(payload.captureAllScreens),
+    });
 
         const tenantId = getTenantIdForRequest(req);
         const tenantSettings = getGeneralSettingsForTenant(tenantId);
@@ -2445,6 +2447,7 @@ server.on('request', async (req, res) => {
           sessionId,
           screenId: requestedScreenId,
           scale: requestedScale,
+          captureVirtualDesktop: Boolean(payload.captureAllScreens),
           requireConsent: Boolean(tenantSettings?.screenConsentRequired !== false),
         });
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -5013,6 +5016,7 @@ wss.on('connection', (socket, request) => {
           session.offer = {
             sdp: parsed.sdp,
             sdpType: parsed.sdpType,
+            captureAllScreens: Boolean(session.captureAllScreens),
           };
           console.log(`Stored screen offer for ${parsed.sessionId} (agent ${session.agentName})`);
           sendScreenEvent(session, 'offer', {
@@ -5030,6 +5034,7 @@ wss.on('connection', (socket, request) => {
             state: 'offer-ready',
             screenId: session.screenId,
             screenName: getScreenName(session.agentId, session.screenId),
+            captureAllScreens: Boolean(session.captureAllScreens),
           });
         }
       } else if (parsed?.type === 'screen-candidate') {

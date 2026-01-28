@@ -59,6 +59,7 @@ internal static class Program
     private const int NET_FW_IP_PROTOCOL_UDP = 17;
     private static Task? screenCaptureTask;
     private static string? screenSessionId;
+    private static bool captureVirtualDesktop;
     private static bool remoteUserInputBlocked;
     private static bool remoteScreenBlanked;
     private static Thread? blankOverlayThread;
@@ -3566,7 +3567,9 @@ internal static class Program
                         {
                             requireConsent = false;
                         }
-                        await StartScreenSessionAsync(socket, sessionId, screenId, scale, requireConsent, cancellationToken);
+                        var captureVirtualDesktop = document.RootElement.TryGetProperty("captureVirtualDesktop", out var captureElement) &&
+                            captureElement.ValueKind == JsonValueKind.True;
+                        await StartScreenSessionAsync(socket, sessionId, screenId, scale, requireConsent, captureVirtualDesktop, cancellationToken);
                     }
                 }
 
@@ -5229,7 +5232,7 @@ internal static class Program
         }
     }
 
-    private static async Task StartScreenSessionAsync(ClientWebSocket socket, string sessionId, string? screenId, double requestedScale, bool requireConsent, CancellationToken cancellationToken)
+    private static async Task StartScreenSessionAsync(ClientWebSocket socket, string sessionId, string? screenId, double requestedScale, bool requireConsent, bool captureVirtualDesktopRequest, CancellationToken cancellationToken)
     {
         selectedScreenId = screenId;
         captureScale = ClampCaptureScale(requestedScale);
@@ -5237,6 +5240,7 @@ internal static class Program
         SetRemoteScreenBlanked(false);
         CloseBlankOverlay();
         Console.WriteLine($"Starting screen session {sessionId} (screen:{selectedScreenId ?? "primary"})");
+        captureVirtualDesktop = captureVirtualDesktopRequest;
         if (requireConsent)
         {
             if (!await RequestScreenConsentAsync(cancellationToken))
@@ -5415,6 +5419,7 @@ internal static class Program
         SetRemoteUserInputBlocked(false);
         SetRemoteScreenBlanked(false);
         CloseBlankOverlay();
+        captureVirtualDesktop = false;
         screenCaptureCts?.Cancel();
         screenCaptureCts?.Dispose();
         screenCaptureCts = null;
@@ -5493,8 +5498,8 @@ internal static class Program
         {
             try
             {
-                var targetScreen = GetCaptureScreen();
-                var frame = CaptureScreenFrame(targetScreen);
+                var captureBounds = GetCaptureBounds();
+                var frame = CaptureScreenFrame(captureBounds);
                 if (screenDataChannel is not null)
                 {
                     if (frame.Length > 0)
@@ -5516,7 +5521,7 @@ internal static class Program
                         }
                     }
 
-                    var cursorState = GetCursorState(targetScreen.Bounds);
+                    var cursorState = GetCursorState(captureBounds);
                     var cursorMessage = JsonSerializer.Serialize(new
                     {
                         type = "cursor",
@@ -5544,9 +5549,8 @@ internal static class Program
         }
     }
 
-    private static byte[] CaptureScreenFrame(Screen targetScreen)
+    private static byte[] CaptureScreenFrame(Rectangle bounds)
     {
-        var bounds = targetScreen.Bounds;
         if (bounds.Width <= 0 || bounds.Height <= 0)
         {
             return Array.Empty<byte>();
@@ -5768,6 +5772,16 @@ internal static class Program
         return screens[0];
     }
 
+    private static Rectangle GetCaptureBounds()
+    {
+        if (captureVirtualDesktop)
+        {
+            return SystemInformation.VirtualScreen;
+        }
+
+        return GetCaptureScreen().Bounds;
+    }
+
     private static CancellationToken GetShellReadToken()
     {
         try
@@ -5967,8 +5981,7 @@ internal static class Program
     {
         var ratioX = Math.Clamp(normalizedX / (double)ushort.MaxValue, 0.0, 1.0);
         var ratioY = Math.Clamp(normalizedY / (double)ushort.MaxValue, 0.0, 1.0);
-        var targetScreen = GetCaptureScreen();
-        var bounds = targetScreen.Bounds;
+        var bounds = GetCaptureBounds();
         var virtualBounds = SystemInformation.VirtualScreen;
 
         var absoluteX = bounds.X + ratioX * bounds.Width;

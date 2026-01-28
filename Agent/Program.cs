@@ -63,7 +63,6 @@ internal static class Program
     private static bool remoteScreenBlanked;
     private static Thread? blankOverlayThread;
     private static ScreenBlankOverlay? blankOverlayForm;
-    private static ManualResetEvent? blankOverlayReady;
     private static readonly object blankOverlayLock = new();
     private static string? currentChatSessionId;
     private static string? selectedScreenId;
@@ -5618,23 +5617,29 @@ internal static class Program
                 return;
             }
 
-            blankOverlayReady?.Dispose();
-            blankOverlayReady = new ManualResetEvent(false);
             blankOverlayThread = new Thread(() =>
             {
-                using var overlay = new ScreenBlankOverlay();
-                lock (blankOverlayLock)
+                try
                 {
-                    blankOverlayForm = overlay;
+                    using var overlay = new ScreenBlankOverlay();
+                    lock (blankOverlayLock)
+                    {
+                        blankOverlayForm = overlay;
+                    }
+
+                    Application.Run(overlay);
                 }
-
-                blankOverlayReady?.Set();
-                Application.Run(overlay);
-
-                lock (blankOverlayLock)
+                catch (Exception ex)
                 {
-                    blankOverlayForm = null;
-                    blankOverlayThread = null;
+                    Console.WriteLine($"Blank overlay failed: {ex}");
+                }
+                finally
+                {
+                    lock (blankOverlayLock)
+                    {
+                        blankOverlayForm = null;
+                        blankOverlayThread = null;
+                    }
                 }
             })
             {
@@ -5643,7 +5648,6 @@ internal static class Program
             };
             blankOverlayThread.SetApartmentState(ApartmentState.STA);
             blankOverlayThread.Start();
-            blankOverlayReady.WaitOne();
         }
     }
 
@@ -5651,8 +5655,6 @@ internal static class Program
     {
         lock (blankOverlayLock)
         {
-            blankOverlayReady?.Dispose();
-            blankOverlayReady = null;
             if (blankOverlayForm is not null)
             {
                 blankOverlayForm.BeginInvoke((Action)(() => blankOverlayForm.Close()));

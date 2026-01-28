@@ -26,7 +26,6 @@ let pendingRemoteUserInputBlock = null;
 let pendingRemoteScreenBlank = null;
 
 const keyMapEntries = [
-  { label: 'Ctrl + Alt + Del', keys: ['Control', 'Alt', 'Delete'] },
   { label: 'Alt + Tab', keys: ['Alt', 'Tab'] },
   { label: 'Alt + Shift + Tab', keys: ['Alt', 'Shift', 'Tab'] },
   { label: 'Win key', keys: ['Meta'] },

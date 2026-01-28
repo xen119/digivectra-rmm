@@ -5962,9 +5962,26 @@ internal static class Program
         return (int)Math.Round(clamped * ushort.MaxValue);
     }
 
+    private static (int x, int y) MapToVirtualCoordinates(int normalizedX, int normalizedY)
+    {
+        var ratioX = Math.Clamp(normalizedX / (double)ushort.MaxValue, 0.0, 1.0);
+        var ratioY = Math.Clamp(normalizedY / (double)ushort.MaxValue, 0.0, 1.0);
+        var targetScreen = GetCaptureScreen();
+        var bounds = targetScreen.Bounds;
+        var virtualBounds = SystemInformation.VirtualScreen;
+
+        var absoluteX = bounds.X + ratioX * bounds.Width;
+        var absoluteY = bounds.Y + ratioY * bounds.Height;
+        var relativeX = virtualBounds.Width > 0 ? (absoluteX - virtualBounds.X) / virtualBounds.Width : 0.5;
+        var relativeY = virtualBounds.Height > 0 ? (absoluteY - virtualBounds.Y) / virtualBounds.Height : 0.5;
+
+        return (NormalizeToAbsolute(relativeX), NormalizeToAbsolute(relativeY));
+    }
+
     private static void SendMouseMove(int normalizedX, int normalizedY)
     {
-        SendMouseInput(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, normalizedX, normalizedY);
+        var (x, y) = MapToVirtualCoordinates(normalizedX, normalizedY);
+        SendMouseInput(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, x, y);
     }
 
     private static void SendMouseButton(string button, bool isDown, int normalizedX, int normalizedY)
@@ -5982,7 +5999,8 @@ internal static class Program
             return;
         }
 
-        SendMouseInput(flag | MOUSEEVENTF_ABSOLUTE, normalizedX, normalizedY);
+        var (x, y) = MapToVirtualCoordinates(normalizedX, normalizedY);
+        SendMouseInput(flag | MOUSEEVENTF_ABSOLUTE, x, y);
     }
 
     private static void SendMouseWheel(double delta)

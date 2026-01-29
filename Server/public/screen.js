@@ -98,6 +98,33 @@ window.addEventListener('resize', () => {
   }
 });
 
+window.addEventListener('message', handlePopoutControlMessage);
+
+function handlePopoutControlMessage(event) {
+  if (event.origin !== window.location.origin) {
+    return;
+  }
+
+  const message = event.data;
+  if (!message || message.type !== 'popout-control') {
+    return;
+  }
+
+  if (message.screenId !== currentStreamScreenId) {
+    return;
+  }
+
+  if (!controlEnabled || !isControlChannelOpen()) {
+    return;
+  }
+
+  if (!message.payload) {
+    return;
+  }
+
+  sendControlMessage(message.payload);
+}
+
 if (!agentId) {
   statusEl.textContent = 'Agent identifier missing.';
 } else {
@@ -649,6 +676,8 @@ function openPopoutWindow() {
     return;
   }
 
+  const screenId = viewMode === 'desktop' ? 'desktop' : selectedScreenId ?? 'single';
+  const assignedScreenIdJson = JSON.stringify(screenId);
   const html = `
     <!doctype html>
     <html>
@@ -693,6 +722,78 @@ function openPopoutWindow() {
           <img id="popoutFrame" alt="Agent screen stream" />
           <div id="popoutCursor"></div>
         </div>
+        <script>
+          (function () {
+            const assignedScreenId = ${assignedScreenIdJson};
+            const openerWindow = window.opener;
+            const targetOrigin = window.location.origin;
+            const frame = document.getElementById('popoutFrame');
+            if (!openerWindow || openerWindow.closed || !frame) {
+              return;
+            }
+
+            const mapMouseButton = (button) => {
+              switch (button) {
+                case 0:
+                  return 'left';
+                case 1:
+                  return 'middle';
+                case 2:
+                  return 'right';
+                default:
+                  return null;
+              }
+            };
+
+            const getCoords = (event) => {
+              const rect = frame.getBoundingClientRect();
+              const x = rect.width ? Math.min(Math.max(event.clientX - rect.left, 0), rect.width) / rect.width : 0;
+              const y = rect.height ? Math.min(Math.max(event.clientY - rect.top, 0), rect.height) / rect.height : 0;
+              return { x, y };
+            };
+
+            const postControl = (payload) => {
+              if (!openerWindow || openerWindow.closed) {
+                return;
+              }
+              openerWindow.postMessage({ type: 'popout-control', screenId: assignedScreenId, payload }, targetOrigin);
+            };
+
+            frame.addEventListener('mousemove', (event) => {
+              const coords = getCoords(event);
+              postControl({ event: 'mouse', action: 'move', x: coords.x, y: coords.y });
+            });
+
+            const sendMouseButton = (event, action) => {
+              const button = mapMouseButton(event.button);
+              if (!button) {
+                return;
+              }
+              const coords = getCoords(event);
+              postControl({ event: 'mouse', action, button, x: coords.x, y: coords.y });
+              event.preventDefault();
+            };
+
+            frame.addEventListener('mousedown', (event) => sendMouseButton(event, 'down'));
+            frame.addEventListener('mouseup', (event) => sendMouseButton(event, 'up'));
+            frame.addEventListener('wheel', (event) => {
+              postControl({ event: 'mouse', action: 'wheel', delta: event.deltaY });
+              event.preventDefault();
+            }, { passive: false });
+
+            window.addEventListener('keydown', (event) => {
+              postControl({ event: 'keyboard', action: 'down', key: event.key, code: event.code });
+              event.preventDefault();
+            });
+
+            window.addEventListener('keyup', (event) => {
+              postControl({ event: 'keyboard', action: 'up', key: event.key, code: event.code });
+              event.preventDefault();
+            });
+
+            frame.addEventListener('contextmenu', (event) => event.preventDefault());
+          })();
+        </script>
       </body>
     </html>
   `;
@@ -702,7 +803,6 @@ function openPopoutWindow() {
 
   const popFrameEl = popoutWin.document.getElementById('popoutFrame');
   const cursorEl = popoutWin.document.getElementById('popoutCursor');
-  const screenId = viewMode === 'desktop' ? 'desktop' : selectedScreenId;
   const entry = { window: popoutWin, frameEl: popFrameEl, cursorEl, screenId };
   popouts.push(entry);
 
@@ -710,7 +810,7 @@ function openPopoutWindow() {
     popouts = popouts.filter((pop) => pop.window !== popoutWin);
   });
 
-  if (popFrameEl && frameEl?.src && frameEl.src !== '') {
+  if (popFrameEl && frameEl?.src) {
     popFrameEl.src = frameEl.src;
   }
 

@@ -22,8 +22,6 @@ let selectedScreenId = null;
 let captureScale = 1.0;
 let viewMode = 'single';
 let lastCursorPayload = null;
-let popouts = [];
-let currentStreamScreenId = null;
 let remoteUserInputBlocked = false;
 let remoteScreenBlanked = false;
 let pendingRemoteUserInputBlock = null;
@@ -87,43 +85,12 @@ if (popoutButton) {
 
 window.addEventListener('keydown', (event) => handleKeyEvent(event, 'down'), true);
 window.addEventListener('keyup', (event) => handleKeyEvent(event, 'up'), true);
-window.addEventListener('blur', () => {
-  if (controlEnabled) {
-    setControlEnabled(false);
-  }
-});
 window.addEventListener('resize', () => {
   if (lastCursorPayload) {
     updateRemoteCursor(lastCursorPayload);
   }
 });
 
-window.addEventListener('message', handlePopoutControlMessage);
-
-function handlePopoutControlMessage(event) {
-  if (event.origin !== window.location.origin) {
-    return;
-  }
-
-  const message = event.data;
-  if (!message || message.type !== 'popout-control') {
-    return;
-  }
-
-  if (message.screenId !== currentStreamScreenId) {
-    return;
-  }
-
-  if (!controlEnabled || !isControlChannelOpen()) {
-    return;
-  }
-
-  if (!message.payload) {
-    return;
-  }
-
-  sendControlMessage(message.payload);
-}
 
 if (!agentId) {
   statusEl.textContent = 'Agent identifier missing.';
@@ -198,7 +165,6 @@ async function startScreenSession() {
     }
     requestBody.scale = captureScale;
     requestBody.captureAllScreens = viewMode === 'desktop';
-    currentStreamScreenId = viewMode === 'desktop' ? 'desktop' : selectedScreenId;
 
     const response = await authFetch('/screen/request', {
       method: 'POST',
@@ -290,7 +256,6 @@ async function stopExistingSession() {
     await authFetch(`/screen/${sessionId}/stop`, { method: 'POST' });
     sessionId = null;
   }
-  currentStreamScreenId = null;
 }
 
 async function refreshAgentInfo() {
@@ -373,7 +338,6 @@ async function handleOffer(payload) {
         const frame = JSON.parse(payloadText);
     if (frame.type === 'frame' && frame.image) {
       frameEl.src = `data:image/png;base64,${frame.image}`;
-      syncPopoutFrame();
     } else if (frame.type === 'cursor') {
       updateRemoteCursor(frame);
     }
@@ -669,195 +633,12 @@ function updateDisplayButtons() {
 }
 
 function openPopoutWindow() {
-  cleanupPopouts();
+  const screenId = viewMode === 'desktop' ? 'desktop' : (selectedScreenId || 'desktop');
   const specs = 'width=1100,height=700,left=200,top=100';
-  const popoutWin = window.open('', `agentScreenPopout_${Date.now()}`, specs);
-  if (!popoutWin) {
-    return;
-  }
-
-  const screenId = viewMode === 'desktop' ? 'desktop' : selectedScreenId ?? 'single';
-  const assignedScreenIdJson = JSON.stringify(screenId);
-  const html = `
-    <!doctype html>
-    <html>
-      <head>
-        <title>Agent screen</title>
-        <style>
-          body {
-            margin: 0;
-            background: #0b1119;
-            color: #cdd9e5;
-            font-family: system-ui, sans-serif;
-          }
-          .popout-shell {
-            position: relative;
-            width: 100%;
-            height: 100vh;
-            overflow: hidden;
-            background: #05070c;
-          }
-          #popoutFrame {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            display: block;
-            background: #010409;
-          }
-          #popoutCursor {
-            position: absolute;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: rgba(14, 165, 233, 0.85);
-            box-shadow: 0 0 6px rgba(14, 165, 233, 0.9);
-            transform: translate(-50%, -50%);
-            pointer-events: none;
-            opacity: 0;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="popout-shell">
-          <img id="popoutFrame" alt="Agent screen stream" />
-          <div id="popoutCursor"></div>
-        </div>
-        <script>
-          (function () {
-            const assignedScreenId = ${assignedScreenIdJson};
-            const openerWindow = window.opener;
-            const targetOrigin = window.location.origin;
-            const frame = document.getElementById('popoutFrame');
-            if (!openerWindow || openerWindow.closed || !frame) {
-              return;
-            }
-
-            const mapMouseButton = (button) => {
-              switch (button) {
-                case 0:
-                  return 'left';
-                case 1:
-                  return 'middle';
-                case 2:
-                  return 'right';
-                default:
-                  return null;
-              }
-            };
-
-            const getCoords = (event) => {
-              const rect = frame.getBoundingClientRect();
-              const x = rect.width ? Math.min(Math.max(event.clientX - rect.left, 0), rect.width) / rect.width : 0;
-              const y = rect.height ? Math.min(Math.max(event.clientY - rect.top, 0), rect.height) / rect.height : 0;
-              return { x, y };
-            };
-
-            const postControl = (payload) => {
-              if (!openerWindow || openerWindow.closed) {
-                return;
-              }
-              openerWindow.postMessage({ type: 'popout-control', screenId: assignedScreenId, payload }, targetOrigin);
-            };
-
-            frame.addEventListener('mousemove', (event) => {
-              const coords = getCoords(event);
-              postControl({ event: 'mouse', action: 'move', x: coords.x, y: coords.y });
-            });
-
-            const sendMouseButton = (event, action) => {
-              const button = mapMouseButton(event.button);
-              if (!button) {
-                return;
-              }
-              const coords = getCoords(event);
-              postControl({ event: 'mouse', action, button, x: coords.x, y: coords.y });
-              event.preventDefault();
-            };
-
-            frame.addEventListener('mousedown', (event) => sendMouseButton(event, 'down'));
-            frame.addEventListener('mouseup', (event) => sendMouseButton(event, 'up'));
-            frame.addEventListener('wheel', (event) => {
-              postControl({ event: 'mouse', action: 'wheel', delta: event.deltaY });
-              event.preventDefault();
-            }, { passive: false });
-
-            window.addEventListener('keydown', (event) => {
-              postControl({ event: 'keyboard', action: 'down', key: event.key, code: event.code });
-              event.preventDefault();
-            });
-
-            window.addEventListener('keyup', (event) => {
-              postControl({ event: 'keyboard', action: 'up', key: event.key, code: event.code });
-              event.preventDefault();
-            });
-
-            frame.addEventListener('contextmenu', (event) => event.preventDefault());
-          })();
-        </script>
-      </body>
-    </html>
-  `;
-
-  popoutWin.document.write(html);
-  popoutWin.document.close();
-
-  const popFrameEl = popoutWin.document.getElementById('popoutFrame');
-  const cursorEl = popoutWin.document.getElementById('popoutCursor');
-  const entry = { window: popoutWin, frameEl: popFrameEl, cursorEl, screenId };
-  popouts.push(entry);
-
-  popoutWin.addEventListener('beforeunload', () => {
-    popouts = popouts.filter((pop) => pop.window !== popoutWin);
-  });
-
-  if (popFrameEl && frameEl?.src) {
-    popFrameEl.src = frameEl.src;
-  }
-
-  syncPopoutFrame();
-  updatePopoutCursorForEntry(entry, lastCursorPayload);
-}
-
-function cleanupPopouts() {
-  popouts = popouts.filter((entry) => entry.window && !entry.window.closed);
-}
-
-function syncPopoutFrame() {
-  cleanupPopouts();
-  popouts.forEach((entry) => {
-    if (entry.screenId !== currentStreamScreenId) {
-      return;
-    }
-
-    if (entry.frameEl && frameEl?.src) {
-      entry.frameEl.src = frameEl.src;
-    }
-  });
-}
-
-function updatePopoutCursor(payload) {
-  cleanupPopouts();
-  popouts.forEach((entry) => {
-    updatePopoutCursorForEntry(entry, payload);
-  });
-}
-
-function updatePopoutCursorForEntry(entry, payload) {
-  if (!entry.cursorEl || !frameEl || entry.screenId !== currentStreamScreenId) {
-    return;
-  }
-
-  const rect = frameEl.getBoundingClientRect();
-  if (!rect.width || !rect.height) {
-    entry.cursorEl.style.opacity = '0';
-    return;
-  }
-
-  const x = clampNormalized(payload?.x ?? 0);
-  const y = clampNormalized(payload?.y ?? 0);
-  entry.cursorEl.style.left = `${x * rect.width}px`;
-  entry.cursorEl.style.top = `${y * rect.height}px`;
-  entry.cursorEl.style.opacity = payload?.visible ? '1' : '0';
+  const url = new URL('popout-screen.html', window.location.href);
+  url.searchParams.set('agent', agentId);
+  url.searchParams.set('screenId', screenId);
+  window.open(url.toString(), `agentPopout_${screenId}_${Date.now()}`, specs);
 }
 
 

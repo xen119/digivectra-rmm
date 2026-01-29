@@ -14,6 +14,9 @@ let source;
 let pc;
 let controlChannel;
 let agentName = agentId;
+let autoReconnect = true;
+let reconnectTimer = null;
+let closingWindow = false;
 
 function updateStatus(text) {
   if (statusEl) {
@@ -27,12 +30,49 @@ function updateInstructions(text) {
   }
 }
 
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    window.clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect(reason) {
+  if (closingWindow || !autoReconnect || reconnectTimer) {
+    return;
+  }
+
+  console.info(`Scheduling popout reconnect (${reason}).`);
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null;
+    updateStatus('Reconnecting screen stream…');
+    initPopout();
+  }, 1200);
+}
+
+function cleanupConnection() {
+  source?.close();
+  source = null;
+  if (pc) {
+    pc.close();
+    pc = null;
+  }
+  controlChannel = null;
+  sessionId = null;
+}
+
 async function initPopout() {
   if (!agentId) {
     updateStatus('Agent identifier missing.');
     return;
   }
 
+  const previousSession = sessionId;
+  cleanupConnection();
+  clearReconnectTimer();
+  if (previousSession) {
+    authFetch(`/screen/${previousSession}/stop`, { method: 'POST' }).catch(() => {});
+  }
   updateStatus('Requesting screen stream…');
   updateInstructions('Click inside the view to send input. Press Esc to release control.');
 
@@ -89,11 +129,15 @@ async function initPopout() {
     });
     source.addEventListener('error', () => {
       if (source.readyState === EventSource.CLOSED) {
-        updateStatus('Stream closed by the agent.');
+        updateStatus('Stream closed unexpectedly.');
+        scheduleReconnect('source-error');
+      } else {
+        updateStatus('Stream connection error.');
       }
     });
     source.addEventListener('closed', () => {
       updateStatus('Screen session ended.');
+      scheduleReconnect('source-closed');
     });
 
     pollOffer(sessionId);
@@ -123,6 +167,9 @@ async function handleOffer(payload) {
 
     if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
       updateInstructions('Control channel ready. Interact inside this window.');
+    } else if (['disconnected', 'failed'].includes(pc.iceConnectionState)) {
+      updateInstructions('Connection interrupted. Reconnecting…');
+      scheduleReconnect('ice-state');
     }
   };
 
@@ -156,7 +203,8 @@ async function handleOffer(payload) {
 
     controlChannel.onclose = () => {
       controlChannel = null;
-      updateInstructions('Control channel closed.');
+      updateInstructions('Control channel closed. Reconnecting…');
+      scheduleReconnect('control-channel');
     };
   };
 
@@ -380,9 +428,13 @@ if (frameEl) {
 }
 
 window.addEventListener('beforeunload', () => {
-  source?.close();
-  if (sessionId) {
-    authFetch(`/screen/${sessionId}/stop`, { method: 'POST' });
+  closingWindow = true;
+  autoReconnect = false;
+  clearReconnectTimer();
+  const currentSession = sessionId;
+  cleanupConnection();
+  if (currentSession) {
+    authFetch(`/screen/${currentSession}/stop`, { method: 'POST' });
   }
 });
 

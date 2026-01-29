@@ -5,8 +5,8 @@ const controlButton = document.getElementById('controlButton');
 const controlInstructions = document.getElementById('controlInstructions');
 const displayButtonsContainer = document.getElementById('displayButtons');
 const desktopViewButton = document.getElementById('desktopViewButton');
-const keyMapContainer = document.getElementById('keyMapList');
 const popoutButton = document.getElementById('popoutButton');
+const keyMapContainer = document.getElementById('keyMapList');
 
 const authFetch = (input, init) => fetch(input, { credentials: 'same-origin', ...init });
 
@@ -22,9 +22,8 @@ let selectedScreenId = null;
 let captureScale = 1.0;
 let viewMode = 'single';
 let lastCursorPayload = null;
-let popoutWindow = null;
-let popoutFrameEl = null;
-let popoutCursorEl = null;
+let popouts = [];
+let currentStreamScreenId = null;
 let remoteUserInputBlocked = false;
 let remoteScreenBlanked = false;
 let pendingRemoteUserInputBlock = null;
@@ -172,6 +171,7 @@ async function startScreenSession() {
     }
     requestBody.scale = captureScale;
     requestBody.captureAllScreens = viewMode === 'desktop';
+    currentStreamScreenId = viewMode === 'desktop' ? 'desktop' : selectedScreenId;
 
     const response = await authFetch('/screen/request', {
       method: 'POST',
@@ -263,6 +263,7 @@ async function stopExistingSession() {
     await authFetch(`/screen/${sessionId}/stop`, { method: 'POST' });
     sessionId = null;
   }
+  currentStreamScreenId = null;
 }
 
 async function refreshAgentInfo() {
@@ -641,14 +642,10 @@ function updateDisplayButtons() {
 }
 
 function openPopoutWindow() {
-  if (popoutWindow && !popoutWindow.closed) {
-    popoutWindow.focus();
-    return;
-  }
-
+  cleanupPopouts();
   const specs = 'width=1100,height=700,left=200,top=100';
-  popoutWindow = window.open('', 'agentScreenPopout', specs);
-  if (!popoutWindow) {
+  const popoutWin = window.open('', `agentScreenPopout_${Date.now()}`, specs);
+  if (!popoutWin) {
     return;
   }
 
@@ -700,46 +697,67 @@ function openPopoutWindow() {
     </html>
   `;
 
-  popoutWindow.document.write(html);
-  popoutWindow.document.close();
+  popoutWin.document.write(html);
+  popoutWin.document.close();
 
-  popoutFrameEl = popoutWindow.document.getElementById('popoutFrame');
-  popoutCursorEl = popoutWindow.document.getElementById('popoutCursor');
+  const popFrameEl = popoutWin.document.getElementById('popoutFrame');
+  const cursorEl = popoutWin.document.getElementById('popoutCursor');
+  const screenId = viewMode === 'desktop' ? 'desktop' : selectedScreenId;
+  const entry = { window: popoutWin, frameEl: popFrameEl, cursorEl, screenId };
+  popouts.push(entry);
 
-  popoutWindow.addEventListener('beforeunload', () => {
-    popoutWindow = null;
-    popoutFrameEl = null;
-    popoutCursorEl = null;
+  popoutWin.addEventListener('beforeunload', () => {
+    popouts = popouts.filter((pop) => pop.window !== popoutWin);
   });
 
+  if (popFrameEl && frameEl?.src && frameEl.src !== '') {
+    popFrameEl.src = frameEl.src;
+  }
+
   syncPopoutFrame();
-  updatePopoutCursor(lastCursorPayload);
+  updatePopoutCursorForEntry(entry, lastCursorPayload);
+}
+
+function cleanupPopouts() {
+  popouts = popouts.filter((entry) => entry.window && !entry.window.closed);
 }
 
 function syncPopoutFrame() {
-  if (!popoutFrameEl || !frameEl) {
-    return;
-  }
+  cleanupPopouts();
+  popouts.forEach((entry) => {
+    if (entry.screenId !== currentStreamScreenId) {
+      return;
+    }
 
-  popoutFrameEl.src = frameEl.src || '';
+    if (entry.frameEl && frameEl?.src) {
+      entry.frameEl.src = frameEl.src;
+    }
+  });
 }
 
 function updatePopoutCursor(payload) {
-  if (!popoutCursorEl || !frameEl) {
+  cleanupPopouts();
+  popouts.forEach((entry) => {
+    updatePopoutCursorForEntry(entry, payload);
+  });
+}
+
+function updatePopoutCursorForEntry(entry, payload) {
+  if (!entry.cursorEl || !frameEl || entry.screenId !== currentStreamScreenId) {
     return;
   }
 
   const rect = frameEl.getBoundingClientRect();
   if (!rect.width || !rect.height) {
-    popoutCursorEl.style.opacity = '0';
+    entry.cursorEl.style.opacity = '0';
     return;
   }
 
   const x = clampNormalized(payload?.x ?? 0);
   const y = clampNormalized(payload?.y ?? 0);
-  popoutCursorEl.style.left = `${x * rect.width}px`;
-  popoutCursorEl.style.top = `${y * rect.height}px`;
-  popoutCursorEl.style.opacity = payload?.visible ? '1' : '0';
+  entry.cursorEl.style.left = `${x * rect.width}px`;
+  entry.cursorEl.style.top = `${y * rect.height}px`;
+  entry.cursorEl.style.opacity = payload?.visible ? '1' : '0';
 }
 
 
